@@ -879,41 +879,26 @@ function CleanArrApp() {
           <div className="h-5 w-px bg-border" />
 
           {/* Navigation */}
-          <TabsList className="h-8 gap-0.5 bg-transparent p-0">
-            <TabsTrigger
-              value="dashboard"
-              className="h-8 gap-1.5 rounded-md px-3 text-sm data-[state=active]:bg-muted"
-            >
-              <LayoutDashboard className="size-3.5" />
+          <TabsList>
+            <TabsTrigger value="dashboard" className="gap-1.5">
+              <LayoutDashboard className="size-3.5 text-blue-500" />
               Dashboard
             </TabsTrigger>
-            <TabsTrigger
-              value="setup"
-              className="h-8 gap-1.5 rounded-md px-3 text-sm data-[state=active]:bg-muted"
-            >
-              <Settings2 className="size-3.5" />
+            <TabsTrigger value="setup" className="gap-1.5">
+              <Settings2 className="size-3.5 text-orange-500" />
               Setup
               {setupCompletionCount < SETUP_STEPS.length && (
                 <span className="ml-0.5 flex size-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-semibold text-white">
                   {SETUP_STEPS.length - setupCompletionCount}
                 </span>
               )}
-              {setupCompletionCount === SETUP_STEPS.length && (
-                <CheckCircle2 className="ml-0.5 size-3.5 text-green-500" />
-              )}
             </TabsTrigger>
-            <TabsTrigger
-              value="activity"
-              className="h-8 gap-1.5 rounded-md px-3 text-sm data-[state=active]:bg-muted"
-            >
-              <Activity className="size-3.5" />
+            <TabsTrigger value="activity" className="gap-1.5">
+              <Activity className="size-3.5 text-emerald-500" />
               Activity
             </TabsTrigger>
-            <TabsTrigger
-              value="library"
-              className="h-8 gap-1.5 rounded-md px-3 text-sm data-[state=active]:bg-muted"
-            >
-              <Library className="size-3.5" />
+            <TabsTrigger value="library" className="gap-1.5">
+              <Library className="size-3.5 text-violet-500" />
               Library
             </TabsTrigger>
           </TabsList>
@@ -1490,7 +1475,7 @@ function ActivityPanel({
             }
           />
         ) : (
-          <div className="space-y-2 px-px pb-px">
+          <div className="space-y-2 p-px">
             {filteredActivity.map((entry) => (
               <ActivityEntry
                 key={`${entry.processed_at}-${entry.result.item_id}`}
