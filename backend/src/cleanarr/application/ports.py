@@ -56,6 +56,9 @@ class SonarrClientPort(Protocol):
     async def unmonitor_episodes(self, episode_ids: Sequence[int]) -> None:
         """Disable monitoring for specific episodes."""
 
+    async def unmonitor_season(self, series_id: int, season_number: int) -> None:
+        """Disable monitoring for a specific season."""
+
     async def delete_episode_file(self, episode_file_id: int) -> None:
         """Delete a single episode file."""
 

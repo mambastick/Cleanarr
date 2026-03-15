@@ -21,6 +21,7 @@ from cleanarr.api.auth_schemas import (
 from cleanarr.api.config_schemas import (
     ConnectionTestResponse,
     GeneralConfigRequest,
+    JellyfinServiceRequest,
     JellyseerrServiceRequest,
     QbittorrentServiceRequest,
     RadarrServiceRequest,
@@ -34,7 +35,16 @@ from cleanarr.api.dashboard import (
     WebhookAttemptStore,
     build_dashboard_response,
 )
-from cleanarr.api.schemas import JellyfinWebhookPayload, WebhookBatchResponse
+from cleanarr.api.library_schemas import (
+    LibraryMoviesResponse,
+    LibrarySeriesResponse,
+    ManualDeleteRequest,
+    MovieSummary,
+    SeasonSummary,
+    SeriesSummary,
+)
+from cleanarr.api.schemas import JellyfinWebhookPayload, ProcessingResultResponse, WebhookBatchResponse
+from cleanarr.domain import ItemType, MediaDeletionEvent, MediaFingerprint
 from cleanarr.domain.config import ServiceKind
 from cleanarr.infrastructure.container import ServiceContainer
 from cleanarr.infrastructure.settings import Settings
@@ -69,6 +79,7 @@ async def _health_probe_loop(container: ServiceContainer, health_store: HealthPr
                 _probe("Sonarr", _has_active_service(config.sonarr), container.sonarr),
                 _probe("Jellyseerr", _has_active_service(config.jellyseerr), container.jellyseerr),
                 _probe("Downloader", _has_active_service(config.downloaders), container.downloader),
+                _probe("Jellyfin", _has_active_service(config.jellyfin), container.jellyfin_server),
             )
         except Exception:
             _logger.exception("Health probe loop encountered an unexpected error")
@@ -490,6 +501,62 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         return ConnectionTestResponse.from_domain(result)
 
     @app.post(
+        "/api/config/jellyfin",
+        response_model=RuntimeConfigResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def create_jellyfin(
+        request: Request,
+        payload: JellyfinServiceRequest,
+    ) -> RuntimeConfigResponse:
+        container = request.app.state.container
+        config = container.config_service.add_service(payload.to_domain().kind, payload.to_domain())
+        await container.refresh_runtime()
+        return RuntimeConfigResponse.from_config(config, admin_token_configured=bool(container.admin_shared_token))
+
+    @app.put(
+        "/api/config/jellyfin/{service_id}",
+        response_model=RuntimeConfigResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def update_jellyfin(
+        request: Request,
+        service_id: str,
+        payload: JellyfinServiceRequest,
+    ) -> RuntimeConfigResponse:
+        container = request.app.state.container
+        config = container.config_service.update_service(
+            payload.to_domain(service_id=service_id).kind,
+            service_id,
+            payload.to_domain(service_id=service_id),
+        )
+        await container.refresh_runtime()
+        return RuntimeConfigResponse.from_config(config, admin_token_configured=bool(container.admin_shared_token))
+
+    @app.delete(
+        "/api/config/jellyfin/{service_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def delete_jellyfin(request: Request, service_id: str) -> Response:
+        container = request.app.state.container
+        container.config_service.delete_service(ServiceKind.JELLYFIN, service_id)
+        await container.refresh_runtime()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.post(
+        "/api/config/jellyfin/test",
+        response_model=ConnectionTestResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def test_jellyfin(
+        payload: JellyfinServiceRequest,
+        request: Request,
+    ) -> ConnectionTestResponse:
+        result = await request.app.state.container.config_service.test_service(payload.to_domain())
+        return ConnectionTestResponse.from_domain(result)
+
+    @app.post(
         "/webhook/jellyfin",
         response_model=WebhookBatchResponse,
         dependencies=[Depends(require_webhook_token)],
@@ -561,6 +628,211 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         )
         return batch_response
 
+    @app.get(
+        "/api/library/series",
+        response_model=LibrarySeriesResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def library_series(request: Request) -> LibrarySeriesResponse:
+        container = request.app.state.container
+        sonarr = container.sonarr
+        jellyfin = container.jellyfin_server
+
+        series_list = list(await sonarr.list_series())
+
+        # Fetch Jellyfin series + seasons in a single call for cross-referencing
+        jf_series_items = list(await jellyfin.list_items(include_types=["Series", "Season"]))
+        jf_series_by_tvdb: dict[int, str] = {}
+        jf_series_by_tmdb: dict[int, str] = {}
+        jf_series_by_imdb: dict[str, str] = {}
+        jf_seasons_by_parent: dict[str, dict[int, str]] = {}  # parent_id -> {season_number -> jellyfin_id}
+
+        for item in jf_series_items:
+            if item.type == "Series":
+                if item.tvdb_id:
+                    jf_series_by_tvdb[item.tvdb_id] = item.id
+                if item.tmdb_id:
+                    jf_series_by_tmdb[item.tmdb_id] = item.id
+                if item.imdb_id:
+                    jf_series_by_imdb[item.imdb_id] = item.id
+            elif item.type == "Season" and item.parent_id and item.season_number is not None:
+                jf_seasons_by_parent.setdefault(item.parent_id, {})[item.season_number] = item.id
+
+        def find_jf_series_id(series: object) -> str | None:
+            if getattr(series, "tvdb_id", None) and series.tvdb_id in jf_series_by_tvdb:  # type: ignore[union-attr]
+                return jf_series_by_tvdb[series.tvdb_id]  # type: ignore[union-attr]
+            if getattr(series, "tmdb_id", None) and series.tmdb_id in jf_series_by_tmdb:  # type: ignore[union-attr]
+                return jf_series_by_tmdb[series.tmdb_id]  # type: ignore[union-attr]
+            if getattr(series, "imdb_id", None) and series.imdb_id in jf_series_by_imdb:  # type: ignore[union-attr]
+                return jf_series_by_imdb[series.imdb_id]  # type: ignore[union-attr]
+            return None
+
+        result: list[SeriesSummary] = []
+        for series in sorted(series_list, key=lambda s: s.title.lower()):
+            episodes = list(await sonarr.list_episodes(series.id))
+            episode_files = list(await sonarr.list_episode_files(series.id))
+
+            size_by_season: dict[int, int] = {}
+            file_count_by_season: dict[int, int] = {}
+            for ef in episode_files:
+                sn = ef.season_number or 0
+                size_by_season[sn] = size_by_season.get(sn, 0) + (ef.size or 0)
+                file_count_by_season[sn] = file_count_by_season.get(sn, 0) + 1
+
+            episode_count_by_season: dict[int, int] = {}
+            for ep in episodes:
+                sn = ep.season_number
+                episode_count_by_season[sn] = episode_count_by_season.get(sn, 0) + 1
+
+            season_numbers = sorted(
+                {ep.season_number for ep in episodes if ep.season_number > 0}
+            )
+
+            jf_series_id = find_jf_series_id(series)
+            jf_season_map = jf_seasons_by_parent.get(jf_series_id, {}) if jf_series_id else {}
+
+            seasons = [
+                SeasonSummary(
+                    season_number=sn,
+                    episode_count=episode_count_by_season.get(sn, 0),
+                    episode_file_count=file_count_by_season.get(sn, 0),
+                    size_bytes=size_by_season.get(sn, 0),
+                    jellyfin_season_id=jf_season_map.get(sn),
+                )
+                for sn in season_numbers
+            ]
+            result.append(
+                SeriesSummary(
+                    sonarr_id=series.id,
+                    title=series.title,
+                    seasons=seasons,
+                    jellyfin_series_id=jf_series_id,
+                )
+            )
+        return LibrarySeriesResponse(series=result)
+
+    @app.get(
+        "/api/library/movies",
+        response_model=LibraryMoviesResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def library_movies(request: Request) -> LibraryMoviesResponse:
+        container = request.app.state.container
+        radarr = container.radarr
+        jellyfin = container.jellyfin_server
+
+        movies_list = list(await radarr.list_movies())
+
+        # Fetch Jellyfin movies for cross-referencing
+        jf_movie_items = list(await jellyfin.list_items(include_types=["Movie"]))
+        jf_movies_by_tmdb: dict[int, str] = {}
+        jf_movies_by_imdb: dict[str, str] = {}
+        for item in jf_movie_items:
+            if item.tmdb_id:
+                jf_movies_by_tmdb[item.tmdb_id] = item.id
+            if item.imdb_id:
+                jf_movies_by_imdb[item.imdb_id] = item.id
+
+        result: list[MovieSummary] = []
+        for movie in sorted(movies_list, key=lambda m: m.title.lower()):
+            jf_movie_id: str | None = None
+            if movie.tmdb_id and movie.tmdb_id in jf_movies_by_tmdb:
+                jf_movie_id = jf_movies_by_tmdb[movie.tmdb_id]
+            elif movie.imdb_id and movie.imdb_id in jf_movies_by_imdb:
+                jf_movie_id = jf_movies_by_imdb[movie.imdb_id]
+            result.append(
+                MovieSummary(
+                    radarr_id=movie.id,
+                    title=movie.title,
+                    size_bytes=movie.size_on_disk or 0,
+                    has_file=movie.has_file,
+                    jellyfin_movie_id=jf_movie_id,
+                )
+            )
+        return LibraryMoviesResponse(movies=result)
+
+    @app.post(
+        "/api/actions/delete",
+        response_model=ProcessingResultResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def manual_delete(request: Request, payload: ManualDeleteRequest) -> ProcessingResultResponse:
+        container = request.app.state.container
+
+        if payload.item_type is ItemType.MOVIE:
+            if payload.radarr_movie_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="radarr_movie_id is required for movie deletion.",
+                )
+            radarr = container.radarr
+            movies_list = list(await radarr.list_movies())
+            movie = next((m for m in movies_list if m.id == payload.radarr_movie_id), None)
+            if movie is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Radarr movie {payload.radarr_movie_id} not found.",
+                )
+            fingerprint = MediaFingerprint(
+                tmdb_id=movie.tmdb_id,
+                imdb_id=movie.imdb_id,
+                path=movie.path,
+            )
+            event = MediaDeletionEvent(
+                notification_type="ItemDeleted",
+                item_type=ItemType.MOVIE,
+                item_id="manual",
+                name=movie.title,
+                fingerprint=fingerprint,
+            )
+        else:
+            if payload.sonarr_series_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="sonarr_series_id is required for series/season deletion.",
+                )
+            sonarr = container.sonarr
+            series_list = list(await sonarr.list_series())
+            series = next((s for s in series_list if s.id == payload.sonarr_series_id), None)
+            if series is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Sonarr series {payload.sonarr_series_id} not found.",
+                )
+            if payload.item_type is ItemType.SEASON and payload.season_number is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="season_number is required for season deletion.",
+                )
+            fingerprint = MediaFingerprint(
+                tvdb_id=series.tvdb_id,
+                tmdb_id=series.tmdb_id,
+                imdb_id=series.imdb_id,
+                path=series.path,
+            )
+            event = MediaDeletionEvent(
+                notification_type="ItemDeleted",
+                item_type=payload.item_type,
+                item_id="manual",
+                name=series.title,
+                fingerprint=fingerprint,
+                series_name=series.title,
+                season_number=payload.season_number,
+            )
+
+        strategy = container.strategy_factory.for_item_type(payload.item_type)
+        result = await strategy.handle(event)
+        request.app.state.activity_store.record(result)
+
+        # After cascade deletion, also remove from Jellyfin if ID provided and not dry_run
+        if payload.jellyfin_item_id and not container.config.general.dry_run:
+            try:
+                await container.jellyfin_server.delete_item(payload.jellyfin_item_id)
+            except Exception:
+                _logger.warning("Failed to delete Jellyfin item %s after cascade deletion", payload.jellyfin_item_id)
+
+        return ProcessingResultResponse.from_domain(result)
+
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa(full_path: str) -> FileResponse:
         if full_path.startswith(("api/", "health/", "webhook/")):
@@ -578,6 +850,6 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
             if requested_path.is_relative_to(static_dir.resolve()) and requested_path.is_file():
                 return FileResponse(requested_path)
 
-        return FileResponse(index_path)
+        return FileResponse(index_path, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
     return app

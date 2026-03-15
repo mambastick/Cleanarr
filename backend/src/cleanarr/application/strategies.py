@@ -552,6 +552,17 @@ class SeasonDeletionStrategy(BaseDeletionStrategy):
                 episode_file_id=episode_file_id,
             )
 
+        if event.season_number is not None:
+            await self._run_mutation(
+                collector,
+                system="sonarr",
+                action="unmonitor_season",
+                message=f"Unmonitored Sonarr season {event.season_number} of series {series.id}.",
+                mutation=bind_async(self._sonarr.unmonitor_season, series.id, event.season_number),
+                series_id=series.id,
+                season_number=event.season_number,
+            )
+
         await self._cleanup_jellyseerr_season(event, collector)
         return collector.build()
 

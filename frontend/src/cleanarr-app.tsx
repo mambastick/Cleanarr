@@ -2,6 +2,8 @@ import {
   Activity,
   ArrowRight,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   CircleAlert,
   CircleHelp,
   Copy,
@@ -12,6 +14,7 @@ import {
   Info,
   KeyRound,
   LayoutDashboard,
+  Library,
   LoaderCircle,
   LogOut,
   PenSquare,
@@ -23,6 +26,7 @@ import {
   ShieldCheck,
   Sparkles,
   TestTubeDiagonal,
+  Trash2,
   Tv,
   type LucideIcon,
   UserRound,
@@ -59,6 +63,7 @@ import type {
 import type {
   ConnectionTestResponse,
   GeneralConfig,
+  JellyfinServiceConfig,
   JellyseerrServiceConfig,
   QbittorrentServiceConfig,
   RadarrServiceConfig,
@@ -66,6 +71,11 @@ import type {
   SonarrServiceConfig,
 } from "@/lib/runtime-config"
 import { cn } from "@/lib/utils"
+import type {
+  LibraryMoviesResponse,
+  LibrarySeriesResponse,
+  ManualDeleteResponse,
+} from "@/lib/library"
 
 // ─── Brand ───────────────────────────────────────────────────────────────────
 
@@ -87,8 +97,8 @@ function CleanArrBrand({ size = "sm" }: { size?: "sm" | "lg" }) {
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type MainTab = "dashboard" | "setup" | "activity"
-type ServiceFamily = "radarr" | "sonarr" | "jellyseerr" | "downloaders"
+type MainTab = "dashboard" | "setup" | "activity" | "library"
+type ServiceFamily = "radarr" | "sonarr" | "jellyseerr" | "downloaders" | "jellyfin_server"
 type SetupStepId = "general" | "jellyfin" | ServiceFamily
 type AuthMode = "register" | "login"
 type ServiceRecord =
@@ -96,6 +106,7 @@ type ServiceRecord =
   | SonarrServiceConfig
   | JellyseerrServiceConfig
   | QbittorrentServiceConfig
+  | JellyfinServiceConfig
 
 type FlashState =
   | {
@@ -103,6 +114,22 @@ type FlashState =
       message: string
     }
   | null
+
+type LibraryDeleteTarget =
+  | {
+      kind: "series"
+      sonarr_series_id: number
+      series_title: string
+      item_type: "Season" | "Series"
+      season_number?: number
+      jellyfin_item_id?: string | null
+    }
+  | {
+      kind: "movie"
+      radarr_movie_id: number
+      movie_title: string
+      jellyfin_movie_id?: string | null
+    }
 
 type ServiceDraft = {
   id?: string
@@ -184,6 +211,7 @@ const SERVICE_FAMILIES: ServiceFamily[] = [
   "sonarr",
   "jellyseerr",
   "downloaders",
+  "jellyfin_server",
 ]
 
 const SERVICE_META: Record<ServiceFamily, ServiceMeta> = {
@@ -305,6 +333,34 @@ const SERVICE_META: Record<ServiceFamily, ServiceMeta> = {
     ],
     example: "https://qbittorrent.example.com",
   },
+  jellyfin_server: {
+    family: "jellyfin_server",
+    title: "Jellyfin",
+    singular: "media server",
+    description: "Jellyfin media server used for library browsing and immediate item removal.",
+    endpoint: "/api/config/jellyfin",
+    accent: "blue",
+    icon: Server,
+    fields: [
+      {
+        key: "api_key",
+        label: "API key",
+        type: "password",
+        hint: "Jellyfin → Dashboard → API Keys → + → create a key for CleanArr.",
+      },
+    ],
+    steps: [
+      "Paste the Jellyfin base URL including scheme and port, e.g. http://jellyfin:8096.",
+      "Open Jellyfin → Dashboard → API Keys and create a new key for CleanArr.",
+      "Connecting Jellyfin enables the Library tab: browse movies and series, delete seasons immediately.",
+      "Deletion cascades through Sonarr/Radarr → qBittorrent → Jellyseerr, then removes the item from Jellyfin instantly.",
+    ],
+    help: [
+      "Example URL: http://jellyfin:8096",
+      "External URL also works: https://jellyfin.example.com",
+    ],
+    example: "http://jellyfin:8096",
+  },
 }
 
 const SETUP_STEPS: SetupStepMeta[] = [
@@ -350,6 +406,13 @@ const SETUP_STEPS: SetupStepMeta[] = [
     accent: "green",
     icon: Download,
   },
+  {
+    id: "jellyfin_server",
+    title: "Jellyfin Server",
+    description: "Optional: enables library browsing and instant removal.",
+    accent: "blue",
+    icon: Server,
+  },
 ]
 
 const EMPTY_DRAFTS: Record<ServiceFamily, ServiceDraft> = {
@@ -357,6 +420,7 @@ const EMPTY_DRAFTS: Record<ServiceFamily, ServiceDraft> = {
   sonarr: { name: "Sonarr", url: "", api_key: "", username: "", password: "", enabled: true, is_default: true },
   jellyseerr: { name: "Jellyseerr", url: "", api_key: "", username: "", password: "", enabled: true, is_default: true },
   downloaders: { name: "qBittorrent", url: "", api_key: "", username: "", password: "", enabled: true, is_default: true },
+  jellyfin_server: { name: "Jellyfin", url: "", api_key: "", username: "", password: "", enabled: true, is_default: true },
 }
 
 const GENERAL_SETUP_STEPS = [
@@ -435,6 +499,17 @@ function CleanArrApp() {
   const [serviceModal, setServiceModal] = useState<ServiceModalState | null>(null)
   const [sessionToken, setSessionToken] = useState(() => readSessionCookie())
   const hasAutoNavigated = useRef(false)
+
+  const [library, setLibrary] = useState<LibrarySeriesResponse | null>(null)
+  const [isLibraryLoading, setIsLibraryLoading] = useState(false)
+  const [libraryError, setLibraryError] = useState<string | null>(null)
+  const [libraryMovies, setLibraryMovies] = useState<LibraryMoviesResponse | null>(null)
+  const [isLibraryMoviesLoading, setIsLibraryMoviesLoading] = useState(false)
+  const [libraryMoviesError, setLibraryMoviesError] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<LibraryDeleteTarget | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteResult, setDeleteResult] = useState<ManualDeleteResponse | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const deferredFilter = useDeferredValue(activityFilter)
 
@@ -521,6 +596,70 @@ function CleanArrApp() {
     }
   }, [fetchJson])
 
+  const loadLibrary = useCallback(async () => {
+    setIsLibraryLoading(true)
+    setLibraryError(null)
+    try {
+      const payload = await fetchJson<LibrarySeriesResponse>("/api/library/series")
+      setLibrary(payload)
+    } catch (error) {
+      setLibraryError(normalizeError(error))
+    } finally {
+      setIsLibraryLoading(false)
+    }
+  }, [fetchJson])
+
+  const loadLibraryMovies = useCallback(async () => {
+    setIsLibraryMoviesLoading(true)
+    setLibraryMoviesError(null)
+    try {
+      const payload = await fetchJson<LibraryMoviesResponse>("/api/library/movies")
+      setLibraryMovies(payload)
+    } catch (error) {
+      setLibraryMoviesError(normalizeError(error))
+    } finally {
+      setIsLibraryMoviesLoading(false)
+    }
+  }, [fetchJson])
+
+  const executeDelete = useCallback(async () => {
+    if (!deleteTarget) return
+    setIsDeleting(true)
+    setDeleteError(null)
+    setDeleteResult(null)
+    try {
+      let body: Record<string, unknown>
+      if (deleteTarget.kind === "movie") {
+        body = {
+          item_type: "Movie",
+          radarr_movie_id: deleteTarget.radarr_movie_id,
+          jellyfin_item_id: deleteTarget.jellyfin_movie_id ?? null,
+        }
+      } else {
+        body = {
+          item_type: deleteTarget.item_type,
+          sonarr_series_id: deleteTarget.sonarr_series_id,
+          season_number: deleteTarget.season_number ?? null,
+          jellyfin_item_id: deleteTarget.jellyfin_item_id ?? null,
+        }
+      }
+      const result = await fetchJson<ManualDeleteResponse>("/api/actions/delete", {
+        method: "POST",
+        body: JSON.stringify(body),
+      })
+      setDeleteResult(result)
+      if (deleteTarget.kind === "movie") {
+        void loadLibraryMovies()
+      } else {
+        void loadLibrary()
+      }
+    } catch (error) {
+      setDeleteError(normalizeError(error))
+    } finally {
+      setIsDeleting(false)
+    }
+  }, [deleteTarget, fetchJson, loadLibrary, loadLibraryMovies])
+
   // Auto-polls
   useEffect(() => {
     void loadDashboard()
@@ -540,6 +679,13 @@ function CleanArrApp() {
       setConfigError(null)
     }
   }, [authStatus, loadConfig])
+
+  useEffect(() => {
+    if (activeTab === "library" && authStatus?.authenticated) {
+      void loadLibrary()
+      void loadLibraryMovies()
+    }
+  }, [activeTab, authStatus?.authenticated, loadLibrary, loadLibraryMovies])
 
   // Persist session token to cookie
   useEffect(() => {
@@ -763,6 +909,13 @@ function CleanArrApp() {
               <Activity className="size-3.5" />
               Activity
             </TabsTrigger>
+            <TabsTrigger
+              value="library"
+              className="h-8 gap-1.5 rounded-md px-3 text-sm data-[state=active]:bg-muted"
+            >
+              <Library className="size-3.5" />
+              Library
+            </TabsTrigger>
           </TabsList>
 
           {/* Right side */}
@@ -911,6 +1064,26 @@ function CleanArrApp() {
             onFilterChange={setActivityFilter}
           />
         </TabsContent>
+
+        {/* ── Library ── */}
+        <TabsContent value="library" className="mt-0">
+          <LibraryPanel
+            library={library}
+            isLibraryLoading={isLibraryLoading}
+            libraryError={libraryError}
+            libraryMovies={libraryMovies}
+            isLibraryMoviesLoading={isLibraryMoviesLoading}
+            libraryMoviesError={libraryMoviesError}
+            isLive={isLive}
+            onRefreshSeries={() => void loadLibrary()}
+            onRefreshMovies={() => void loadLibraryMovies()}
+            onDelete={(target) => {
+              setDeleteTarget(target)
+              setDeleteResult(null)
+              setDeleteError(null)
+            }}
+          />
+        </TabsContent>
       </main>
 
       {/* Modals */}
@@ -930,6 +1103,20 @@ function CleanArrApp() {
         onSave={saveServiceDraft}
         onDelete={deleteServiceDraft}
         onTest={testServiceDraft}
+      />
+
+      <DeleteConfirmModal
+        target={deleteTarget}
+        isDeleting={isDeleting}
+        result={deleteResult}
+        error={deleteError}
+        isDryRun={!isLive}
+        onConfirm={() => void executeDelete()}
+        onClose={() => {
+          setDeleteTarget(null)
+          setDeleteResult(null)
+          setDeleteError(null)
+        }}
       />
     </Tabs>
   )
@@ -1292,31 +1479,27 @@ function ActivityPanel({
         </span>
       </div>
 
-      <div className="rounded-xl border">
-        <ScrollArea className="h-[580px]">
-          <div className="divide-y">
-            {filteredActivity.length === 0 ? (
-              <div className="p-8">
-                <EmptyState
-                  title="No events"
-                  description={
-                    activityFilter
-                      ? "No activity matches the current filter."
-                      : "Send a Jellyfin webhook to populate the activity log."
-                  }
-                />
-              </div>
-            ) : (
-              filteredActivity.map((entry) => (
-                <ActivityEntry
-                  key={`${entry.processed_at}-${entry.result.item_id}`}
-                  entry={entry}
-                />
-              ))
-            )}
+      <ScrollArea className="h-[580px]">
+        {filteredActivity.length === 0 ? (
+          <EmptyState
+            title="No events"
+            description={
+              activityFilter
+                ? "No activity matches the current filter."
+                : "Send a Jellyfin webhook to populate the activity log."
+            }
+          />
+        ) : (
+          <div className="space-y-2 pr-3">
+            {filteredActivity.map((entry) => (
+              <ActivityEntry
+                key={`${entry.processed_at}-${entry.result.item_id}`}
+                entry={entry}
+              />
+            ))}
           </div>
-        </ScrollArea>
-      </div>
+        )}
+      </ScrollArea>
     </section>
   )
 }
@@ -2523,43 +2706,54 @@ function ErrorBanner({ message }: { message: string }) {
 }
 
 function ActivityEntry({ entry }: { entry: DashboardActivity }) {
+  const [open, setOpen] = useState(false)
+  const Icon = entry.result.item_type === "Movie" ? Film : Tv
   return (
-    <div className="space-y-3 px-4 py-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-0.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-medium">
-              {formatMediaTitle(entry.result.item_type, entry.result.name)}
-            </p>
-            <Badge variant="outline" className="text-xs">{entry.result.item_type}</Badge>
-            <StatusPill
-              tone={entry.result.status === "partial_failure" ? "red" : "green"}
-              label={entry.result.status}
-            />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            ID: <span className="font-mono">{entry.result.item_id}</span>
-          </p>
+    <Card>
+      <button
+        type="button"
+        className="flex w-full items-center gap-3 px-4 py-3 text-left"
+        onClick={() => setOpen((v) => !v)}
+      >
+        {open ? (
+          <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+        )}
+        <Icon className="size-4 shrink-0 text-blue-500" />
+        <span className="flex-1 truncate text-sm font-medium">{entry.result.name}</span>
+        <div className="flex shrink-0 items-center gap-2">
+          <Badge variant="outline" className="text-xs">{entry.result.item_type}</Badge>
+          <StatusPill
+            tone={entry.result.status === "partial_failure" ? "red" : "green"}
+            label={entry.result.status}
+          />
+          <span className="hidden text-xs text-muted-foreground sm:block">
+            {new Date(entry.processed_at).toLocaleString()}
+          </span>
         </div>
-        <p className="shrink-0 text-xs text-muted-foreground">
-          {new Date(entry.processed_at).toLocaleString()}
-        </p>
-      </div>
+      </button>
 
-      <div className="flex flex-wrap gap-1.5">
-        {Object.entries(entry.action_summary).map(([k, v]) => (
-          <Badge key={k} variant="outline" className="text-xs">
-            {k}: {v}
-          </Badge>
-        ))}
-      </div>
-
-      <div className="space-y-1.5">
-        {entry.result.actions.map((action, i) => (
-          <ActionRow key={`${action.system}-${action.action}-${i}`} action={action} />
-        ))}
-      </div>
-    </div>
+      {open && (
+        <CardContent className="border-t pb-3 pt-3 space-y-3">
+          <div className="text-xs text-muted-foreground sm:hidden">
+            {new Date(entry.processed_at).toLocaleString()}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {Object.entries(entry.action_summary).map(([k, v]) => (
+              <Badge key={k} variant="outline" className="text-xs">
+                {k}: {v}
+              </Badge>
+            ))}
+          </div>
+          <div className="space-y-1.5">
+            {entry.result.actions.map((action, i) => (
+              <ActionRow key={`${action.system}-${action.action}-${i}`} action={action} />
+            ))}
+          </div>
+        </CardContent>
+      )}
+    </Card>
   )
 }
 
@@ -2622,10 +2816,466 @@ function MetricCard({
   )
 }
 
+// ─── Library panel ────────────────────────────────────────────────────────────
+
+function LibrarySeriesTab({
+  library,
+  isLoading,
+  error,
+  onRefresh,
+  onDelete,
+}: {
+  library: LibrarySeriesResponse | null
+  isLoading: boolean
+  error: string | null
+  onRefresh: () => void
+  onDelete: (target: LibraryDeleteTarget) => void
+}) {
+  const [search, setSearch] = useState("")
+  const [expanded, setExpanded] = useState<Set<number>>(new Set())
+
+  const filtered = useMemo(() => {
+    if (!library) return []
+    if (!search.trim()) return library.series
+    const q = search.toLowerCase()
+    return library.series.filter((s) => s.title.toLowerCase().includes(q))
+  }, [library, search])
+
+  const toggleExpand = (id: number) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button variant="outline" size="sm" onClick={onRefresh} disabled={isLoading}>
+          <RefreshCw className={cn("size-4", isLoading && "animate-spin")} />
+          Refresh
+        </Button>
+      </div>
+
+      {error && <ErrorBanner message={error} />}
+
+      {isLoading && !library && (
+        <div className="space-y-3">
+          {[1, 2, 3].map((n) => (
+            <Skeleton key={n} className="h-14 w-full rounded-lg" />
+          ))}
+        </div>
+      )}
+
+      {!isLoading && library && filtered.length === 0 && (
+        <EmptyState
+          title={search ? "No series match your search" : "No series found"}
+          description={
+            search
+              ? "Try a different search term."
+              : "Sonarr returned no series. Configure Sonarr in Setup first."
+          }
+        />
+      )}
+
+      {library && library.series.length > 0 && (
+        <Input
+          placeholder="Search series…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      )}
+
+      {filtered.length > 0 && (
+        <div className="space-y-2">
+          {filtered.map((series) => {
+            const isOpen = expanded.has(series.sonarr_id)
+            const totalBytes = series.seasons.reduce((sum, s) => sum + s.size_bytes, 0)
+            return (
+              <Card key={series.sonarr_id}>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left"
+                  onClick={() => toggleExpand(series.sonarr_id)}
+                >
+                  {isOpen ? (
+                    <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                  )}
+                  <Tv className="size-4 shrink-0 text-blue-500" />
+                  <span className="flex-1 text-sm font-medium">{series.title}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {series.seasons.length} season{series.seasons.length !== 1 ? "s" : ""}
+                    {totalBytes > 0 && ` · ${formatBytes(totalBytes)}`}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-2 shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onDelete({
+                        kind: "series",
+                        sonarr_series_id: series.sonarr_id,
+                        series_title: series.title,
+                        item_type: "Series",
+                        jellyfin_item_id: series.jellyfin_series_id,
+                      })
+                    }}
+                  >
+                    <Trash2 className="size-3.5" />
+                    Delete series
+                  </Button>
+                </button>
+
+                {isOpen && series.seasons.length > 0 && (
+                  <CardContent className="border-t pt-3 pb-3">
+                    <div className="space-y-1.5">
+                      {series.seasons.map((season) => (
+                        <div
+                          key={season.season_number}
+                          className="flex items-center gap-3 rounded-md px-2 py-2 hover:bg-muted/40"
+                        >
+                          <span className="min-w-[80px] text-sm font-medium">
+                            Season {season.season_number}
+                          </span>
+                          <span className="flex-1 text-xs text-muted-foreground">
+                            {season.episode_file_count}/{season.episode_count} episodes
+                            {season.size_bytes > 0 && ` · ${formatBytes(season.size_bytes)}`}
+                          </span>
+                          {season.episode_file_count > 0 ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
+                              onClick={() =>
+                                onDelete({
+                                  kind: "series",
+                                  sonarr_series_id: series.sonarr_id,
+                                  series_title: series.title,
+                                  item_type: "Season",
+                                  season_number: season.season_number,
+                                  jellyfin_item_id: season.jellyfin_season_id,
+                                })
+                              }
+                            >
+                              <Trash2 className="size-3.5" />
+                              Delete
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">No files</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                )}
+
+                {isOpen && series.seasons.length === 0 && (
+                  <CardContent className="border-t pt-3 pb-3">
+                    <p className="text-xs text-muted-foreground">No seasons with episodes found.</p>
+                  </CardContent>
+                )}
+              </Card>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function LibraryMoviesTab({
+  movies,
+  isLoading,
+  error,
+  onRefresh,
+  onDelete,
+}: {
+  movies: LibraryMoviesResponse | null
+  isLoading: boolean
+  error: string | null
+  onRefresh: () => void
+  onDelete: (target: LibraryDeleteTarget) => void
+}) {
+  const [search, setSearch] = useState("")
+
+  const filtered = useMemo(() => {
+    if (!movies) return []
+    if (!search.trim()) return movies.movies
+    const q = search.toLowerCase()
+    return movies.movies.filter((m) => m.title.toLowerCase().includes(q))
+  }, [movies, search])
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button variant="outline" size="sm" onClick={onRefresh} disabled={isLoading}>
+          <RefreshCw className={cn("size-4", isLoading && "animate-spin")} />
+          Refresh
+        </Button>
+      </div>
+
+      {error && <ErrorBanner message={error} />}
+
+      {isLoading && !movies && (
+        <div className="space-y-3">
+          {[1, 2, 3].map((n) => (
+            <Skeleton key={n} className="h-12 w-full rounded-lg" />
+          ))}
+        </div>
+      )}
+
+      {!isLoading && movies && filtered.length === 0 && (
+        <EmptyState
+          title={search ? "No movies match your search" : "No movies found"}
+          description={
+            search
+              ? "Try a different search term."
+              : "Radarr returned no movies. Configure Radarr in Setup first."
+          }
+        />
+      )}
+
+      {movies && movies.movies.length > 0 && (
+        <Input
+          placeholder="Search movies…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      )}
+
+      {filtered.length > 0 && (
+        <div className="space-y-2">
+          {filtered.map((movie) => (
+            <Card key={movie.radarr_id}>
+              <div className="flex items-center gap-3 px-4 py-3">
+                <Film className="size-4 shrink-0 text-purple-500" />
+                <span className="flex-1 text-sm font-medium">{movie.title}</span>
+                <span className="text-xs text-muted-foreground">
+                  {movie.has_file
+                    ? movie.size_bytes > 0
+                      ? formatBytes(movie.size_bytes)
+                      : "On disk"
+                    : "No file"}
+                </span>
+                {movie.has_file ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-2 shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
+                    onClick={() =>
+                      onDelete({
+                        kind: "movie",
+                        radarr_movie_id: movie.radarr_id,
+                        movie_title: movie.title,
+                        jellyfin_movie_id: movie.jellyfin_movie_id,
+                      })
+                    }
+                  >
+                    <Trash2 className="size-3.5" />
+                    Delete
+                  </Button>
+                ) : (
+                  <span className="ml-2 text-xs text-muted-foreground">No files</span>
+                )}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function LibraryPanel({
+  library,
+  isLibraryLoading,
+  libraryError,
+  libraryMovies,
+  isLibraryMoviesLoading,
+  libraryMoviesError,
+  isLive,
+  onRefreshSeries,
+  onRefreshMovies,
+  onDelete,
+}: {
+  library: LibrarySeriesResponse | null
+  isLibraryLoading: boolean
+  libraryError: string | null
+  libraryMovies: LibraryMoviesResponse | null
+  isLibraryMoviesLoading: boolean
+  libraryMoviesError: string | null
+  isLive: boolean
+  onRefreshSeries: () => void
+  onRefreshMovies: () => void
+  onDelete: (target: LibraryDeleteTarget) => void
+}) {
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-lg font-semibold">Library</h2>
+        <p className="text-sm text-muted-foreground">
+          Browse your media library and delete items — cascades to Sonarr/Radarr, qBittorrent, Jellyseerr, and Jellyfin.
+        </p>
+      </div>
+
+      {!isLive && (
+        <Alert>
+          <Info className="size-4 text-amber-600 dark:text-amber-400" />
+          <AlertTitle>Dry run mode</AlertTitle>
+          <AlertDescription>
+            No actual changes will be made. Enable Live mode in Runtime settings to execute real deletions.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <Tabs defaultValue="series">
+        <TabsList>
+          <TabsTrigger value="series">
+            <Tv className="mr-1.5 size-3.5" />
+            Series
+          </TabsTrigger>
+          <TabsTrigger value="movies">
+            <Film className="mr-1.5 size-3.5" />
+            Movies
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="series" className="mt-4">
+          <LibrarySeriesTab
+            library={library}
+            isLoading={isLibraryLoading}
+            error={libraryError}
+            onRefresh={onRefreshSeries}
+            onDelete={onDelete}
+          />
+        </TabsContent>
+        <TabsContent value="movies" className="mt-4">
+          <LibraryMoviesTab
+            movies={libraryMovies}
+            isLoading={isLibraryMoviesLoading}
+            error={libraryMoviesError}
+            onRefresh={onRefreshMovies}
+            onDelete={onDelete}
+          />
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}
+
+// ─── Delete confirm modal ──────────────────────────────────────────────────────
+
+function DeleteConfirmModal({
+  target,
+  isDeleting,
+  result,
+  error,
+  isDryRun,
+  onConfirm,
+  onClose,
+}: {
+  target: LibraryDeleteTarget | null
+  isDeleting: boolean
+  result: ManualDeleteResponse | null
+  error: string | null
+  isDryRun: boolean
+  onConfirm: () => void
+  onClose: () => void
+}) {
+  if (!target) return null
+
+  const label =
+    target.kind === "movie"
+      ? `"${target.movie_title}"`
+      : target.item_type === "Season"
+        ? `Season ${target.season_number} of "${target.series_title}"`
+        : `"${target.series_title}"`
+
+  const isDone = Boolean(result || error)
+
+  return (
+    <Modal
+      open={true}
+      title={isDone ? "Deletion result" : `Delete ${label}?`}
+      onClose={onClose}
+      footer={
+        isDone ? (
+          <Button onClick={onClose}>Close</Button>
+        ) : (
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose} disabled={isDeleting}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={onConfirm}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <LoaderCircle className="mr-1 size-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="mr-1 size-3.5" />
+              )}
+              {isDryRun ? "Simulate (dry run)" : "Delete"}
+            </Button>
+          </div>
+        )
+      }
+    >
+      <div className="space-y-4">
+        {!isDone && (
+          <>
+            {isDryRun && (
+              <Alert>
+                <Info className="size-4 text-amber-600 dark:text-amber-400" />
+                <AlertTitle>Dry run mode</AlertTitle>
+                <AlertDescription>No actual changes will be made.</AlertDescription>
+              </Alert>
+            )}
+            <p className="text-sm text-muted-foreground">
+              This will remove files from Sonarr, delete matching torrents from qBittorrent,
+              and clean up requests in Jellyseerr.
+            </p>
+          </>
+        )}
+
+        {error && <ErrorBanner message={error} />}
+
+        {result && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <StatusPill
+                tone={result.status === "partial_failure" ? "red" : result.status === "ignored" ? "neutral" : "green"}
+                label={result.status}
+              />
+            </div>
+            <div className="space-y-1.5">
+              {result.actions.map((action, i) => (
+                <ActionRow key={`${action.system}-${action.action}-${i}`} action={action} />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  )
+}
+
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 function formatMediaTitle(itemType: string, name: string): string {
   return `${itemType}: ${name}`
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B"
+  const k = 1024
+  const sizes = ["B", "KB", "MB", "GB", "TB"]
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
 }
 
 function normalizeError(error: unknown): string {
@@ -2661,6 +3311,7 @@ function getServices(config: RuntimeConfigPayload | null, family: ServiceFamily)
     case "sonarr": return config.sonarr
     case "jellyseerr": return config.jellyseerr
     case "downloaders": return config.downloaders
+    case "jellyfin_server": return config.jellyfin
   }
 }
 
@@ -2678,6 +3329,10 @@ function isSetupStepReady(step: SetupStepId, config: RuntimeConfigPayload | null
   if (!config) return false
   if (step === "general" || step === "jellyfin") {
     return Boolean(config.general.webhook_shared_token)
+  }
+  if (step === "jellyfin_server") {
+    // Jellyfin server is optional — always considered ready
+    return true
   }
   return Boolean(resolveActiveService(getServices(config, step)))
 }
@@ -2705,6 +3360,7 @@ function buildServicePayload(family: ServiceFamily, draft: ServiceDraft) {
     case "radarr":
     case "sonarr":
     case "jellyseerr":
+    case "jellyfin_server":
       return { ...base, api_key: draft.api_key }
     case "downloaders":
       return { ...base, username: draft.username, password: draft.password }

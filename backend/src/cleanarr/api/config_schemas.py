@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from cleanarr.application.configuration import ConnectionTestResult
 from cleanarr.domain.config import (
     GeneralConfig,
+    JellyfinServiceConfig,
     JellyseerrServiceConfig,
     QbittorrentServiceConfig,
     RadarrServiceConfig,
@@ -24,6 +25,7 @@ class RuntimeConfigResponse(BaseModel):
     sonarr: list[SonarrServiceConfig]
     jellyseerr: list[JellyseerrServiceConfig]
     downloaders: list[QbittorrentServiceConfig]
+    jellyfin: list[JellyfinServiceConfig]
     admin_token_configured: bool
 
     @classmethod
@@ -34,6 +36,7 @@ class RuntimeConfigResponse(BaseModel):
             sonarr=config.sonarr,
             jellyseerr=config.jellyseerr,
             downloaders=config.downloaders,
+            jellyfin=config.jellyfin,
             admin_token_configured=admin_token_configured,
         )
 
@@ -113,6 +116,22 @@ class QbittorrentServiceRequest(BaseModel):
         if service_id is not None:
             payload["id"] = service_id
         return QbittorrentServiceConfig.model_validate(payload)
+
+
+class JellyfinServiceRequest(BaseModel):
+    """Create or update a Jellyfin server integration."""
+
+    name: str
+    url: str
+    api_key: str
+    enabled: bool = True
+    is_default: bool = False
+
+    def to_domain(self, *, service_id: str | None = None) -> JellyfinServiceConfig:
+        payload = self.model_dump()
+        if service_id is not None:
+            payload["id"] = service_id
+        return JellyfinServiceConfig.model_validate(payload)
 
 
 class ConnectionTestResponse(BaseModel):

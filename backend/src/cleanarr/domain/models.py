@@ -146,6 +146,22 @@ class RadarrMovie:
     path: str
     tmdb_id: int | None
     imdb_id: str | None
+    size_on_disk: int | None = None
+    has_file: bool = False
+
+
+@dataclass(frozen=True)
+class JellyfinItem:
+    """Subset of Jellyfin item metadata."""
+
+    id: str
+    name: str
+    type: str
+    tmdb_id: int | None = None
+    tvdb_id: int | None = None
+    imdb_id: str | None = None
+    parent_id: str | None = None
+    season_number: int | None = None
 
 
 @dataclass(frozen=True)
@@ -192,6 +208,7 @@ class SonarrEpisodeFile:
     path: str
     relative_path: str | None
     season_number: int | None
+    size: int | None = None
 
 
 @dataclass(frozen=True)

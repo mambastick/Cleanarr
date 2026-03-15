@@ -11,6 +11,7 @@ from cleanarr.application.configuration import RuntimeConfigurationService
 from cleanarr.application.service import CascadeDeletionService
 from cleanarr.application.strategies import DeletionStrategyFactory
 from cleanarr.domain.config import (
+    JellyfinServiceConfig,
     JellyseerrServiceConfig,
     QbittorrentServiceConfig,
     RadarrServiceConfig,
@@ -19,8 +20,10 @@ from cleanarr.domain.config import (
 )
 from cleanarr.infrastructure.auth import InMemorySessionStore, PasswordHasher
 from cleanarr.infrastructure.clients import (
+    JellyfinServerClient,
     JellyseerrClient,
     NullDownloaderClient,
+    NullJellyfinServerClient,
     NullJellyseerrClient,
     NullRadarrClient,
     NullSonarrClient,
@@ -39,10 +42,12 @@ class ServiceRuntime:
 
     config: RuntimeConfig
     service: CascadeDeletionService
+    strategy_factory: DeletionStrategyFactory
     radarr: RadarrClient | NullRadarrClient
     sonarr: SonarrClient | NullSonarrClient
     jellyseerr: JellyseerrClient | NullJellyseerrClient
     downloader: QbittorrentClient | NullDownloaderClient
+    jellyfin_server: JellyfinServerClient | NullJellyfinServerClient
 
     async def close(self) -> None:
         """Dispose all HTTP clients."""
@@ -51,6 +56,7 @@ class ServiceRuntime:
         await self.sonarr.close()
         await self.jellyseerr.close()
         await self.downloader.close()
+        await self.jellyfin_server.close()
 
 
 class ServiceContainer:
@@ -118,6 +124,14 @@ class ServiceContainer:
         return self._runtime.downloader
 
     @property
+    def jellyfin_server(self) -> JellyfinServerClient | NullJellyfinServerClient:
+        return self._runtime.jellyfin_server
+
+    @property
+    def strategy_factory(self) -> DeletionStrategyFactory:
+        return self._runtime.strategy_factory
+
+    @property
     def webhook_shared_token(self) -> str | None:
         """Return the currently active webhook token."""
 
@@ -153,6 +167,7 @@ class ServiceContainer:
         active_sonarr = ServiceContainer._pick_active_sonarr(config.sonarr)
         active_jellyseerr = ServiceContainer._pick_active_jellyseerr(config.jellyseerr)
         active_downloader = ServiceContainer._pick_active_downloader(config.downloaders)
+        active_jellyfin = ServiceContainer._pick_active_jellyfin(config.jellyfin)
 
         radarr = (
             RadarrClient(
@@ -191,6 +206,15 @@ class ServiceContainer:
             if active_downloader
             else NullDownloaderClient()
         )
+        jellyfin_server = (
+            JellyfinServerClient(
+                base_url=active_jellyfin.url,
+                api_key=active_jellyfin.api_key,
+                timeout_seconds=general.http_timeout_seconds,
+            )
+            if active_jellyfin
+            else NullJellyfinServerClient()
+        )
 
         strategy_factory = DeletionStrategyFactory(
             dry_run=general.dry_run,
@@ -203,10 +227,12 @@ class ServiceContainer:
         return ServiceRuntime(
             config=config,
             service=CascadeDeletionService(strategy_factory),
+            strategy_factory=strategy_factory,
             radarr=radarr,
             sonarr=sonarr,
             jellyseerr=jellyseerr,
             downloader=downloader,
+            jellyfin_server=jellyfin_server,
         )
 
     @staticmethod
@@ -239,6 +265,16 @@ class ServiceContainer:
     def _pick_active_downloader(
         services: list[QbittorrentServiceConfig],
     ) -> QbittorrentServiceConfig | None:
+        enabled = [service for service in services if service.enabled]
+        if not enabled:
+            return None
+        default = next((service for service in enabled if service.is_default), None)
+        return default or enabled[0]
+
+    @staticmethod
+    def _pick_active_jellyfin(
+        services: list[JellyfinServiceConfig],
+    ) -> JellyfinServiceConfig | None:
         enabled = [service for service in services if service.enabled]
         if not enabled:
             return None

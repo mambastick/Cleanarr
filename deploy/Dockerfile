@@ -7,6 +7,7 @@ RUN corepack enable
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
+ARG CACHE_BUST=1
 COPY frontend /app/frontend
 RUN pnpm build
 

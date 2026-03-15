@@ -11,6 +11,7 @@ from cleanarr.domain import (
     AuthenticationError,
     DownloaderRemovalResult,
     ExternalServiceError,
+    JellyfinItem,
     JellyseerrIssue,
     JellyseerrMedia,
     JellyseerrRequest,
@@ -120,6 +121,8 @@ class RadarrClient(JsonServiceClient):
                 path=item["path"],
                 tmdb_id=item.get("tmdbId"),
                 imdb_id=item.get("imdbId"),
+                size_on_disk=item.get("sizeOnDisk") or item.get("statistics", {}).get("sizeOnDisk"),
+                has_file=bool(item.get("hasFile", False)),
             )
             for item in payload
         ]
@@ -263,6 +266,7 @@ class SonarrClient(JsonServiceClient):
                 path=item["path"],
                 relative_path=item.get("relativePath"),
                 season_number=item.get("seasonNumber"),
+                size=item.get("size"),
             )
             for item in payload
         ]
@@ -271,8 +275,18 @@ class SonarrClient(JsonServiceClient):
         await self._request(
             "PUT",
             "/episode/monitor",
+            expected_statuses={200, 202},
             json={"episodeIds": list(episode_ids), "monitored": False},
         )
+
+    async def unmonitor_season(self, series_id: int, season_number: int) -> None:
+        series_data = await self._request("GET", f"/series/{series_id}")
+        seasons = series_data.get("seasons", [])
+        for season in seasons:
+            if season.get("seasonNumber") == season_number:
+                season["monitored"] = False
+                break
+        await self._request("PUT", f"/series/{series_id}", expected_statuses={200, 202}, json=series_data)
 
     async def delete_episode_file(self, episode_file_id: int) -> None:
         await self._request("DELETE", f"/episodeFile/{episode_file_id}", expected_statuses={200})
@@ -317,6 +331,9 @@ class NullSonarrClient:
         return []
 
     async def unmonitor_episodes(self, episode_ids: Sequence[int]) -> None:
+        return None
+
+    async def unmonitor_season(self, series_id: int, season_number: int) -> None:
         return None
 
     async def delete_episode_file(self, episode_file_id: int) -> None:
@@ -498,16 +515,21 @@ class JellyseerrClient(JsonServiceClient):
         *,
         season_numbers: Sequence[int],
     ) -> None:
-        payload = {
+        payload: dict[str, Any] = {
             "mediaType": request.media_type,
             "seasons": list(season_numbers),
             "is4k": request.is_4k,
-            "serverId": request.server_id,
-            "profileId": request.profile_id,
-            "rootFolder": request.root_folder,
-            "languageProfileId": request.language_profile_id,
-            "userId": request.requested_by_id,
         }
+        if request.server_id is not None:
+            payload["serverId"] = request.server_id
+        if request.profile_id is not None:
+            payload["profileId"] = request.profile_id
+        if request.root_folder is not None:
+            payload["rootFolder"] = request.root_folder
+        if request.language_profile_id is not None:
+            payload["languageProfileId"] = request.language_profile_id
+        if request.requested_by_id is not None:
+            payload["userId"] = request.requested_by_id
         await self._request_with_xsrf("PUT", f"/request/{request.id}", json=payload)
 
     async def delete_issue(self, issue_id: int) -> None:
@@ -660,6 +682,72 @@ class QbittorrentClient:
                 self._system,
                 f"qBittorrent returned unexpected status {response.status_code}: {response.text}",
             )
+
+
+class JellyfinServerClient(JsonServiceClient):
+    """Jellyfin media server HTTP client."""
+
+    def __init__(self, *, base_url: str, api_key: str, timeout_seconds: float) -> None:
+        super().__init__(
+            system="jellyfin",
+            base_url=base_url,
+            timeout_seconds=timeout_seconds,
+            headers={"Authorization": f'MediaBrowser Token="{api_key}"'},
+        )
+
+    async def ping(self) -> None:
+        """Verify Jellyfin connectivity."""
+        await self._request("GET", "/System/Ping", expected_statuses={200, 204})
+
+    async def list_items(self, *, include_types: list[str]) -> Sequence[JellyfinItem]:
+        payload = await self._request(
+            "GET",
+            "/Items",
+            params={
+                "Recursive": "true",
+                "IncludeItemTypes": ",".join(include_types),
+                "Fields": "ProviderIds,ParentId,IndexNumber",
+                "Limit": 5000,
+            },
+        )
+        raw_items = payload.get("Items", []) if isinstance(payload, dict) else []
+        result: list[JellyfinItem] = []
+        for item in raw_items:
+            provider_ids = item.get("ProviderIds") or {}
+            tmdb_raw = provider_ids.get("Tmdb")
+            tvdb_raw = provider_ids.get("Tvdb")
+            result.append(
+                JellyfinItem(
+                    id=item["Id"],
+                    name=item.get("Name", ""),
+                    type=item.get("Type", ""),
+                    tmdb_id=int(tmdb_raw) if tmdb_raw and str(tmdb_raw).isdigit() else None,
+                    tvdb_id=int(tvdb_raw) if tvdb_raw and str(tvdb_raw).isdigit() else None,
+                    imdb_id=provider_ids.get("Imdb"),
+                    parent_id=item.get("ParentId") or item.get("SeriesId"),
+                    season_number=item.get("IndexNumber"),
+                )
+            )
+        return result
+
+    async def delete_item(self, item_id: str) -> None:
+        await self._request("DELETE", f"/Items/{item_id}", expected_statuses={200, 204, 404})
+
+
+class NullJellyfinServerClient:
+    """No-op fallback when no active Jellyfin server is configured."""
+
+    async def close(self) -> None:
+        return None
+
+    async def ping(self) -> None:
+        return None
+
+    async def list_items(self, *, include_types: list[str]) -> Sequence[JellyfinItem]:
+        return []
+
+    async def delete_item(self, item_id: str) -> None:
+        return None
 
 
 class NullDownloaderClient:

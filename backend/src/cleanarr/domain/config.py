@@ -16,6 +16,7 @@ class ServiceKind(StrEnum):
     SONARR = "sonarr"
     JELLYSEERR = "jellyseerr"
     QBITTORRENT = "qbittorrent"
+    JELLYFIN = "jellyfin"
 
 
 class GeneralConfig(BaseModel):
@@ -108,6 +109,13 @@ class QbittorrentServiceConfig(BaseServiceConfig):
         return _normalize_qbittorrent_url(value)
 
 
+class JellyfinServiceConfig(BaseServiceConfig):
+    """Jellyfin media server integration settings."""
+
+    kind: ServiceKind = ServiceKind.JELLYFIN
+    api_key: str
+
+
 class RuntimeConfig(BaseModel):
     """Complete persisted CleanArr runtime configuration."""
 
@@ -117,6 +125,7 @@ class RuntimeConfig(BaseModel):
     sonarr: list[SonarrServiceConfig] = Field(default_factory=list)
     jellyseerr: list[JellyseerrServiceConfig] = Field(default_factory=list)
     downloaders: list[QbittorrentServiceConfig] = Field(default_factory=list)
+    jellyfin: list[JellyfinServiceConfig] = Field(default_factory=list)
 
 
 def _normalize_api_service_url(value: str, *, expected_suffix: str) -> str:

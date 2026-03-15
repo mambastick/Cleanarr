@@ -8,6 +8,7 @@ from typing import TypeVar
 from cleanarr.domain.config import (
     BaseServiceConfig,
     GeneralConfig,
+    JellyfinServiceConfig,
     JellyseerrServiceConfig,
     QbittorrentServiceConfig,
     RadarrServiceConfig,
@@ -16,12 +17,18 @@ from cleanarr.domain.config import (
     SonarrServiceConfig,
 )
 from cleanarr.domain.errors import ExternalServiceError
-from cleanarr.infrastructure.clients import JellyseerrClient, QbittorrentClient, RadarrClient, SonarrClient
+from cleanarr.infrastructure.clients import (
+    JellyfinServerClient,
+    JellyseerrClient,
+    QbittorrentClient,
+    RadarrClient,
+    SonarrClient,
+)
 from cleanarr.infrastructure.config_store import FileConfigStore
 from cleanarr.infrastructure.settings import Settings
 
 AnyServiceConfig = (
-    RadarrServiceConfig | SonarrServiceConfig | JellyseerrServiceConfig | QbittorrentServiceConfig
+    RadarrServiceConfig | SonarrServiceConfig | JellyseerrServiceConfig | QbittorrentServiceConfig | JellyfinServiceConfig
 )
 TService = TypeVar("TService", bound=BaseServiceConfig)
 
@@ -94,6 +101,8 @@ class RuntimeConfigurationService:
             self._config = self._config.model_copy(update={"jellyseerr": [*self._config.jellyseerr, payload]})
         elif kind is ServiceKind.QBITTORRENT and isinstance(payload, QbittorrentServiceConfig):
             self._config = self._config.model_copy(update={"downloaders": [*self._config.downloaders, payload]})
+        elif kind is ServiceKind.JELLYFIN and isinstance(payload, JellyfinServiceConfig):
+            self._config = self._config.model_copy(update={"jellyfin": [*self._config.jellyfin, payload]})
         else:
             raise TypeError(f"Payload {type(payload).__name__} does not match {kind.value}.")
         self._persist()
@@ -145,6 +154,15 @@ class RuntimeConfigurationService:
                     ]
                 }
             )
+        elif kind is ServiceKind.JELLYFIN and isinstance(payload, JellyfinServiceConfig):
+            self._config = self._config.model_copy(
+                update={
+                    "jellyfin": [
+                        payload if service.id == service_id else service
+                        for service in self._config.jellyfin
+                    ]
+                }
+            )
         else:
             raise TypeError(f"Payload {type(payload).__name__} does not match {kind.value}.")
         self._persist()
@@ -167,9 +185,13 @@ class RuntimeConfigurationService:
             self._config = self._config.model_copy(
                 update={"jellyseerr": [service for service in self._config.jellyseerr if service.id != service_id]}
             )
-        else:
+        elif kind is ServiceKind.QBITTORRENT:
             self._config = self._config.model_copy(
                 update={"downloaders": [service for service in self._config.downloaders if service.id != service_id]}
+            )
+        else:
+            self._config = self._config.model_copy(
+                update={"jellyfin": [service for service in self._config.jellyfin if service.id != service_id]}
             )
         self._persist()
         return self.get_config()
@@ -218,6 +240,18 @@ class RuntimeConfigurationService:
                     await jellyseerr_client.close()
                 return ConnectionTestResult(ok=True, message="Jellyseerr responded successfully.")
 
+            if isinstance(payload, JellyfinServiceConfig):
+                jellyfin_client = JellyfinServerClient(
+                    base_url=payload.url,
+                    api_key=payload.api_key,
+                    timeout_seconds=timeout,
+                )
+                try:
+                    await jellyfin_client.ping()
+                finally:
+                    await jellyfin_client.close()
+                return ConnectionTestResult(ok=True, message="Jellyfin responded successfully.")
+
             qbittorrent_client = QbittorrentClient(
                 base_url=payload.url,
                 username=payload.username,
@@ -252,6 +286,7 @@ class RuntimeConfigurationService:
                 "sonarr": RuntimeConfigurationService._normalize_defaults(config.sonarr),
                 "jellyseerr": RuntimeConfigurationService._normalize_defaults(config.jellyseerr),
                 "downloaders": RuntimeConfigurationService._normalize_defaults(config.downloaders),
+                "jellyfin": RuntimeConfigurationService._normalize_defaults(config.jellyfin),
             }
         )
 
@@ -283,4 +318,6 @@ class RuntimeConfigurationService:
             return any(service.id == service_id for service in self._config.sonarr)
         if kind is ServiceKind.JELLYSEERR:
             return any(service.id == service_id for service in self._config.jellyseerr)
+        if kind is ServiceKind.JELLYFIN:
+            return any(service.id == service_id for service in self._config.jellyfin)
         return any(service.id == service_id for service in self._config.downloaders)
