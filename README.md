@@ -22,16 +22,16 @@
 
 <table>
   <tr>
-    <td><img src="media/01-dashboard-dark.png" alt="Dashboard dark" width="480"/></td>
-    <td><img src="media/05-dashboard-light.png" alt="Dashboard light" width="480"/></td>
+    <td><img src="media/01-dashboard-dark.png?v=2" alt="Dashboard dark" width="480"/></td>
+    <td><img src="media/05-dashboard-light.png?v=2" alt="Dashboard light" width="480"/></td>
   </tr>
   <tr>
     <td align="center"><sub>Dashboard — dark mode</sub></td>
     <td align="center"><sub>Dashboard — light mode</sub></td>
   </tr>
   <tr>
-    <td><img src="media/02-setup-dark.png" alt="Setup wizard" width="480"/></td>
-    <td><img src="media/03-activity-dark.png" alt="Activity log" width="480"/></td>
+    <td><img src="media/02-setup-dark.png?v=2" alt="Setup wizard" width="480"/></td>
+    <td><img src="media/03-activity-dark.png?v=2" alt="Activity log" width="480"/></td>
   </tr>
   <tr>
     <td align="center"><sub>Setup wizard — all steps complete</sub></td>
