@@ -67,6 +67,24 @@ import type {
 } from "@/lib/runtime-config"
 import { cn } from "@/lib/utils"
 
+// ─── Brand ───────────────────────────────────────────────────────────────────
+
+function CleanArrBrand({ size = "sm" }: { size?: "sm" | "lg" }) {
+  const iconSize = size === "sm" ? 18 : 36
+  const textClass = size === "sm" ? "text-base" : "text-3xl"
+  return (
+    <div className="flex items-center gap-2">
+      <svg width={iconSize} height={iconSize} viewBox="0 0 48 48" fill="none">
+        <path d="M28,6 L8,28 L24,28 L22,42 L40,20 L24,20 Z" fill="#a855f7" />
+      </svg>
+      <span className={textClass}>
+        <span className="font-light text-foreground">Clean</span>
+        <span className="font-bold text-purple-500">Arr</span>
+      </span>
+    </div>
+  )
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type MainTab = "dashboard" | "setup" | "activity"
@@ -708,9 +726,8 @@ function CleanArrApp() {
       <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-2.5 sm:px-6">
           {/* Brand */}
-          <div className="flex shrink-0 items-center gap-2">
-            <Sparkles className="size-4 text-blue-600 dark:text-blue-400" />
-            <span className="font-semibold tracking-tight">CleanArr</span>
+          <div className="shrink-0">
+            <CleanArrBrand size="sm" />
           </div>
 
           <div className="h-5 w-px bg-border" />
@@ -939,12 +956,12 @@ function AuthScreen({
 }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
-      <Card className="w-full max-w-sm shadow-sm">
+      <div className="w-full max-w-sm space-y-6">
+        <div className="flex justify-center">
+          <CleanArrBrand size="lg" />
+        </div>
+      <Card className="w-full shadow-sm">
         <CardHeader className="space-y-1.5">
-          <div className="flex items-center gap-2">
-            <Sparkles className="size-5 text-blue-600 dark:text-blue-400" />
-            <span className="text-lg font-semibold">CleanArr</span>
-          </div>
           <CardTitle className="flex items-center gap-2 text-xl">
             {requiresRegistration ? (
               <UserRoundPlus className="size-5 text-blue-600 dark:text-blue-400" />
@@ -1014,6 +1031,7 @@ function AuthScreen({
           </Button>
         </CardContent>
       </Card>
+      </div>
     </div>
   )
 }

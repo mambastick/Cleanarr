@@ -25,18 +25,18 @@
   <!-- Icon circle -->
   <circle cx="60" cy="60" r="36" fill="url(#ring)" stroke="#7c3aed" stroke-width="1" stroke-opacity="0.5"/>
 
-  <!-- Bolt shape (simplified CleanArr mark) -->
-  <g filter="url(#glow)" transform="translate(60,60)">
-    <!-- Upper bolt segment -->
-    <path d="M-6,-20 L4,-20 L-2,0 L6,0 L-8,20 L-2,4 L-10,4 Z"
+  <!-- Bolt (Lucide Zap–style, centered at 60,60) -->
+  <g filter="url(#glow)">
+    <path d="M62,-14 L42,8 L60,8 L58,26 L78,4 L60,4 Z"
+          transform="translate(0,52)"
           fill="url(#bolt)" opacity="0.95"/>
   </g>
 
-  <!-- Wordmark -->
+  <!-- Wordmark: CleanArr as one word -->
   <text x="112" y="52" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
-        font-size="34" font-weight="300" letter-spacing="-0.5" fill="#e2e8f0">Clean</text>
-  <text x="221" y="52" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
-        font-size="34" font-weight="700" letter-spacing="-0.5" fill="#a855f7">Arr</text>
+        font-size="34" letter-spacing="-0.5">
+    <tspan font-weight="300" fill="#e2e8f0">Clean</tspan><tspan font-weight="700" fill="#a855f7">Arr</tspan>
+  </text>
 
   <!-- Tagline -->
   <text x="113" y="76" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"

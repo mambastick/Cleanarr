@@ -11,5 +11,6 @@
   </defs>
   <rect width="48" height="48" rx="10" fill="url(#bg)"/>
   <rect width="48" height="48" rx="10" fill="none" stroke="#6d28d9" stroke-width="1" stroke-opacity="0.6"/>
-  <path d="M22 7 L30 7 L23 22 L31 22 L18 41 L22 27 L14 27 Z" fill="url(#bolt)"/>
+  <!-- Lucide Zap–style bolt, centered in 48×48 -->
+  <path d="M28,6 L8,28 L24,28 L22,42 L40,20 L24,20 Z" fill="url(#bolt)"/>
 </svg>
