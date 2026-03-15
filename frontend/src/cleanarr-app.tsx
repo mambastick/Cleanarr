@@ -1490,7 +1490,7 @@ function ActivityPanel({
             }
           />
         ) : (
-          <div className="space-y-2 pr-3">
+          <div className="space-y-2 px-px pb-px">
             {filteredActivity.map((entry) => (
               <ActivityEntry
                 key={`${entry.processed_at}-${entry.result.item_id}`}
