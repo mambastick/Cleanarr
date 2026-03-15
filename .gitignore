@@ -209,6 +209,9 @@ frontend/.vite/
 backend/src/cleanarr/ui/static/
 backend/.venv/
 
+# Accidental editable install in repo root
+src/
+
 # Ruff stuff:
 .ruff_cache/
 
