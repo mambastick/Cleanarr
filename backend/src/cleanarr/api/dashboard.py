@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from collections import Counter, deque
+import asyncio
+import sqlite3
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from threading import Lock
 from urllib.parse import urlsplit, urlunsplit
 
@@ -14,8 +17,6 @@ from pydantic import BaseModel
 from cleanarr.api.schemas import ProcessingResultResponse
 from cleanarr.domain import ItemType, ProcessingResult
 from cleanarr.domain.config import RuntimeConfig
-
-RECENT_ACTIVITY_LIMIT = 25
 
 JELLYFIN_GENERIC_TEMPLATE = """{
   "notification_type": "{{json_encode NotificationType}}",
@@ -60,29 +61,80 @@ class ActivityRecord:
     result: ProcessingResult
 
 
-class RecentActivityStore:
-    """Small in-memory ring buffer for the dashboard."""
+class ActivityStore:
+    """SQLite-backed activity log with configurable day-based retention."""
 
-    def __init__(self, *, max_entries: int = RECENT_ACTIVITY_LIMIT) -> None:
-        self._entries: deque[ActivityRecord] = deque(maxlen=max_entries)
-        self._lock = Lock()
+    def __init__(self, db_path: Path, *, retention_days: int = 30) -> None:
+        self._db_path = db_path
+        self._retention_days = retention_days
+
+    def initialize_sync(self) -> None:
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS activity ("
+                "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "  processed_at TEXT NOT NULL,"
+                "  result_json TEXT NOT NULL"
+                ")"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_processed_at ON activity(processed_at)"
+            )
+            conn.commit()
+        self._purge_sync()
+
+    async def initialize(self) -> None:
+        await asyncio.to_thread(self.initialize_sync)
+
+    def _purge_sync(self) -> None:
+        cutoff = (datetime.now(UTC) - timedelta(days=self._retention_days)).isoformat()
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute("DELETE FROM activity WHERE processed_at < ?", (cutoff,))
+            conn.commit()
+
+    def _record_sync(self, result: ProcessingResult) -> None:
+        now = datetime.now(UTC).isoformat()
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute(
+                "INSERT INTO activity (processed_at, result_json) VALUES (?, ?)",
+                (now, result.model_dump_json()),
+            )
+            cutoff = (datetime.now(UTC) - timedelta(days=self._retention_days)).isoformat()
+            conn.execute("DELETE FROM activity WHERE processed_at < ?", (cutoff,))
+            conn.commit()
+
+    async def record(self, result: ProcessingResult) -> None:
+        await asyncio.to_thread(self._record_sync, result)
+
+    def _snapshot_sync(self, limit: int) -> list[ActivityRecord]:
+        with sqlite3.connect(self._db_path) as conn:
+            rows = conn.execute(
+                "SELECT processed_at, result_json FROM activity"
+                " ORDER BY processed_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        records = []
+        for processed_at, result_json in rows:
+            try:
+                records.append(
+                    ActivityRecord(
+                        processed_at=datetime.fromisoformat(processed_at),
+                        result=ProcessingResult.model_validate_json(result_json),
+                    )
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        return records
+
+    async def snapshot(self, limit: int = 200) -> list[ActivityRecord]:
+        return await asyncio.to_thread(self._snapshot_sync, limit)
+
+    def set_retention_days(self, days: int) -> None:
+        self._retention_days = days
 
     @property
-    def max_entries(self) -> int:
-        return self._entries.maxlen or RECENT_ACTIVITY_LIMIT
-
-    def record(self, result: ProcessingResult) -> None:
-        with self._lock:
-            self._entries.appendleft(
-                ActivityRecord(
-                    processed_at=datetime.now(UTC),
-                    result=result,
-                )
-            )
-
-    def snapshot(self) -> list[ActivityRecord]:
-        with self._lock:
-            return list(self._entries)
+    def retention_days(self) -> int:
+        return self._retention_days
 
 
 @dataclass(frozen=True)
@@ -143,7 +195,7 @@ class DashboardServiceResponse(BaseModel):
     log_level: str
     downloader_kind: str
     webhook_token_configured: bool
-    recent_activity_limit: int
+    activity_retention_days: int
 
 
 class DashboardEndpointResponse(BaseModel):
@@ -226,12 +278,12 @@ class DashboardResponse(BaseModel):
     webhook_status: DashboardWebhookStatusResponse
 
 
-def build_dashboard_response(
+async def build_dashboard_response(
     *,
     config: RuntimeConfig,
     downloader_kind: str,
     version: str,
-    activity_store: RecentActivityStore,
+    activity_store: ActivityStore,
     webhook_attempt_store: WebhookAttemptStore,
     health_probe_store: HealthProbeStore,
 ) -> DashboardResponse:
@@ -243,6 +295,7 @@ def build_dashboard_response(
     active_jellyseerr = _pick_active_url(config.jellyseerr)
     active_downloader = _pick_active_url(config.downloaders)
     health = health_probe_store.snapshot()
+    activity_records = await activity_store.snapshot()
 
     return DashboardResponse(
         service=DashboardServiceResponse(
@@ -252,7 +305,7 @@ def build_dashboard_response(
             log_level=general.log_level,
             downloader_kind=downloader_kind,
             webhook_token_configured=bool(general.webhook_shared_token),
-            recent_activity_limit=activity_store.max_entries,
+            activity_retention_days=activity_store.retention_days,
         ),
         endpoints=[
             DashboardEndpointResponse(
@@ -319,7 +372,7 @@ def build_dashboard_response(
                 action_summary=_summarize_actions(record.result),
                 result=ProcessingResultResponse.from_domain(record.result),
             )
-            for record in activity_store.snapshot()
+            for record in activity_records
         ],
         webhook_status=_build_webhook_status(webhook_attempt_store.latest()),
     )

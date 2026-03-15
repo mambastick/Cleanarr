@@ -2216,6 +2216,24 @@ function GeneralSettingsModal({
               />
               <FieldHint text="Increase only if your Arr services are slow to respond." />
             </FormField>
+
+            <FormField label="Activity history retention" htmlFor="general-retention">
+              <select
+                id="general-retention"
+                value={String(draft.activity_retention_days)}
+                onChange={(e) =>
+                  setDraft({ ...draft, activity_retention_days: Number(e.target.value) })
+                }
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
+                <option value="1">1 day</option>
+                <option value="7">7 days</option>
+                <option value="30">30 days</option>
+                <option value="90">90 days</option>
+                <option value="365">1 year</option>
+              </select>
+              <FieldHint text="Events older than this are deleted from the SQLite database." />
+            </FormField>
           </div>
 
           <FormField label="Webhook shared token" htmlFor="general-webhook-token">

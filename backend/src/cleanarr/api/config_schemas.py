@@ -48,6 +48,7 @@ class GeneralConfigRequest(BaseModel):
     log_level: str
     webhook_shared_token: str | None = None
     http_timeout_seconds: float
+    activity_retention_days: int = 30
 
     def to_domain(self) -> GeneralConfig:
         return GeneralConfig.model_validate(self.model_dump())

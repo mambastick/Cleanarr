@@ -29,9 +29,9 @@ from cleanarr.api.config_schemas import (
     SonarrServiceRequest,
 )
 from cleanarr.api.dashboard import (
+    ActivityStore,
     DashboardResponse,
     HealthProbeStore,
-    RecentActivityStore,
     WebhookAttemptStore,
     build_dashboard_response,
 )
@@ -150,13 +150,19 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
 
     own_container = container is None
     resolved_container = container or ServiceContainer.from_settings(Settings())
-    activity_store = RecentActivityStore()
+    settings = resolved_container.settings
+    db_path = Path(settings.config_state_path).parent / "activity.db"
+    activity_store = ActivityStore(
+        db_path,
+        retention_days=resolved_container.config.general.activity_retention_days,
+    )
     webhook_attempt_store = WebhookAttemptStore()
     health_probe_store = HealthProbeStore()
     static_dir = Path(__file__).resolve().parents[1] / "ui" / "static"
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> Any:
+        await activity_store.initialize()
         app.state.container = resolved_container
         app.state.activity_store = activity_store
         app.state.webhook_attempt_store = webhook_attempt_store
@@ -187,7 +193,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
 
     @app.get("/api/dashboard", response_model=DashboardResponse)
     async def dashboard(request: Request) -> DashboardResponse:
-        return build_dashboard_response(
+        return await build_dashboard_response(
             config=request.app.state.container.config,
             downloader_kind=request.app.state.container.settings.downloader_kind,
             version=app.version,
@@ -282,6 +288,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     ) -> RuntimeConfigResponse:
         container = request.app.state.container
         config = container.config_service.update_general(payload.to_domain())
+        request.app.state.activity_store.set_retention_days(payload.activity_retention_days)
         await container.refresh_runtime()
         return RuntimeConfigResponse.from_config(
             config,
@@ -614,7 +621,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         service = request.app.state.container.service
         results = [await service.process(item.to_domain()) for item in webhook_payloads]
         for result in results:
-            request.app.state.activity_store.record(result)
+            await request.app.state.activity_store.record(result)
         batch_response = WebhookBatchResponse.from_results(results)
         first_payload = webhook_payloads[0]
         request.app.state.webhook_attempt_store.record(
@@ -822,7 +829,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
 
         strategy = container.strategy_factory.for_item_type(payload.item_type)
         result = await strategy.handle(event)
-        request.app.state.activity_store.record(result)
+        await request.app.state.activity_store.record(result)
 
         # After cascade deletion, also remove from Jellyfin if ID provided and not dry_run
         if payload.jellyfin_item_id and not container.config.general.dry_run:

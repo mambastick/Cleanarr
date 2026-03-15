@@ -26,6 +26,7 @@ class GeneralConfig(BaseModel):
     log_level: str = "INFO"
     webhook_shared_token: str | None = None
     http_timeout_seconds: float = 15.0
+    activity_retention_days: int = 30
 
     @field_validator("log_level", mode="before")
     @classmethod
