@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="120" viewBox="0 0 600 120">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f0f12"/>
+      <stop offset="100%" stop-color="#16141c"/>
+    </linearGradient>
+    <linearGradient id="bolt" x1="0" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#a855f7"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#a855f7" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#6d28d9" stop-opacity="0.1"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="600" height="120" rx="12" fill="url(#bg)"/>
+  <rect width="600" height="120" rx="12" fill="none" stroke="#2d2040" stroke-width="1"/>
+
+  <!-- Icon circle -->
+  <circle cx="60" cy="60" r="36" fill="url(#ring)" stroke="#7c3aed" stroke-width="1" stroke-opacity="0.5"/>
+
+  <!-- Bolt shape (simplified CleanArr mark) -->
+  <g filter="url(#glow)" transform="translate(60,60)">
+    <!-- Upper bolt segment -->
+    <path d="M-6,-20 L4,-20 L-2,0 L6,0 L-8,20 L-2,4 L-10,4 Z"
+          fill="url(#bolt)" opacity="0.95"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="112" y="52" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+        font-size="34" font-weight="300" letter-spacing="-0.5" fill="#e2e8f0">Clean</text>
+  <text x="221" y="52" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+        font-size="34" font-weight="700" letter-spacing="-0.5" fill="#a855f7">Arr</text>
+
+  <!-- Tagline -->
+  <text x="113" y="76" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+        font-size="13" font-weight="400" fill="#6b7280" letter-spacing="0.2">
+    Cascade media cleanup · Jellyfin → Radarr · Sonarr · Jellyseerr · qBittorrent
+  </text>
+
+  <!-- Version pill -->
+  <rect x="113" y="88" width="48" height="18" rx="9" fill="#1e1b2e" stroke="#3b1d6e" stroke-width="1"/>
+  <text x="137" y="101" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+        font-size="10" font-weight="500" fill="#a78bfa" text-anchor="middle">v0.1.0</text>
+
+  <!-- Python pill -->
+  <rect x="168" y="88" width="60" height="18" rx="9" fill="#1e1b2e" stroke="#1e3a5f" stroke-width="1"/>
+  <text x="198" y="101" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+        font-size="10" font-weight="500" fill="#60a5fa" text-anchor="middle">Python 3.12</text>
+
+  <!-- FastAPI pill -->
+  <rect x="235" y="88" width="54" height="18" rx="9" fill="#1e1b2e" stroke="#1a3d36" stroke-width="1"/>
+  <text x="262" y="101" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+        font-size="10" font-weight="500" fill="#34d399" text-anchor="middle">FastAPI</text>
+
+  <!-- React pill -->
+  <rect x="296" y="88" width="46" height="18" rx="9" fill="#1e1b2e" stroke="#1a3551" stroke-width="1"/>
+  <text x="319" y="101" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+        font-size="10" font-weight="500" fill="#38bdf8" text-anchor="middle">React 19</text>
+</svg>

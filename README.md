@@ -1,8 +1,13 @@
-# CleanArr
+<p align="center">
+  <img src="media/logo.svg" alt="CleanArr" width="540"/>
+</p>
 
-CleanArr listens for Jellyfin `ItemDeleted` webhooks and cascades cleanup to Radarr, Sonarr, Jellyseerr, and qBittorrent. When you delete a movie or series in Jellyfin, CleanArr automatically removes the matching entries from every connected service.
+<p align="center">
+  CleanArr listens for Jellyfin <code>ItemDeleted</code> webhooks and cascades cleanup to Radarr, Sonarr, Jellyseerr, and qBittorrent.<br/>
+  When you delete a movie or series in Jellyfin, CleanArr automatically removes the matching entries from every connected service.
+</p>
 
-It ships with a built-in React dashboard for configuration, monitoring, and activity history. The production frontend is bundled into the same container as the backend.
+---
 
 ## Features
 
@@ -12,6 +17,27 @@ It ships with a built-in React dashboard for configuration, monitoring, and acti
 - **Dry-run mode** — enabled by default, no destructive actions until you flip the switch
 - **Built-in dashboard** — React SPA served by the same process, includes setup wizard and activity log
 - **Multi-profile** — save multiple service definitions, pick one as the active default
+
+## Screenshots
+
+<table>
+  <tr>
+    <td><img src="media/01-dashboard-dark.png" alt="Dashboard dark" width="480"/></td>
+    <td><img src="media/05-dashboard-light.png" alt="Dashboard light" width="480"/></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Dashboard — dark mode</sub></td>
+    <td align="center"><sub>Dashboard — light mode</sub></td>
+  </tr>
+  <tr>
+    <td><img src="media/02-setup-dark.png" alt="Setup wizard" width="480"/></td>
+    <td><img src="media/03-activity-dark.png" alt="Activity log" width="480"/></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Setup wizard — all steps complete</sub></td>
+    <td align="center"><sub>Activity log</sub></td>
+  </tr>
+</table>
 
 ## Repository layout
 
