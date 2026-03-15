@@ -1,0 +1,10 @@
+.git
+.gitignore
+.mypy_cache
+.pytest_cache
+.ruff_cache
+backend/.venv
+__pycache__
+backend/tests
+frontend/node_modules
+backend/src/cleanarr/ui/static

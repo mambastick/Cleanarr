@@ -1,0 +1,26 @@
+services:
+  cleanarr:
+    image: cleanarr:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "8089:8089"
+    environment:
+      LOG_LEVEL: INFO
+      DRY_RUN: "true"
+      WEBHOOK_SHARED_TOKEN: change-me
+      HTTP_TIMEOUT_SECONDS: "15"
+      CONFIG_STATE_PATH: /config/runtime-config.json
+    volumes:
+      - cleanarr-config:/config
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8089/health/live')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  cleanarr-config:
