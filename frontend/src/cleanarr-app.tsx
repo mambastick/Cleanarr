@@ -18,6 +18,7 @@ import {
   LoaderCircle,
   LogOut,
   PenSquare,
+  Play,
   Plus,
   RefreshCw,
   Server,
@@ -25,6 +26,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Sparkles,
+  Star,
   TestTubeDiagonal,
   Trash2,
   Tv,
@@ -730,17 +732,9 @@ function CleanArrApp() {
     [dashboard?.recent_activity, deferredFilter],
   )
 
-  const configuredServicesCount = useMemo(
-    () => SERVICE_FAMILIES.reduce((n, f) => n + getServices(config, f).length, 0),
-    [config],
-  )
-
   const allServicesConfigured = SERVICE_FAMILIES.every((f) =>
     Boolean(resolveActiveService(getServices(config, f))),
   )
-
-  const activeServiceCount =
-    dashboard?.downstream.filter((s) => s.configured).length ?? 0
 
   const deletedActions = (dashboard?.recent_activity ?? []).reduce(
     (n, e) => n + (e.action_summary.deleted ?? 0),
@@ -973,12 +967,9 @@ function CleanArrApp() {
         {/* ── Dashboard ── */}
         <TabsContent value="dashboard" className="mt-0">
           <DashboardPanel
-            config={config}
             dashboard={dashboard}
             isDashboardLoading={isDashboardLoading}
             setupCompletionCount={setupCompletionCount}
-            configuredServicesCount={configuredServicesCount}
-            activeServiceCount={activeServiceCount}
             deletedActions={deletedActions}
             latestActivity={latestActivity}
             allServicesConfigured={allServicesConfigured}
@@ -1206,196 +1197,201 @@ function AuthScreenSkeleton() {
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
+const DOWNSTREAM_META: Partial<Record<string, { icon: LucideIcon; color: string }>> = {
+  Radarr: { icon: Film, color: "text-yellow-500" },
+  Sonarr: { icon: Tv, color: "text-sky-500" },
+  Jellyfin: { icon: Play, color: "text-purple-500" },
+  Jellyseerr: { icon: Star, color: "text-orange-500" },
+  Downloader: { icon: Download, color: "text-emerald-500" },
+}
+
+function ServiceHealthCard({ service }: { service: { name: string; role: string; url: string; configured: boolean; health_status: HealthStatus } }) {
+  const meta = DOWNSTREAM_META[service.name] ?? { icon: Server, color: "text-muted-foreground" }
+  const Icon = meta.icon
+  return (
+    <div className={cn("rounded-xl border p-4 space-y-3", !service.configured && "opacity-60")}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted">
+          <Icon className={cn("size-4", meta.color)} />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <StatusDot healthStatus={service.health_status} />
+          <span
+            className={cn(
+              "text-xs capitalize",
+              service.health_status === "healthy" && "text-green-600 dark:text-green-400",
+              service.health_status === "unreachable" && "text-red-500",
+              service.health_status === "unconfigured" && "text-muted-foreground",
+            )}
+          >
+            {service.health_status}
+          </span>
+        </div>
+      </div>
+      <div>
+        <p className="text-sm font-semibold">{service.name}</p>
+        <p className="text-xs text-muted-foreground">{service.role}</p>
+      </div>
+      {service.url ? (
+        <code className="block truncate text-[11px] text-muted-foreground">{service.url}</code>
+      ) : (
+        <span className="text-[11px] text-muted-foreground italic">Not configured</span>
+      )}
+    </div>
+  )
+}
+
 function DashboardPanel({
-  config,
   dashboard,
   isDashboardLoading,
   setupCompletionCount,
-  configuredServicesCount,
-  activeServiceCount,
   deletedActions,
   latestActivity,
   allServicesConfigured,
   isLive,
   onOpenSetup,
 }: {
-  config: RuntimeConfigPayload | null
   dashboard: DashboardPayload | null
   isDashboardLoading: boolean
   setupCompletionCount: number
-  configuredServicesCount: number
-  activeServiceCount: number
   deletedActions: number
   latestActivity: DashboardActivity | null
   allServicesConfigured: boolean
   isLive: boolean
   onOpenSetup: () => void
 }) {
+  const webhookStatus = dashboard?.webhook_status
+
   return (
     <section className="space-y-5">
-      {/* Mode hero */}
+      {/* Status bar */}
       <div
         className={cn(
-          "flex items-center gap-5 rounded-xl border-2 p-5",
+          "flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border-2 px-5 py-4",
           isLive
             ? "border-green-200/70 bg-green-50/40 dark:border-green-900/60 dark:bg-green-950/20"
             : "border-amber-200/70 bg-amber-50/40 dark:border-amber-900/60 dark:bg-amber-950/20",
         )}
       >
-        <div
-          className={cn(
-            "flex size-14 shrink-0 items-center justify-center rounded-full",
-            isLive
-              ? "bg-green-100 dark:bg-green-950/60"
-              : "bg-amber-100 dark:bg-amber-950/60",
-          )}
-        >
+        <div className="flex items-center gap-3">
           {isLive ? (
-            <Zap className="size-7 text-green-600 dark:text-green-400" />
+            <Zap className="size-5 text-green-600 dark:text-green-400" />
           ) : (
-            <ShieldAlert className="size-7 text-amber-600 dark:text-amber-400" />
+            <ShieldAlert className="size-5 text-amber-600 dark:text-amber-400" />
+          )}
+          <div>
+            <p className="text-sm font-semibold leading-tight">{isLive ? "Live mode" : "Dry run"}</p>
+            <p className="text-xs text-muted-foreground">
+              {isLive ? "Real deletions are active" : "No deletions will be performed"}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 ml-auto">
+          <span className="text-sm text-muted-foreground">
+            Setup{" "}
+            <strong className="text-foreground">
+              {setupCompletionCount}/{SETUP_STEPS.length}
+            </strong>
+          </span>
+          <span className="text-sm text-muted-foreground">
+            <strong className="text-foreground">{deletedActions}</strong> deletions logged
+          </span>
+          {!allServicesConfigured && (
+            <Button variant="outline" size="sm" onClick={onOpenSetup}>
+              <ArrowRight className="size-4 text-blue-600 dark:text-blue-400" />
+              Complete setup
+            </Button>
+          )}
+          {allServicesConfigured && !isLive && (
+            <Button variant="outline" size="sm" onClick={onOpenSetup}>
+              <Settings2 className="size-4 text-blue-600 dark:text-blue-400" />
+              Enable live mode
+            </Button>
           )}
         </div>
-        <div className="flex-1">
-          <p className="text-xl font-semibold">{isLive ? "Live mode" : "Dry run"}</p>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            {isLive
-              ? "Real deletions are active across all downstream services."
-              : "No deletions will be performed. Safe for testing and validation."}
-          </p>
-        </div>
-        {!allServicesConfigured && (
-          <Button variant="outline" size="sm" onClick={onOpenSetup} className="shrink-0">
-            <ArrowRight className="size-4 text-blue-600 dark:text-blue-400" />
-            Complete setup
-          </Button>
-        )}
-        {allServicesConfigured && !isLive && (
-          <Button variant="outline" size="sm" onClick={onOpenSetup} className="shrink-0">
-            <Settings2 className="size-4 text-blue-600 dark:text-blue-400" />
-            Enable live mode
-          </Button>
+      </div>
+
+      {/* Connected services */}
+      <div>
+        <p className="mb-3 text-sm font-medium text-muted-foreground">Connected services</p>
+        {isDashboardLoading && !dashboard ? (
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} className="h-32 w-full rounded-xl" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+            {(dashboard?.downstream ?? []).map((service) => (
+              <ServiceHealthCard key={service.name} service={service} />
+            ))}
+          </div>
         )}
       </div>
 
-      {/* Metrics */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricCard
-          title="Mode"
-          value={isLive ? "Live" : "Dry run"}
-          description="Current deletion mode"
-          icon={ShieldAlert}
-          tone={isLive ? "green" : "red"}
-        />
-        <MetricCard
-          title="Setup"
-          value={`${setupCompletionCount}/${SETUP_STEPS.length}`}
-          description="Steps complete"
-          icon={Settings2}
-          tone="blue"
-        />
-        <MetricCard
-          title="Integrations"
-          value={String(configuredServicesCount)}
-          description="Saved service profiles"
-          icon={Server}
-          tone="green"
-        />
-        <MetricCard
-          title="Deletions"
-          value={String(deletedActions)}
-          description="Observed in activity log"
-          icon={Activity}
-          tone="red"
-        />
-      </div>
-
-      {/* Services + snapshot */}
-      <div className="grid gap-5 xl:grid-cols-2">
-        {/* Service health */}
+      {/* Webhook status + latest event */}
+      <div className="grid gap-5 lg:grid-cols-2">
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <Server className="size-4 text-green-600 dark:text-green-400" />
-              Downstream services
+              <Webhook className="size-4 text-violet-500" />
+              Webhook status
             </CardTitle>
-            <CardDescription>Active targets seen by the live runtime.</CardDescription>
+            <CardDescription>Last Jellyfin delivery attempt.</CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-2 sm:grid-cols-2">
-            {isDashboardLoading && !dashboard ? (
-              <>
-                <Skeleton className="h-16 w-full" />
-                <Skeleton className="h-16 w-full" />
-                <Skeleton className="h-16 w-full" />
-                <Skeleton className="h-16 w-full" />
-              </>
-            ) : (
-              (dashboard?.downstream ?? []).map((service) => (
-                <div key={service.name} className="rounded-lg border p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium">{service.name}</p>
-                    <div className="flex items-center gap-1.5">
-                      <StatusDot healthStatus={service.health_status} />
-                      <span
-                        className={cn(
-                          "text-xs capitalize",
-                          service.health_status === "healthy" && "text-green-600 dark:text-green-400",
-                          service.health_status === "unreachable" && "text-red-600 dark:text-red-400",
-                          service.health_status === "unconfigured" && "text-muted-foreground",
-                        )}
-                      >
-                        {service.health_status}
-                      </span>
-                    </div>
-                  </div>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{service.role}</p>
-                  <code className="mt-1.5 block truncate text-xs text-muted-foreground">
-                    {service.url || "Not configured"}
-                  </code>
+          <CardContent>
+            {webhookStatus?.attempted_at ? (
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <StatusPill
+                    tone={webhookStatus.outcome === "processed" ? "green" : "red"}
+                    label={webhookStatus.outcome}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(webhookStatus.attempted_at).toLocaleString()}
+                  </span>
                 </div>
-              ))
+                <p className="text-sm">{webhookStatus.message}</p>
+                {webhookStatus.item_name && (
+                  <p className="text-xs text-muted-foreground">{webhookStatus.item_name}</p>
+                )}
+              </div>
+            ) : (
+              <EmptyState
+                title="No webhook received"
+                description="Send a Jellyfin ItemDeleted webhook to see status here."
+              />
             )}
           </CardContent>
         </Card>
 
-        {/* Snapshot + latest event */}
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <LayoutDashboard className="size-4 text-blue-600 dark:text-blue-400" />
-              Runtime snapshot
+              <Activity className="size-4 text-emerald-500" />
+              Latest event
             </CardTitle>
-            <CardDescription>Current configuration at a glance.</CardDescription>
+            <CardDescription>Most recent processed item.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-2 sm:grid-cols-2">
-              <SummaryTile label="Log level" value={config?.general.log_level ?? "INFO"} />
-              <SummaryTile
-                label="Timeout"
-                value={`${config?.general.http_timeout_seconds ?? 15}s`}
-              />
-              <SummaryTile
-                label="Webhook token"
-                value={config?.general.webhook_shared_token ? "Configured" : "Missing"}
-              />
-              <SummaryTile label="Live targets" value={`${activeServiceCount} / 4`} />
-            </div>
-
+          <CardContent>
             {latestActivity ? (
-              <div className="rounded-lg border p-3">
+              <div className="space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">
                       {formatMediaTitle(latestActivity.result.item_type, latestActivity.result.name)}
                     </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">Latest processed item</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {new Date(latestActivity.processed_at).toLocaleString()}
+                    </p>
                   </div>
                   <StatusPill
                     tone={latestActivity.result.status === "partial_failure" ? "red" : "green"}
                     label={latestActivity.result.status}
                   />
                 </div>
-                <div className="mt-2 flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1.5">
                   {Object.entries(latestActivity.action_summary).map(([k, v]) => (
                     <Badge key={k} variant="outline" className="text-xs">
                       {k}: {v}
@@ -2762,42 +2758,6 @@ function ActionRow({ action }: { action: DashboardAction }) {
         </p>
       )}
     </div>
-  )
-}
-
-function MetricCard({
-  title,
-  value,
-  description,
-  icon: Icon,
-  tone,
-}: {
-  title: string
-  value: string
-  description: string
-  icon: LucideIcon
-  tone: "blue" | "green" | "red"
-}) {
-  return (
-    <Card>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between gap-2">
-          <CardDescription className="text-xs">{title}</CardDescription>
-          <Icon
-            className={cn(
-              "size-4",
-              tone === "blue" && "text-blue-600 dark:text-blue-400",
-              tone === "green" && "text-green-600 dark:text-green-400",
-              tone === "red" && "text-red-600 dark:text-red-400",
-            )}
-          />
-        </div>
-        <CardTitle className="text-2xl">{value}</CardTitle>
-      </CardHeader>
-      <CardContent className="pt-0">
-        <p className="text-xs text-muted-foreground">{description}</p>
-      </CardContent>
-    </Card>
   )
 }
 

@@ -211,7 +211,7 @@ class DashboardEndpointResponse(BaseModel):
 class HealthProbeStore:
     """Stores latest connectivity probe results per downstream service."""
 
-    _SERVICES = ("Radarr", "Sonarr", "Jellyseerr", "Downloader")
+    _SERVICES = ("Radarr", "Sonarr", "Jellyfin", "Jellyseerr", "Downloader")
 
     def __init__(self) -> None:
         self._results: dict[str, str] = {name: "unconfigured" for name in self._SERVICES}
@@ -293,6 +293,7 @@ async def build_dashboard_response(
     general = config.general
     active_radarr = _pick_active_url(config.radarr)
     active_sonarr = _pick_active_url(config.sonarr)
+    active_jellyfin = _pick_active_url(config.jellyfin)
     active_jellyseerr = _pick_active_url(config.jellyseerr)
     active_downloader = _pick_active_url(config.downloaders)
     health = health_probe_store.snapshot()
@@ -348,6 +349,13 @@ async def build_dashboard_response(
                 url=_sanitize_url(active_sonarr),
                 configured=bool(active_sonarr),
                 health_status=health.get("Sonarr", "unconfigured"),
+            ),
+            DashboardDownstreamResponse(
+                name="Jellyfin",
+                role="Media server and webhook source",
+                url=_sanitize_url(active_jellyfin),
+                configured=bool(active_jellyfin),
+                health_status=health.get("Jellyfin", "unconfigured"),
             ),
             DashboardDownstreamResponse(
                 name="Jellyseerr",
