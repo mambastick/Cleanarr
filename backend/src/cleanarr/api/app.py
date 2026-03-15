@@ -54,9 +54,10 @@ async def _health_probe_loop(container: ServiceContainer, health_store: HealthPr
             health_store.update(name, "unconfigured")
             return
         try:
-            await asyncio.wait_for(client.ping(), timeout=5.0)
+            await asyncio.wait_for(client.ping(), timeout=10.0)
             health_store.update(name, "healthy")
-        except Exception:
+        except Exception as exc:
+            _logger.warning("Health probe [%s] failed: %s: %s", name, type(exc).__name__, exc)
             health_store.update(name, "unreachable")
 
     await asyncio.sleep(5)

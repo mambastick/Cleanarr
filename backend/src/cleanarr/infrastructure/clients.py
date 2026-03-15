@@ -40,6 +40,7 @@ class JsonServiceClient:
             base_url=base_url.rstrip("/"),
             timeout=timeout_seconds,
             headers=headers,
+            transport=httpx.AsyncHTTPTransport(retries=1),
         )
 
     async def close(self) -> None:
@@ -566,7 +567,11 @@ class QbittorrentClient:
         self._system = "qbittorrent"
         self._username = username
         self._password = password
-        self._client = httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=timeout_seconds)
+        self._client = httpx.AsyncClient(
+            base_url=base_url.rstrip("/"),
+            timeout=timeout_seconds,
+            transport=httpx.AsyncHTTPTransport(retries=1),
+        )
 
     async def close(self) -> None:
         """Close the underlying client."""
