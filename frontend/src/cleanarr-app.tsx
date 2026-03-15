@@ -924,24 +924,6 @@ function CleanArrApp() {
               </div>
             )}
 
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-8"
-              onClick={() => {
-                void loadDashboard()
-                void loadConfig()
-              }}
-              title="Refresh"
-            >
-              <RefreshCw
-                className={cn(
-                  "size-4",
-                  (isDashboardLoading || isConfigLoading) && "animate-spin",
-                )}
-              />
-            </Button>
-
             <ThemeToggle />
 
             <div className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs text-muted-foreground">
