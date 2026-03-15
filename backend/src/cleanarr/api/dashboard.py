@@ -58,7 +58,7 @@ class ActivityRecord:
     """A processed webhook event recorded for UI inspection."""
 
     processed_at: datetime
-    result: ProcessingResult
+    result: ProcessingResultResponse
 
 
 class ActivityStore:
@@ -94,10 +94,11 @@ class ActivityStore:
 
     def _record_sync(self, result: ProcessingResult) -> None:
         now = datetime.now(UTC).isoformat()
+        result_response = ProcessingResultResponse.from_domain(result)
         with sqlite3.connect(self._db_path) as conn:
             conn.execute(
                 "INSERT INTO activity (processed_at, result_json) VALUES (?, ?)",
-                (now, result.model_dump_json()),
+                (now, result_response.model_dump_json()),
             )
             cutoff = (datetime.now(UTC) - timedelta(days=self._retention_days)).isoformat()
             conn.execute("DELETE FROM activity WHERE processed_at < ?", (cutoff,))
@@ -119,7 +120,7 @@ class ActivityStore:
                 records.append(
                     ActivityRecord(
                         processed_at=datetime.fromisoformat(processed_at),
-                        result=ProcessingResult.model_validate_json(result_json),
+                        result=ProcessingResultResponse.model_validate_json(result_json),
                     )
                 )
             except Exception:  # noqa: BLE001
@@ -370,7 +371,7 @@ async def build_dashboard_response(
             DashboardActivityResponse(
                 processed_at=record.processed_at,
                 action_summary=_summarize_actions(record.result),
-                result=ProcessingResultResponse.from_domain(record.result),
+                result=record.result,
             )
             for record in activity_records
         ],
@@ -478,6 +479,6 @@ def _pick_active_url(services: Sequence[BaseModel]) -> str:
     return getattr(active, "url", "") if active is not None else ""
 
 
-def _summarize_actions(result: ProcessingResult) -> dict[str, int]:
+def _summarize_actions(result: ProcessingResultResponse) -> dict[str, int]:
     counts = Counter(action.status.value for action in result.actions)
     return dict(sorted(counts.items()))
