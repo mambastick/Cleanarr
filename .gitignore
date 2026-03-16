@@ -14,8 +14,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -210,7 +210,7 @@ backend/src/cleanarr/ui/static/
 backend/.venv/
 
 # Accidental editable install in repo root
-src/
+/src/
 
 # Ruff stuff:
 .ruff_cache/
