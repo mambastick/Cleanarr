@@ -18,7 +18,7 @@ import {
   LogOut,
   PenSquare,
   Play,
-  Plus,
+
   RefreshCw,
   Server,
   Settings2,
@@ -950,16 +950,11 @@ function CleanArrApp() {
         <SetupWizard
           config={config}
           dashboard={dashboard}
-          isConfigLoading={isConfigLoading}
           origin={origin}
           curlPreview={curlPreview}
-          onAddService={(family) => {
-            setServiceModal({ family, draft: structuredClone(EMPTY_DRAFTS[family]) })
-          }}
-          onEditService={(family, service) => {
-            setServiceModal({ family, draft: toDraft(service) })
-          }}
-          onEditGeneral={() => setGeneralModalOpen(true)}
+          onSaveGeneral={saveGeneralSettings}
+          onSaveService={saveServiceDraft}
+          onTestService={testServiceDraft}
           onSetupWebhook={handleSetupWebhook}
           onClose={() => setShowWizard(false)}
         />
@@ -1593,37 +1588,357 @@ function SettingsPanel({
 
 // ─── Setup wizard ─────────────────────────────────────────────────────────────
 
+function WizardGeneralStep({
+  config,
+  onSave,
+}: {
+  config: RuntimeConfigPayload | null
+  onSave: (payload: GeneralConfig) => Promise<void>
+}) {
+  const general = config?.general ?? null
+  const [draft, setDraft] = useState<GeneralConfig | null>(() =>
+    general ? structuredClone(general) : null,
+  )
+  const [isSaving, setIsSaving] = useState(false)
+  const [tokenCopied, setTokenCopied] = useState(false)
+  const [isTokenVisible, setIsTokenVisible] = useState(false)
+
+  useEffect(() => {
+    setDraft(general ? structuredClone(general) : null)
+  }, [general])
+
+  const handleSave = async () => {
+    if (!draft) return
+    setIsSaving(true)
+    try {
+      await onSave(draft)
+    } catch (e) {
+      toast.error(normalizeError(e))
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  if (!draft) {
+    return (
+      <EmptyState
+        title="Settings unavailable"
+        description="Refresh the page and try again."
+      />
+    )
+  }
+
+  return (
+    <div className="space-y-5 pb-4">
+      <div>
+        <h2 className="text-lg font-semibold">General</h2>
+        <p className="text-sm text-muted-foreground">
+          Runtime settings — log level, HTTP timeout, activity retention, and webhook token.
+        </p>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <FormField label="Log level" htmlFor="wizard-log-level">
+          <select
+            id="wizard-log-level"
+            value={draft.log_level}
+            onChange={(e) => setDraft({ ...draft, log_level: e.target.value })}
+            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            {LOG_LEVEL_OPTIONS.map((l) => <option key={l} value={l}>{l}</option>)}
+          </select>
+        </FormField>
+
+        <FormField label="HTTP timeout (s)" htmlFor="wizard-timeout">
+          <Input
+            id="wizard-timeout"
+            type="number"
+            min={1}
+            step={1}
+            value={String(draft.http_timeout_seconds)}
+            onChange={(e) => setDraft({ ...draft, http_timeout_seconds: Number(e.target.value) })}
+          />
+        </FormField>
+
+        <FormField label="Activity retention" htmlFor="wizard-retention">
+          <select
+            id="wizard-retention"
+            value={String(draft.activity_retention_days)}
+            onChange={(e) => setDraft({ ...draft, activity_retention_days: Number(e.target.value) })}
+            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            <option value="1">1 day</option>
+            <option value="7">7 days</option>
+            <option value="30">30 days</option>
+            <option value="90">90 days</option>
+            <option value="365">1 year</option>
+          </select>
+        </FormField>
+      </div>
+
+      <FormField label="Webhook token" htmlFor="wizard-webhook-token">
+        <div className="flex items-center gap-2">
+          <code className="flex-1 rounded-md border border-input bg-muted px-3 py-2 font-mono text-xs break-all select-all">
+            {isTokenVisible ? (draft.webhook_shared_token ?? "—") : "•".repeat(32)}
+          </code>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            title={isTokenVisible ? "Hide token" : "Show token"}
+            onClick={() => setIsTokenVisible((v) => !v)}
+          >
+            {isTokenVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            title="Regenerate token"
+            onClick={() => setDraft({ ...draft, webhook_shared_token: generateWebhookToken() })}
+          >
+            <RefreshCw className="size-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!draft.webhook_shared_token}
+            title="Copy token"
+            onClick={async () => {
+              await navigator.clipboard.writeText(draft.webhook_shared_token ?? "")
+              setTokenCopied(true)
+              setTimeout(() => setTokenCopied(false), 2000)
+            }}
+          >
+            {tokenCopied
+              ? <CheckCircle2 className="size-4 text-green-600 dark:text-green-400" />
+              : <Copy className="size-4" />}
+          </Button>
+        </div>
+        <FieldHint text="Auto-generated. Regenerate only if you need to rotate it — then re-run auto-configure in the Jellyfin step." />
+      </FormField>
+
+      <div className="flex justify-end border-t pt-4">
+        <Button onClick={() => void handleSave()} disabled={isSaving}>
+          {isSaving
+            ? <LoaderCircle className="size-4 animate-spin" />
+            : <CheckCircle2 className="size-4 text-green-600 dark:text-green-400" />}
+          Save
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function WizardServiceStep({
+  family,
+  config,
+  onSave,
+  onTest,
+  jellyfinSetupProps,
+}: {
+  family: ServiceFamily
+  config: RuntimeConfigPayload | null
+  onSave: (family: ServiceFamily, draft: ServiceDraft) => Promise<void>
+  onTest: (family: ServiceFamily, draft: ServiceDraft) => Promise<ConnectionTestResponse>
+  jellyfinSetupProps?: {
+    dashboard: DashboardPayload | null
+    origin: string
+    curlPreview: string
+    tokenConfigured: boolean
+    onSetupWebhook: (webhookUrl: string) => Promise<{ found: boolean; configured: boolean; message: string }>
+  }
+}) {
+  const meta = SERVICE_META[family]
+  const existingServices = getServices(config, family)
+  const existingService = resolveActiveService(existingServices) ?? existingServices[0] ?? null
+
+  const [draft, setDraft] = useState<ServiceDraft>(() =>
+    existingService ? toDraft(existingService) : structuredClone(EMPTY_DRAFTS[family]),
+  )
+  const [isSaving, setIsSaving] = useState(false)
+  const [isTesting, setIsTesting] = useState(false)
+
+  useEffect(() => {
+    const svc = resolveActiveService(getServices(config, family)) ?? getServices(config, family)[0] ?? null
+    setDraft(svc ? toDraft(svc) : structuredClone(EMPTY_DRAFTS[family]))
+  }, [config, family])
+
+  const alreadyConfigured = Boolean(existingService)
+
+  const handleTest = async () => {
+    setIsTesting(true)
+    try {
+      const result = await onTest(family, draft)
+      if (result.ok) {
+        toast.success(result.message)
+      } else {
+        toast.error(result.message)
+      }
+    } catch (e) {
+      toast.error(normalizeError(e))
+    } finally {
+      setIsTesting(false)
+    }
+  }
+
+  const handleSave = async () => {
+    setIsSaving(true)
+    try {
+      await onSave(family, draft)
+    } catch (e) {
+      toast.error(normalizeError(e))
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return (
+    <div className="space-y-5 pb-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">{meta.title}</h2>
+          <p className="text-sm text-muted-foreground">{meta.description}</p>
+        </div>
+        {alreadyConfigured && (
+          <StatusPill tone="green" label="Already configured" />
+        )}
+      </div>
+
+      <GuideCard
+        tone={meta.accent}
+        title="Before you save"
+        description="Paste the service URL and credentials, then run Test. The result must turn green before switching live."
+      >
+        <InstructionList items={meta.help} />
+      </GuideCard>
+
+      <FormField label="Display name" htmlFor={`wizard-${family}-name`}>
+        <Input
+          id={`wizard-${family}-name`}
+          value={draft.name}
+          onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+        />
+      </FormField>
+
+      <FormField label="Base URL" htmlFor={`wizard-${family}-url`}>
+        <Input
+          id={`wizard-${family}-url`}
+          type="url"
+          value={draft.url}
+          onChange={(e) => setDraft({ ...draft, url: e.target.value })}
+          placeholder={meta.example}
+        />
+        <FieldHint
+          text={
+            family === "downloaders"
+              ? "Paste the qBittorrent Web UI URL only. CleanArr strips /api/v2 automatically."
+              : `Paste the service URL only. CleanArr appends the correct API path for ${meta.title} automatically.`
+          }
+        />
+      </FormField>
+
+      {meta.fields.map((field) => (
+        <FormField
+          key={field.key}
+          label={field.label}
+          htmlFor={`wizard-${family}-${field.key}`}
+        >
+          <Input
+            id={`wizard-${family}-${field.key}`}
+            type={field.type}
+            value={draft[field.key]}
+            onChange={(e) => setDraft({ ...draft, [field.key]: e.target.value })}
+          />
+          <FieldHint text={field.hint} />
+        </FormField>
+      ))}
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="inline-flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm">
+          <input
+            type="checkbox"
+            checked={draft.enabled}
+            onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
+          />
+          Enabled
+        </label>
+        <label className="inline-flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm">
+          <input
+            type="checkbox"
+            checked={draft.is_default}
+            onChange={(e) => setDraft({ ...draft, is_default: e.target.checked })}
+          />
+          Use as runtime target
+        </label>
+      </div>
+
+      <div className="flex gap-3 border-t pt-4">
+        <Button
+          variant="outline"
+          disabled={isTesting}
+          onClick={() => void handleTest()}
+        >
+          {isTesting ? (
+            <LoaderCircle className="size-4 animate-spin" />
+          ) : (
+            <TestTubeDiagonal className="size-4 text-blue-600 dark:text-blue-400" />
+          )}
+          Test
+        </Button>
+        <Button
+          disabled={isSaving}
+          onClick={() => void handleSave()}
+        >
+          {isSaving ? (
+            <LoaderCircle className="size-4 animate-spin" />
+          ) : (
+            <CheckCircle2 className="size-4 text-green-600 dark:text-green-400" />
+          )}
+          Save
+        </Button>
+      </div>
+
+      {jellyfinSetupProps && (
+        <div className="space-y-5 border-t pt-5">
+          <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Webhook</p>
+          <JellyfinSetupPanel
+            dashboard={jellyfinSetupProps.dashboard}
+            origin={jellyfinSetupProps.origin}
+            curlPreview={jellyfinSetupProps.curlPreview}
+            tokenConfigured={jellyfinSetupProps.tokenConfigured}
+            jellyfinConfigured={alreadyConfigured || Boolean(draft.id)}
+            onOpenGeneral={() => {}}
+            onSetupWebhook={jellyfinSetupProps.onSetupWebhook}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SetupWizard({
   config,
   dashboard,
-  isConfigLoading,
   origin,
   curlPreview,
-  onAddService,
-  onEditService,
-  onEditGeneral,
+  onSaveGeneral,
+  onSaveService,
+  onTestService,
   onSetupWebhook,
   onClose,
 }: {
   config: RuntimeConfigPayload | null
   dashboard: DashboardPayload | null
-  isConfigLoading: boolean
   origin: string
   curlPreview: string
-  onAddService: (family: ServiceFamily) => void
-  onEditService: (family: ServiceFamily, service: ServiceRecord) => void
-  onEditGeneral: () => void
+  onSaveGeneral: (payload: GeneralConfig) => Promise<void>
+  onSaveService: (family: ServiceFamily, draft: ServiceDraft) => Promise<void>
+  onTestService: (family: ServiceFamily, draft: ServiceDraft) => Promise<ConnectionTestResponse>
   onSetupWebhook: (webhookUrl: string) => Promise<{ found: boolean; configured: boolean; message: string }>
   onClose: () => void
 }) {
-  const WIZARD_STEPS: Array<{ family: ServiceFamily | null; label: string }> = [
-    { family: "jellyfin_server", label: "Jellyfin" },
-    { family: "radarr", label: "Radarr" },
-    { family: "sonarr", label: "Sonarr" },
-    { family: "jellyseerr", label: "Jellyseerr" },
-    { family: "downloaders", label: "qBittorrent" },
-  ]
-
   return (
     <div className="fixed inset-0 z-50 overflow-auto bg-background/98 backdrop-blur-sm">
       <div className="mx-auto max-w-4xl px-6 py-6">
@@ -1646,82 +1961,67 @@ function SetupWizard({
           backButtonText="Back"
           stepCircleContainerClassName="bg-card"
         >
-          {/* Step 1: Jellyfin */}
+          {/* Step 1: General */}
           <Step>
-            <div className="space-y-5 pb-4">
-              <div>
-                <h2 className="text-lg font-semibold">Jellyfin setup</h2>
-                <p className="text-sm text-muted-foreground">
-                  Connect your Jellyfin server and configure the webhook plugin.
-                </p>
-              </div>
-
-              {/* 1.1 Runtime settings (webhook token) */}
-              <div className="space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  1.1 — Runtime settings
-                </p>
-                <RuntimeSettingsCard
-                  config={config?.general ?? null}
-                  isLoading={isConfigLoading}
-                  onEdit={onEditGeneral}
-                />
-              </div>
-
-              {/* 1.2 Jellyfin server connection */}
-              <div className="space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  1.2 — Server connection
-                </p>
-                <ServiceSetupPanel
-                  meta={SERVICE_META.jellyfin_server}
-                  services={getServices(config, "jellyfin_server")}
-                  isLoading={isConfigLoading}
-                  onAdd={() => onAddService("jellyfin_server")}
-                  onEdit={(service) => onEditService("jellyfin_server", service)}
-                />
-              </div>
-
-              {/* 1.3 Webhook configuration */}
-              <div className="space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  1.3 — Webhook plugin
-                </p>
-                <JellyfinSetupPanel
-                  dashboard={dashboard}
-                  origin={origin}
-                  curlPreview={curlPreview}
-                  tokenConfigured={Boolean(config?.general.webhook_shared_token)}
-                  jellyfinConfigured={Boolean(resolveActiveService(getServices(config, "jellyfin_server")))}
-                  onOpenGeneral={onEditGeneral}
-                  onSetupWebhook={onSetupWebhook}
-                />
-              </div>
-            </div>
+            <WizardGeneralStep config={config} onSave={onSaveGeneral} />
           </Step>
 
-          {/* Steps 2–5: *arr services */}
-          {WIZARD_STEPS.slice(1).map(({ family, label }) =>
-            family ? (
-              <Step key={family}>
-                <div className="space-y-5 pb-4">
-                  <div>
-                    <h2 className="text-lg font-semibold">{label}</h2>
-                    <p className="text-sm text-muted-foreground">
-                      {SERVICE_META[family].description}
-                    </p>
-                  </div>
-                  <ServiceSetupPanel
-                    meta={SERVICE_META[family]}
-                    services={getServices(config, family)}
-                    isLoading={isConfigLoading}
-                    onAdd={() => onAddService(family)}
-                    onEdit={(service) => onEditService(family, service)}
-                  />
-                </div>
-              </Step>
-            ) : null,
-          )}
+          {/* Step 2: Jellyfin */}
+          <Step>
+            <WizardServiceStep
+              family="jellyfin_server"
+              config={config}
+              onSave={onSaveService}
+              onTest={onTestService}
+              jellyfinSetupProps={{
+                dashboard,
+                origin,
+                curlPreview,
+                tokenConfigured: Boolean(config?.general.webhook_shared_token),
+                onSetupWebhook,
+              }}
+            />
+          </Step>
+
+          {/* Step 3: Radarr */}
+          <Step>
+            <WizardServiceStep
+              family="radarr"
+              config={config}
+              onSave={onSaveService}
+              onTest={onTestService}
+            />
+          </Step>
+
+          {/* Step 4: Sonarr */}
+          <Step>
+            <WizardServiceStep
+              family="sonarr"
+              config={config}
+              onSave={onSaveService}
+              onTest={onTestService}
+            />
+          </Step>
+
+          {/* Step 5: Jellyseerr */}
+          <Step>
+            <WizardServiceStep
+              family="jellyseerr"
+              config={config}
+              onSave={onSaveService}
+              onTest={onTestService}
+            />
+          </Step>
+
+          {/* Step 6: qBittorrent */}
+          <Step>
+            <WizardServiceStep
+              family="downloaders"
+              config={config}
+              onSave={onSaveService}
+              onTest={onTestService}
+            />
+          </Step>
         </Stepper>
       </div>
     </div>
@@ -1988,180 +2288,7 @@ function JellyfinSetupPanel({
   )
 }
 
-// ─── Service setup panel ──────────────────────────────────────────────────────
 
-function ServiceSetupPanel({
-  meta,
-  services,
-  isLoading,
-  onAdd,
-  onEdit,
-}: {
-  meta: ServiceMeta
-  services: ServiceRecord[]
-  isLoading: boolean
-  onAdd: () => void
-  onEdit: (service: ServiceRecord) => void
-}) {
-  const activeService = resolveActiveService(services)
-  return (
-    <div className="space-y-5">
-      <GuideCard
-        tone={meta.accent}
-        title={`How to add ${meta.title}`}
-        description={`Configure ${meta.singular} connection details, test them, then keep one enabled target live.`}
-      >
-        <InstructionList items={meta.steps} />
-      </GuideCard>
-
-      <GuideCard
-        tone={meta.accent === "green" ? "blue" : "green"}
-        title="URL examples"
-        description="Use an internal cluster URL when CleanArr runs in the same network."
-      >
-        <InstructionList items={meta.help} />
-      </GuideCard>
-
-      <Card>
-        <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0 pb-3">
-          <div className="space-y-0.5">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <meta.icon
-                className={cn(
-                  "size-4",
-                  meta.accent === "blue" && "text-blue-600 dark:text-blue-400",
-                  meta.accent === "green" && "text-green-600 dark:text-green-400",
-                  meta.accent === "red" && "text-red-600 dark:text-red-400",
-                )}
-              />
-              Saved {meta.title} integrations
-            </CardTitle>
-          </div>
-          <Button size="sm" onClick={onAdd}>
-            <Plus className="size-4" />
-            Add {meta.title}
-          </Button>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex flex-wrap gap-2">
-            <StatusPill
-              tone={activeService ? "green" : "red"}
-              label={activeService ? "Runtime target active" : "No runtime target"}
-            />
-            <StatusPill
-              tone="blue"
-              label={`${services.length} saved`}
-            />
-          </div>
-
-          {isLoading && services.length === 0 ? (
-            <div className="space-y-2">
-              <Skeleton className="h-16 w-full" />
-              <Skeleton className="h-16 w-full" />
-            </div>
-          ) : services.length === 0 ? (
-            <EmptyState
-              title={`No ${meta.title} integrations yet`}
-              description={`Press "Add ${meta.title}" to open the form, paste the URL and credentials, then run Test.`}
-            />
-          ) : (
-            services.map((service) => (
-              <IntegrationRow
-                key={service.id}
-                service={service}
-                onEdit={() => onEdit(service)}
-              />
-            ))
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  )
-}
-
-// ─── Runtime settings card ────────────────────────────────────────────────────
-
-function RuntimeSettingsCard({
-  config,
-  isLoading,
-  onEdit,
-}: {
-  config: GeneralConfig | null
-  isLoading: boolean
-  onEdit: () => void
-}) {
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Settings2 className="size-4 text-blue-600 dark:text-blue-400" />
-          Current runtime settings
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {isLoading && !config ? (
-          <div className="space-y-2">
-            <Skeleton className="h-12 w-full" />
-            <Skeleton className="h-12 w-full" />
-          </div>
-        ) : config ? (
-          <>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <SummaryTile label="Mode" value={config.dry_run ? "Dry run" : "Live mode"} />
-              <SummaryTile
-                label="Webhook token"
-                value={config.webhook_shared_token ? "Configured" : "Missing"}
-              />
-              <SummaryTile label="Log level" value={config.log_level} />
-              <SummaryTile label="Timeout" value={`${config.http_timeout_seconds}s`} />
-            </div>
-            <Button variant="outline" className="w-full" onClick={onEdit}>
-              <PenSquare className="size-4 text-blue-600 dark:text-blue-400" />
-              Edit runtime settings
-            </Button>
-          </>
-        ) : (
-          <EmptyState
-            title="Runtime settings unavailable"
-            description="Refresh the configuration and try again."
-          />
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-// ─── Integration row ──────────────────────────────────────────────────────────
-
-function IntegrationRow({
-  service,
-  onEdit,
-}: {
-  service: ServiceRecord
-  onEdit: () => void
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <p className="text-sm font-medium">{service.name}</p>
-          {service.is_default && (
-            <StatusPill tone="blue" label="Default" />
-          )}
-          <StatusPill
-            tone={service.enabled ? "green" : "red"}
-            label={service.enabled ? "Enabled" : "Disabled"}
-          />
-        </div>
-        <p className="mt-0.5 truncate text-xs text-muted-foreground">{service.url}</p>
-      </div>
-      <Button variant="outline" size="sm" onClick={onEdit} className="shrink-0">
-        <PenSquare className="size-4 text-blue-600 dark:text-blue-400" />
-        Edit
-      </Button>
-    </div>
-  )
-}
 
 // ─── General settings modal ───────────────────────────────────────────────────
 
@@ -2626,14 +2753,6 @@ function InstructionList({ items }: { items: string[] }) {
 }
 
 
-function SummaryTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border px-3 py-2.5">
-      <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="mt-1 text-sm font-medium">{value}</p>
-    </div>
-  )
-}
 
 function EmptyState({ title, description }: { title: string; description: string }) {
   return (
@@ -2899,28 +3018,24 @@ function LibrarySeriesTab({
                             {season.episode_file_count}/{season.episode_count} episodes
                             {season.size_bytes > 0 && ` · ${formatBytes(season.size_bytes)}`}
                           </span>
-                          {season.episode_file_count > 0 ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
-                              onClick={() =>
-                                onDelete({
-                                  kind: "series",
-                                  sonarr_series_id: series.sonarr_id,
-                                  series_title: series.title,
-                                  item_type: "Season",
-                                  season_number: season.season_number,
-                                  jellyfin_item_id: season.jellyfin_season_id,
-                                })
-                              }
-                            >
-                              <Trash2 className="size-3.5" />
-                              Delete
-                            </Button>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">No files</span>
-                          )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
+                            onClick={() =>
+                              onDelete({
+                                kind: "series",
+                                sonarr_series_id: series.sonarr_id,
+                                series_title: series.title,
+                                item_type: "Season",
+                                season_number: season.season_number,
+                                jellyfin_item_id: season.jellyfin_season_id,
+                              })
+                            }
+                          >
+                            <Trash2 className="size-3.5" />
+                            Delete
+                          </Button>
                         </div>
                       ))}
                     </div>
@@ -3011,26 +3126,22 @@ function LibraryMoviesTab({
                       : "On disk"
                     : "No file"}
                 </span>
-                {movie.has_file ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-2 shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
-                    onClick={() =>
-                      onDelete({
-                        kind: "movie",
-                        radarr_movie_id: movie.radarr_id,
-                        movie_title: movie.title,
-                        jellyfin_movie_id: movie.jellyfin_movie_id,
-                      })
-                    }
-                  >
-                    <Trash2 className="size-3.5" />
-                    Delete
-                  </Button>
-                ) : (
-                  <span className="ml-2 text-xs text-muted-foreground">No files</span>
-                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-2 shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
+                  onClick={() =>
+                    onDelete({
+                      kind: "movie",
+                      radarr_movie_id: movie.radarr_id,
+                      movie_title: movie.title,
+                      jellyfin_movie_id: movie.jellyfin_movie_id,
+                    })
+                  }
+                >
+                  <Trash2 className="size-3.5" />
+                  Delete
+                </Button>
               </div>
             </Card>
           ))}
