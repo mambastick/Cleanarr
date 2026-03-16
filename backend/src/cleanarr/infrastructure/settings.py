@@ -11,6 +11,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+    db_path: str = Field(default="/config/cleanarr.db", alias="DB_PATH")
     config_state_path: str = Field(default="/config/runtime-config.json", alias="CONFIG_STATE_PATH")
     admin_shared_token: str | None = Field(default=None, alias="ADMIN_SHARED_TOKEN")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")

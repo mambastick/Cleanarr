@@ -31,7 +31,7 @@ from cleanarr.infrastructure.clients import (
     RadarrClient,
     SonarrClient,
 )
-from cleanarr.infrastructure.config_store import FileConfigStore
+from cleanarr.infrastructure.config_store import SqliteConfigStore
 from cleanarr.infrastructure.logging import configure_logging
 from cleanarr.infrastructure.settings import Settings
 
@@ -79,7 +79,10 @@ class ServiceContainer:
     @classmethod
     def from_settings(cls, settings: Settings) -> ServiceContainer:
         config_service = RuntimeConfigurationService(
-            store=FileConfigStore(settings.config_state_path),
+            store=SqliteConfigStore(
+                settings.db_path,
+                migrate_from=settings.config_state_path,
+            ),
             settings=settings,
         )
         auth_service = AuthenticationService(
