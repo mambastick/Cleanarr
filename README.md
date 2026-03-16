@@ -1,107 +1,129 @@
 <p align="center">
-  <img src="media/logo.svg" alt="CleanArr" width="540"/>
+  <img src="media/logo.svg" alt="CleanArr" width="480"/>
 </p>
 
 <p align="center">
-  CleanArr listens for Jellyfin <code>ItemDeleted</code> webhooks and cascades cleanup to Radarr, Sonarr, Jellyseerr, and qBittorrent.<br/>
-  When you delete a movie or series in Jellyfin, CleanArr automatically removes the matching entries from every connected service.
+  <strong>Automatic cascade cleanup for your self-hosted media stack.</strong><br/>
+  CleanArr listens for Jellyfin <code>ItemDeleted</code> webhooks and cascades deletion to Radarr, Sonarr, Jellyseerr, and qBittorrent — automatically, safely, and without touching files it doesn't own.
+</p>
+
+<p align="center">
+  <a href="#quick-start"><strong>Quick start</strong></a> ·
+  <a href="#screenshots"><strong>Screenshots</strong></a> ·
+  <a href="#how-it-works"><strong>How it works</strong></a> ·
+  <a href="#configuration"><strong>Configuration</strong></a> ·
+  <a href="CONTRIBUTING.md"><strong>Contributing</strong></a>
+</p>
+
+<p align="center">
+  <img alt="Python 3.12" src="https://img.shields.io/badge/python-3.12-blue?logo=python&logoColor=white"/>
+  <img alt="React 19" src="https://img.shields.io/badge/react-19-61DAFB?logo=react&logoColor=white"/>
+  <img alt="License MIT" src="https://img.shields.io/github/license/mambastick/Cleanarr"/>
+  <img alt="Docker" src="https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white"/>
 </p>
 
 ---
 
-## Features
+## What is CleanArr?
 
-- **Cascade deletion** — Movie/series/season/episode removal flows from Jellyfin → Arr apps → downloader
-- **Conservative guardrails** — strict ID matching only, pack torrents and shared files are never deleted
-- **Live health monitoring** — probes Radarr, Sonarr, Jellyseerr and qBittorrent every 30 seconds
-- **Dry-run mode** — enabled by default, no destructive actions until you flip the switch
-- **Built-in dashboard** — React SPA served by the same process, includes setup wizard and activity log
-- **Multi-profile** — save multiple service definitions, pick one as the active default
+When you delete something in Jellyfin, you usually have to manually clean up the same item in Radarr, Sonarr, Jellyseerr, and qBittorrent. CleanArr automates this entire chain:
+
+1. Jellyfin fires an `ItemDeleted` webhook
+2. CleanArr resolves the item in Radarr/Sonarr using strict ID matching (TMDB → IMDB → path)
+3. Torrent hashes are deleted from qBittorrent — only if they are exclusively owned by that item
+4. The entry is removed from Radarr/Sonarr
+5. Matching requests, issues, and media records are cleaned up in Jellyseerr
+
+Pack torrents, shared files, and anything that can't be safely attributed are always skipped.
+
+---
 
 ## Screenshots
 
 <table>
   <tr>
-    <td><img src="media/01-dashboard-dark.png?v=2" alt="Dashboard dark" width="480"/></td>
-    <td><img src="media/05-dashboard-light.png?v=2" alt="Dashboard light" width="480"/></td>
+    <td width="50%">
+      <img src="docs/screenshots/login.png" alt="Sign in" width="100%"/>
+      <p align="center"><sub>Sign in screen</sub></p>
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/register.png" alt="Create admin account" width="100%"/>
+      <p align="center"><sub>First-run — create admin account</sub></p>
+    </td>
   </tr>
   <tr>
-    <td align="center"><sub>Dashboard — dark mode</sub></td>
-    <td align="center"><sub>Dashboard — light mode</sub></td>
+    <td width="50%">
+      <img src="docs/screenshots/setup_wizard_step1.png" alt="Setup wizard" width="100%"/>
+      <p align="center"><sub>Guided setup wizard — Jellyfin step</sub></p>
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/dashboard.png" alt="Dashboard" width="100%"/>
+      <p align="center"><sub>Dashboard — all services healthy, Live mode</sub></p>
+    </td>
   </tr>
   <tr>
-    <td><img src="media/02-setup-dark.png?v=2" alt="Setup wizard" width="480"/></td>
-    <td><img src="media/03-activity-dark.png?v=2" alt="Activity log" width="480"/></td>
+    <td width="50%">
+      <img src="docs/screenshots/dashboard_activity.png" alt="Activity log" width="100%"/>
+      <p align="center"><sub>Activity log with deletion history</sub></p>
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/jellyfin_modal.png" alt="Jellyfin service modal" width="100%"/>
+      <p align="center"><sub>Jellyfin service editor — webhook auto-configure</sub></p>
+    </td>
   </tr>
   <tr>
-    <td align="center"><sub>Setup wizard — all steps complete</sub></td>
-    <td align="center"><sub>Activity log</sub></td>
+    <td colspan="2">
+      <img src="docs/screenshots/settings.png" alt="Settings" width="100%"/>
+      <p align="center"><sub>Settings — General configuration</sub></p>
+    </td>
   </tr>
 </table>
 
-## Repository layout
+---
 
-```
-cleanarr/
-├── backend/          # Python 3.12 / FastAPI
-│   ├── pyproject.toml
-│   ├── src/cleanarr/
-│   │   ├── api/          # FastAPI routes, schemas, dashboard
-│   │   ├── application/  # Cascade deletion logic, configuration service
-│   │   ├── domain/       # Models, config, errors
-│   │   └── infrastructure/ # HTTP clients, container, settings
-│   └── tests/
-├── frontend/         # React 19 + Vite + shadcn/ui
-│   └── src/
-├── deploy/
-│   ├── Dockerfile
-│   ├── docker-compose.yml
-│   └── k8s/          # Kubernetes manifests
-└── .env.example
-```
+## Features
 
-## Quick start with Docker Compose
+- **Cascade deletion** — one webhook triggers a full cleanup chain: Jellyfin → Radarr/Sonarr → qBittorrent → Jellyseerr
+- **Strict ID matching** — resolves items by TMDB/TVDB/IMDB ID and path; no fuzzy guessing
+- **Conservative guardrails** — pack torrents and files shared between items are never deleted; CleanArr logs the reason and skips
+- **Dry-run mode** — enabled by default; shows exactly what *would* happen without touching anything
+- **Live health monitoring** — probes all connected services every 30 s; status visible on the dashboard
+- **Webhook auto-configure** — one-click setup of the Jellyfin Webhook plugin directly from the UI
+- **Activity log** — every processed event is stored with full action breakdown; searchable by title, system, action, or status
+- **Guided setup wizard** — first-run wizard walks you through connecting each service step by step
+- **Multi-profile** — save multiple service definitions per type, pick one as the active runtime target
+- **Dark / light mode** — follows system preference
+
+---
+
+## Quick start
+
+### Docker Compose
 
 ```bash
 git clone https://github.com/mambastick/Cleanarr.git
 cd Cleanarr
 
-# Build the image
-docker compose -f deploy/docker-compose.yml build
-
-# Start (edit environment variables in the compose file first)
+# Start (review environment variables in the compose file first)
 docker compose -f deploy/docker-compose.yml up -d
 ```
 
-Open `http://localhost:8089` — the setup wizard walks you through the rest.
+Open **http://localhost:8089** — the setup wizard walks you through the rest.
 
-### Environment variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `DRY_RUN` | `true` | Set to `false` to enable real deletions |
-| `WEBHOOK_SHARED_TOKEN` | — | Shared secret verified on every incoming webhook |
-| `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-| `HTTP_TIMEOUT_SECONDS` | `15` | Timeout for calls to downstream services |
-| `CONFIG_STATE_PATH` | `/config/runtime-config.json` | Persistent config file path — must be on a volume |
-| `ADMIN_SHARED_TOKEN` | — | Optional static admin token (bypasses session auth) |
-
-`CONFIG_STATE_PATH` must point to a persistent volume. Without it, all service configurations are lost on restart.
-
-## Docker (manual)
+### Docker (manual)
 
 ```bash
 docker build -f deploy/Dockerfile -t cleanarr:latest .
-docker run --rm -p 8089:8089 \
+
+docker run -d \
+  --name cleanarr \
+  -p 8089:8089 \
   -e DRY_RUN=true \
-  -e WEBHOOK_SHARED_TOKEN=change-me \
   -v cleanarr-config:/config \
   cleanarr:latest
 ```
 
-## Kubernetes
-
-Manifests are in `deploy/k8s/`. Apply in order:
+### Kubernetes
 
 ```bash
 kubectl apply -f deploy/k8s/namespace.yaml
@@ -113,17 +135,38 @@ kubectl apply -f deploy/k8s/service.yaml
 kubectl apply -f deploy/k8s/ingress.yaml
 ```
 
-The deployment uses `strategy: Recreate` because the config PVC is ReadWriteOnce.
+The deployment uses `strategy: Recreate` because the config PVC is `ReadWriteOnce`.
+
+---
+
+## Configuration
+
+All settings can be changed at runtime from the **Settings** tab. Environment variables provide defaults on first start.
+
+| Variable | Default | Description |
+|---|---|---|
+| `DRY_RUN` | `true` | Set to `false` to enable real deletions |
+| `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `HTTP_TIMEOUT_SECONDS` | `15` | Timeout for calls to downstream services |
+| `DB_PATH` | `/config/cleanarr.db` | SQLite database path — must be on a persistent volume |
+| `ADMIN_SHARED_TOKEN` | — | Optional static token that bypasses session auth (useful for automation) |
+| `WEBHOOK_SHARED_TOKEN` | auto-generated | Shared secret verified on every inbound webhook. Auto-generated on first start; rotate from Settings → General |
+
+> **Important:** `DB_PATH` must point to a persistent volume. Without it, all service configurations and activity history are lost on restart.
+
+---
 
 ## Jellyfin webhook setup
 
-Install the **Webhook** plugin in Jellyfin, then add a Generic destination:
+The easiest way is to use **Auto-configure** in the Jellyfin service editor (click the pencil icon on the Jellyfin card in the Dashboard). It installs the correct config into the Jellyfin Webhook plugin automatically.
+
+**Manual setup:** install the Webhook plugin in Jellyfin → Dashboard → Plugins → Catalog, then add a Generic destination:
 
 - **URL:** `http://your-cleanarr-host:8089/webhook/jellyfin`
 - **Method:** `POST`
-- **Header:** `X-Webhook-Token: <WEBHOOK_SHARED_TOKEN>`
+- **Header:** `X-Webhook-Token: <your-token>`
 - **Notification type:** `Item Deleted` only
-- **Payload template:**
+- **Template:**
 
 ```handlebars
 {
@@ -144,116 +187,125 @@ Install the **Webhook** plugin in Jellyfin, then add a Generic destination:
 }
 ```
 
-The CleanArr dashboard Setup tab shows the exact template and tracks the last webhook delivery attempt so you can verify connectivity without guessing.
+---
 
-## Deletion behavior
+## How it works
 
-### Movie
+### Movie deletion
 
 1. Resolve in Radarr by `tmdb_id → imdb_id → path` (strict, no fuzzy matching)
 2. Collect torrent hashes from Radarr download history
 3. Delete safe hashes in qBittorrent (`deleteFiles=true`)
 4. Delete the Radarr entry
-5. Delete matching Jellyseerr requests, issues, and media
+5. Delete matching Jellyseerr requests, issues, and media records
 
-### Series
+### Series deletion
 
 1. Resolve in Sonarr by `tvdb_id → tmdb_id → imdb_id → path`
-2. Delete torrent hashes that belong exclusively to the series
+2. Delete torrent hashes exclusively owned by the series
 3. Delete the Sonarr series entry
 4. Delete all Jellyseerr requests, issues, and media for the series
 
-### Season
+### Season deletion
 
 1. Resolve parent series in Sonarr
-2. Unmonitor episodes in the target season
+2. Unmonitor all episodes in the target season
 3. Delete only episode files and hashes fully covered by the season scope
 4. Update or remove matching Jellyseerr season requests
 
-### Episode
+### Episode deletion
 
 1. Resolve parent series in Sonarr
-2. Unmonitor only the target episode range
+2. Unmonitor the target episode range
 3. Delete episode file and hash only when fully isolated
 4. Jellyseerr partial-request cleanup skipped in v1
 
 **Guardrails:** pack torrents (multiple series/seasons in one archive) and shared files are never deleted — CleanArr logs the reason and skips destructive actions.
 
-## Health monitoring
+---
 
-CleanArr probes each configured downstream service every 30 seconds. The dashboard System Status card shows `healthy`, `unreachable`, or `unconfigured` per service in real time. No webhook is needed to surface connectivity issues.
+## API reference
 
-## Development setup
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/webhook/jellyfin` | `X-Webhook-Token` header | Main ingestion endpoint |
+| `GET` | `/api/dashboard` | session | Dashboard snapshot for the SPA |
+| `GET` | `/api/config` | session | Runtime configuration |
+| `POST` | `/api/config/general` | session | Update general settings |
+| `POST` | `/api/config/jellyfin/setup-webhook` | session | Auto-configure the Jellyfin Webhook plugin |
+| `POST` | `/api/auth/login` | — | Admin login |
+| `GET` | `/health/live` | none | Liveness probe |
+| `GET` | `/health/ready` | none | Readiness probe |
 
-### Backend
+---
+
+## Repository layout
+
+```
+cleanarr/
+├── backend/                    # Python 3.12 / FastAPI
+│   └── src/cleanarr/
+│       ├── api/                # Routes, schemas, dashboard, auth
+│       ├── application/        # Cascade deletion logic, configuration service
+│       ├── domain/             # Models, config, errors
+│       └── infrastructure/     # HTTP clients, SQLite stores, settings
+├── frontend/                   # React 19 + Vite + TypeScript + shadcn/ui
+│   └── src/
+├── deploy/
+│   ├── Dockerfile              # Multi-stage build (node:24 → python:3.12-slim)
+│   ├── docker-compose.yml
+│   └── k8s/                    # Kubernetes manifests
+└── docs/
+    └── screenshots/
+```
+
+---
+
+## Stack
+
+| Layer | Technology |
+|---|---|
+| Backend | Python 3.12, FastAPI, httpx, Pydantic v2, uvicorn |
+| Frontend | React 19, Vite, TypeScript, shadcn/ui, Tailwind CSS v4, Sonner, Motion |
+| Storage | SQLite (config + activity log) |
+| Container | Multi-stage Docker build — node:24-bookworm-slim → python:3.12-slim |
+
+---
+
+## Development
 
 ```bash
+# Backend
 cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .[dev]
-cp ../.env.example ../.env
-```
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
 
-Build the frontend first (the backend serves the static bundle):
-
-```bash
-cd ../frontend
-pnpm install
-pnpm build
-```
-
-Then run the backend:
-
-```bash
-cd ../backend
-uvicorn cleanarr.main:app --host 0.0.0.0 --port 8089 --reload
-```
-
-### Full local dev (hot reload on both sides)
-
-Terminal 1 — backend:
-```bash
-cd backend
-source .venv/bin/activate
-uvicorn cleanarr.main:app --host 0.0.0.0 --port 8089 --reload
-```
-
-Terminal 2 — frontend (Vite proxies `/api`, `/health`, `/webhook` to port 8089):
-```bash
+# Frontend (build static assets served by the backend)
 cd frontend
-pnpm install
+pnpm install && pnpm build
+
+# Run backend with hot reload
+cd backend
+uvicorn cleanarr.api.app:app --host 0.0.0.0 --port 8089 --reload
+```
+
+For full hot-reload on both sides, run the frontend dev server in parallel — it proxies `/api`, `/health`, and `/webhook` to port 8089:
+
+```bash
+# Terminal 2
+cd frontend
 pnpm dev
 ```
 
 ### Tests
 
 ```bash
-cd backend
-pytest
+cd backend && pytest
+cd frontend && pnpm build   # also runs tsc
 ```
 
-```bash
-cd frontend
-pnpm lint
-pnpm build
-```
+---
 
-Test coverage includes strict resolvers, TV safety analyzer, service-level cascade scenarios, FastAPI webhook auth/payload handling, and HTTP adapters via `respx`.
+## License
 
-## API
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| `POST` | `/webhook/jellyfin` | `X-Webhook-Token` | Main ingestion endpoint |
-| `GET` | `/api/dashboard` | none | Dashboard snapshot for the SPA |
-| `GET` | `/health/live` | none | Liveness probe |
-| `GET` | `/health/ready` | none | Readiness probe |
-| `GET` | `/api/config` | session | Runtime configuration |
-| `POST` | `/api/auth/login` | — | Admin login |
-
-## Stack
-
-- **Backend:** Python 3.12, FastAPI, httpx, Pydantic, uvicorn
-- **Frontend:** React 19, Vite, TypeScript, shadcn/ui (base-nova style), Tailwind CSS
-- **Container:** multi-stage Docker build (node:24 → python:3.12-slim)
+[MIT](LICENSE)
