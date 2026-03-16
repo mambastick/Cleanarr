@@ -1,6 +1,5 @@
 import {
   Activity,
-  ArrowRight,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -55,6 +54,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import Stepper, { Step } from "@/components/ui/stepper"
 import type { AuthSessionPayload, AuthStatusPayload } from "@/lib/auth"
 import type {
   DashboardAction,
@@ -99,9 +99,9 @@ function CleanArrBrand({ size = "sm" }: { size?: "sm" | "lg" }) {
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type MainTab = "dashboard" | "setup" | "activity" | "library"
+type MainTab = "dashboard" | "settings" | "activity" | "library"
 type ServiceFamily = "radarr" | "sonarr" | "jellyseerr" | "downloaders" | "jellyfin_server"
-type SetupStepId = "general" | "jellyfin" | ServiceFamily
+type SetupStepId = "general" | ServiceFamily
 type AuthMode = "register" | "login"
 type ServiceRecord =
   | RadarrServiceConfig
@@ -367,18 +367,11 @@ const SERVICE_META: Record<ServiceFamily, ServiceMeta> = {
 
 const SETUP_STEPS: SetupStepMeta[] = [
   {
-    id: "general",
-    title: "Runtime settings",
-    description: "Dry Run mode, timeout, and the Jellyfin webhook token.",
+    id: "jellyfin_server",
+    title: "Jellyfin",
+    description: "Connect Jellyfin server and configure the webhook plugin.",
     accent: "blue",
-    icon: Settings2,
-  },
-  {
-    id: "jellyfin",
-    title: "Configure Jellyfin",
-    description: "Add the Generic webhook that sends ItemDeleted events to CleanArr.",
-    accent: "blue",
-    icon: Webhook,
+    icon: Play,
   },
   {
     id: "radarr",
@@ -399,7 +392,7 @@ const SETUP_STEPS: SetupStepMeta[] = [
     title: "Jellyseerr",
     description: "Request and issue cleanup source.",
     accent: "green",
-    icon: ShieldCheck,
+    icon: Star,
   },
   {
     id: "downloaders",
@@ -407,13 +400,6 @@ const SETUP_STEPS: SetupStepMeta[] = [
     description: "Downloader used for safe hash deletion.",
     accent: "green",
     icon: Download,
-  },
-  {
-    id: "jellyfin_server",
-    title: "Jellyfin Server",
-    description: "Optional: enables library browsing and instant removal.",
-    accent: "blue",
-    icon: Server,
   },
 ]
 
@@ -425,15 +411,18 @@ const EMPTY_DRAFTS: Record<ServiceFamily, ServiceDraft> = {
   jellyfin_server: { name: "Jellyfin", url: "", api_key: "", username: "", password: "", enabled: true, is_default: true },
 }
 
+const DASHBOARD_NAME_TO_FAMILY: Partial<Record<string, ServiceFamily>> = {
+  Radarr: "radarr",
+  Sonarr: "sonarr",
+  Jellyfin: "jellyfin_server",
+  Jellyseerr: "jellyseerr",
+  Downloader: "downloaders",
+}
+
 const GENERAL_SETUP_STEPS = [
   "Keep CleanArr in Dry Run until all services test green.",
   "Set a webhook token. Jellyfin must send the same X-Webhook-Token header.",
   "Only switch to Live mode after Radarr, Sonarr, Jellyseerr, and qBittorrent are configured.",
-]
-
-const GENERAL_SETUP_HELP = [
-  "Jellyfin → Dashboard → Plugins → Webhook → Add Generic.",
-  "Header name: X-Webhook-Token. Header value: the same token you save here.",
 ]
 
 const JELLYFIN_INSTALL_STEPS = [
@@ -494,8 +483,8 @@ function CleanArrApp() {
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false)
   const [activityFilter, setActivityFilter] = useState("")
   const [authMode, setAuthMode] = useState<AuthMode>("login")
-  const [activeTab, setActiveTab] = useState<MainTab>("setup")
-  const [activeSetupStep, setActiveSetupStep] = useState<SetupStepId>("general")
+  const [showWizard, setShowWizard] = useState(false)
+  const [activeTab, setActiveTab] = useState<MainTab>("dashboard")
   const [authForm, setAuthForm] = useState({ username: "", password: "", confirmPassword: "" })
   const [generalModalOpen, setGeneralModalOpen] = useState(false)
   const [serviceModal, setServiceModal] = useState<ServiceModalState | null>(null)
@@ -742,10 +731,6 @@ function CleanArrApp() {
   )
 
   const latestActivity = dashboard?.recent_activity[0] ?? null
-  const activeStepMeta = SETUP_STEPS.find((s) => s.id === activeSetupStep)
-  const activeStepServiceMeta = isServiceFamily(activeSetupStep)
-    ? SERVICE_META[activeSetupStep]
-    : null
 
   const submitAuthForm = async () => {
     if (authMode === "register" && authForm.password !== authForm.confirmPassword) {
@@ -764,13 +749,15 @@ function CleanArrApp() {
       )
       setSessionToken(payload.token)
       setAuthForm({ username: payload.username, password: "", confirmPassword: "" })
-      setActiveTab("setup")
-      setActiveSetupStep("general")
+      setActiveTab("dashboard")
+      if (authMode === "register") {
+        setShowWizard(true)
+      }
       setFlash({
         kind: "success",
         message:
           authMode === "register"
-            ? "Administrator created. Start with runtime settings and service setup."
+            ? "Administrator created. Use the setup wizard to configure your services."
             : "Signed in successfully.",
       })
     } catch (error) {
@@ -798,8 +785,6 @@ function CleanArrApp() {
     })
     setConfig(next)
     setFlash({ kind: "success", message: "Runtime settings saved." })
-    const nextStep = findNextIncompleteSetupStep(next)
-    if (nextStep) setActiveSetupStep(nextStep)
   }
 
   const saveServiceDraft = async (family: ServiceFamily, draft: ServiceDraft) => {
@@ -811,8 +796,6 @@ function CleanArrApp() {
     setConfig(next)
     setServiceModal(null)
     setFlash({ kind: "success", message: `${meta.title} ${draft.id ? "updated" : "added"}.` })
-    const nextStep = findNextIncompleteSetupStep(next)
-    if (nextStep) setActiveSetupStep(nextStep)
   }
 
   const deleteServiceDraft = async (family: ServiceFamily, serviceId: string) => {
@@ -878,14 +861,9 @@ function CleanArrApp() {
               <LayoutDashboard className="size-3.5 text-blue-500" />
               Dashboard
             </TabsTrigger>
-            <TabsTrigger value="setup" className="gap-1.5">
+            <TabsTrigger value="settings" className="gap-1.5">
               <Settings2 className="size-3.5 text-orange-500" />
-              Setup
-              {setupCompletionCount < SETUP_STEPS.length && (
-                <span className="ml-0.5 flex size-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-semibold text-white">
-                  {SETUP_STEPS.length - setupCompletionCount}
-                </span>
-              )}
+              Settings
             </TabsTrigger>
             <TabsTrigger value="activity" className="gap-1.5">
               <Activity className="size-3.5 text-emerald-500" />
@@ -974,12 +952,24 @@ function CleanArrApp() {
             latestActivity={latestActivity}
             allServicesConfigured={allServicesConfigured}
             isLive={isLive}
-            onOpenSetup={() => setActiveTab("setup")}
+            onOpenSetup={() => setActiveTab("settings")}
+            onOpenWizard={() => setShowWizard(true)}
+            onEditService={(name) => {
+              const family = DASHBOARD_NAME_TO_FAMILY[name]
+              if (!family) return
+              const services = getServices(config, family)
+              const active = resolveActiveService(services)
+              if (active) {
+                setServiceModal({ family, draft: toDraft(active) })
+              } else {
+                setServiceModal({ family, draft: structuredClone(EMPTY_DRAFTS[family]) })
+              }
+            }}
           />
         </TabsContent>
 
-        {/* ── Setup ── */}
-        <TabsContent value="setup" className="mt-0">
+        {/* ── Settings ── */}
+        <TabsContent value="settings" className="mt-0">
           {configError && (
             <div className="mb-5">
               <Alert variant="destructive">
@@ -989,28 +979,14 @@ function CleanArrApp() {
               </Alert>
             </div>
           )}
-          <SetupWorkspace
-            activeStep={activeSetupStep}
-            activeStepMeta={activeStepMeta ?? SETUP_STEPS[0]}
-            activeServiceMeta={activeStepServiceMeta}
+          <SettingsPanel
             config={config}
             dashboard={dashboard}
             isConfigLoading={isConfigLoading}
-            completionCount={setupCompletionCount}
             origin={origin}
             jellyfinTemplatePreview={jellyfinTemplatePreview}
             curlPreview={curlPreview}
-            onSelectStep={setActiveSetupStep}
             onEditGeneral={() => setGeneralModalOpen(true)}
-            onGoToDashboard={() => setActiveTab("dashboard")}
-            onAddService={(family) => {
-              setActiveSetupStep(family)
-              setServiceModal({ family, draft: structuredClone(EMPTY_DRAFTS[family]) })
-            }}
-            onEditService={(family, service) => {
-              setActiveSetupStep(family)
-              setServiceModal({ family, draft: toDraft(service) })
-            }}
           />
         </TabsContent>
 
@@ -1043,6 +1019,26 @@ function CleanArrApp() {
           />
         </TabsContent>
       </main>
+
+      {/* ── Setup wizard overlay ── */}
+      {showWizard && (
+        <SetupWizard
+          config={config}
+          dashboard={dashboard}
+          isConfigLoading={isConfigLoading}
+          origin={origin}
+          jellyfinTemplatePreview={jellyfinTemplatePreview}
+          curlPreview={curlPreview}
+          onAddService={(family) => {
+            setServiceModal({ family, draft: structuredClone(EMPTY_DRAFTS[family]) })
+          }}
+          onEditService={(family, service) => {
+            setServiceModal({ family, draft: toDraft(service) })
+          }}
+          onEditGeneral={() => setGeneralModalOpen(true)}
+          onClose={() => setShowWizard(false)}
+        />
+      )}
 
       {/* Modals */}
       <GeneralSettingsModal
@@ -1205,7 +1201,13 @@ const DOWNSTREAM_META: Partial<Record<string, { icon: LucideIcon; color: string 
   Downloader: { icon: Download, color: "text-emerald-500" },
 }
 
-function ServiceHealthCard({ service }: { service: { name: string; role: string; url: string; configured: boolean; health_status: HealthStatus } }) {
+function ServiceHealthCard({
+  service,
+  onEdit,
+}: {
+  service: { name: string; role: string; url: string; configured: boolean; health_status: HealthStatus }
+  onEdit?: () => void
+}) {
   const meta = DOWNSTREAM_META[service.name] ?? { icon: Server, color: "text-muted-foreground" }
   const Icon = meta.icon
   return (
@@ -1226,6 +1228,16 @@ function ServiceHealthCard({ service }: { service: { name: string; role: string;
           >
             {service.health_status}
           </span>
+          {onEdit && (
+            <button
+              type="button"
+              onClick={onEdit}
+              className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors"
+              title={`Edit ${service.name}`}
+            >
+              <PenSquare className="size-3.5" />
+            </button>
+          )}
         </div>
       </div>
       <div>
@@ -1250,6 +1262,8 @@ function DashboardPanel({
   allServicesConfigured,
   isLive,
   onOpenSetup,
+  onOpenWizard,
+  onEditService,
 }: {
   dashboard: DashboardPayload | null
   isDashboardLoading: boolean
@@ -1259,6 +1273,8 @@ function DashboardPanel({
   allServicesConfigured: boolean
   isLive: boolean
   onOpenSetup: () => void
+  onOpenWizard: () => void
+  onEditService: (name: string) => void
 }) {
   const webhookStatus = dashboard?.webhook_status
 
@@ -1298,9 +1314,9 @@ function DashboardPanel({
             <strong className="text-foreground">{deletedActions}</strong> deletions logged
           </span>
           {!allServicesConfigured && (
-            <Button variant="outline" size="sm" onClick={onOpenSetup}>
-              <ArrowRight className="size-4 text-blue-600 dark:text-blue-400" />
-              Complete setup
+            <Button variant="outline" size="sm" onClick={onOpenWizard}>
+              <Zap className="size-4 text-blue-600 dark:text-blue-400" />
+              Setup wizard
             </Button>
           )}
           {allServicesConfigured && !isLive && (
@@ -1324,7 +1340,11 @@ function DashboardPanel({
         ) : (
           <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
             {(dashboard?.downstream ?? []).map((service) => (
-              <ServiceHealthCard key={service.name} service={service} />
+              <ServiceHealthCard
+                key={service.name}
+                service={service}
+                onEdit={() => onEditService(service.name)}
+              />
             ))}
           </div>
         )}
@@ -1467,155 +1487,177 @@ function ActivityPanel({
   )
 }
 
-// ─── Setup workspace ──────────────────────────────────────────────────────────
+// ─── Settings panel ───────────────────────────────────────────────────────────
 
-function SetupWorkspace({
-  activeStep,
-  activeStepMeta,
-  activeServiceMeta,
+function SettingsPanel({
   config,
   dashboard,
   isConfigLoading,
-  completionCount,
   origin,
   jellyfinTemplatePreview,
   curlPreview,
-  onSelectStep,
   onEditGeneral,
-  onGoToDashboard,
-  onAddService,
-  onEditService,
 }: {
-  activeStep: SetupStepId
-  activeStepMeta: SetupStepMeta
-  activeServiceMeta: ServiceMeta | null
   config: RuntimeConfigPayload | null
   dashboard: DashboardPayload | null
   isConfigLoading: boolean
-  completionCount: number
   origin: string
   jellyfinTemplatePreview: string
   curlPreview: string
-  onSelectStep: (step: SetupStepId) => void
   onEditGeneral: () => void
-  onGoToDashboard: () => void
+}) {
+  return (
+    <section className="space-y-5">
+      <RuntimeSettingsCard
+        config={config?.general ?? null}
+        isLoading={isConfigLoading}
+        onEdit={onEditGeneral}
+      />
+      <JellyfinSetupPanel
+        dashboard={dashboard}
+        origin={origin}
+        jellyfinTemplatePreview={jellyfinTemplatePreview}
+        curlPreview={curlPreview}
+        tokenConfigured={Boolean(config?.general.webhook_shared_token)}
+        onOpenGeneral={onEditGeneral}
+      />
+    </section>
+  )
+}
+
+// ─── Setup wizard ─────────────────────────────────────────────────────────────
+
+function SetupWizard({
+  config,
+  dashboard,
+  isConfigLoading,
+  origin,
+  jellyfinTemplatePreview,
+  curlPreview,
+  onAddService,
+  onEditService,
+  onEditGeneral,
+  onClose,
+}: {
+  config: RuntimeConfigPayload | null
+  dashboard: DashboardPayload | null
+  isConfigLoading: boolean
+  origin: string
+  jellyfinTemplatePreview: string
+  curlPreview: string
   onAddService: (family: ServiceFamily) => void
   onEditService: (family: ServiceFamily, service: ServiceRecord) => void
+  onEditGeneral: () => void
+  onClose: () => void
 }) {
-  const allComplete = completionCount === SETUP_STEPS.length
+  const WIZARD_STEPS: Array<{ family: ServiceFamily | null; label: string }> = [
+    { family: "jellyfin_server", label: "Jellyfin" },
+    { family: "radarr", label: "Radarr" },
+    { family: "sonarr", label: "Sonarr" },
+    { family: "jellyseerr", label: "Jellyseerr" },
+    { family: "downloaders", label: "qBittorrent" },
+  ]
 
   return (
-    <section className="space-y-4">
-      {/* All-done banner */}
-      {allComplete && (
-        <div className="flex items-center gap-3 rounded-xl border border-green-200 bg-green-50/60 p-4 dark:border-green-900 dark:bg-green-950/20">
-          <CheckCircle2 className="size-5 shrink-0 text-green-600 dark:text-green-400" />
-          <div className="flex-1 min-w-0">
-            <p className="font-medium">All steps complete</p>
-            <p className="text-sm text-muted-foreground">
-              Switch to Live mode in Runtime settings when you're ready.
+    <div className="fixed inset-0 z-50 overflow-auto bg-background/98 backdrop-blur-sm">
+      <div className="mx-auto max-w-3xl px-4 py-6">
+        {/* Header */}
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <CleanArrBrand size="sm" />
+            <p className="mt-1 text-sm text-muted-foreground">
+              First-time setup — configure each service to get started.
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={onGoToDashboard} className="shrink-0">
-            <LayoutDashboard className="size-4 text-blue-600 dark:text-blue-400" />
-            Dashboard
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Skip for now
           </Button>
         </div>
-      )}
 
-      <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)]">
-        {/* Step sidebar */}
-        <div className="flex flex-col gap-0.5">
-          {SETUP_STEPS.map((step) => {
-            const ready = isSetupStepReady(step.id, config)
-            const count = isServiceFamily(step.id) ? getServices(config, step.id).length : undefined
-            return (
-              <button
-                key={step.id}
-                type="button"
-                onClick={() => onSelectStep(step.id)}
-                className={cn(
-                  "flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm transition-colors",
-                  activeStep === step.id
-                    ? "bg-muted font-medium text-foreground"
-                    : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-                )}
-              >
-                {ready ? (
-                  <CheckCircle2 className="size-4 shrink-0 text-green-500" />
-                ) : (
-                  <CircleAlert className="size-4 shrink-0 text-amber-500" />
-                )}
-                <span className="flex-1 truncate">{step.title}</span>
-                {typeof count === "number" && count > 0 && (
-                  <span className="text-xs tabular-nums text-muted-foreground">{count}</span>
-                )}
-              </button>
-            )
-          })}
-        </div>
+        <Stepper
+          onFinalStepCompleted={onClose}
+          nextButtonText="Next"
+          backButtonText="Back"
+          stepCircleContainerClassName="bg-card"
+        >
+          {/* Step 1: Jellyfin */}
+          <Step>
+            <div className="space-y-5 pb-4">
+              <div>
+                <h2 className="text-lg font-semibold">Jellyfin setup</h2>
+                <p className="text-sm text-muted-foreground">
+                  Connect your Jellyfin server and configure the webhook plugin.
+                </p>
+              </div>
 
-        {/* Step content */}
-        <Card>
-          <CardHeader className="pb-4">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <activeStepMeta.icon
-                className={cn(
-                  "size-4",
-                  activeStepMeta.accent === "blue" && "text-blue-600 dark:text-blue-400",
-                  activeStepMeta.accent === "green" && "text-green-600 dark:text-green-400",
-                  activeStepMeta.accent === "red" && "text-red-600 dark:text-red-400",
-                )}
-              />
-              {activeStepMeta.title}
-            </CardTitle>
-            <CardDescription>{activeStepMeta.description}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            {activeStep === "general" ? (
-              <>
-                <GuideCard
-                  tone="blue"
-                  title="What to configure"
-                  description="Start with the runtime mode, timeout, and webhook token before connecting downstream services."
-                >
-                  <InstructionList items={GENERAL_SETUP_STEPS} />
-                </GuideCard>
-                <GuideCard
-                  tone="green"
-                  title="Where the token is used"
-                  description="The webhook token must match the header you configure in Jellyfin."
-                >
-                  <InstructionList items={GENERAL_SETUP_HELP} />
-                </GuideCard>
+              {/* 1.1 Runtime settings (webhook token) */}
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  1.1 — Runtime settings
+                </p>
                 <RuntimeSettingsCard
                   config={config?.general ?? null}
                   isLoading={isConfigLoading}
                   onEdit={onEditGeneral}
                 />
-              </>
-            ) : activeStep === "jellyfin" ? (
-              <JellyfinSetupPanel
-                dashboard={dashboard}
-                origin={origin}
-                jellyfinTemplatePreview={jellyfinTemplatePreview}
-                curlPreview={curlPreview}
-                tokenConfigured={Boolean(config?.general.webhook_shared_token)}
-                onOpenGeneral={onEditGeneral}
-              />
-            ) : activeServiceMeta ? (
-              <ServiceSetupPanel
-                meta={activeServiceMeta}
-                services={getServices(config, activeStep)}
-                isLoading={isConfigLoading}
-                onAdd={() => onAddService(activeStep)}
-                onEdit={(service) => onEditService(activeStep, service)}
-              />
-            ) : null}
-          </CardContent>
-        </Card>
+              </div>
+
+              {/* 1.2 Jellyfin server connection */}
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  1.2 — Server connection
+                </p>
+                <ServiceSetupPanel
+                  meta={SERVICE_META.jellyfin_server}
+                  services={getServices(config, "jellyfin_server")}
+                  isLoading={isConfigLoading}
+                  onAdd={() => onAddService("jellyfin_server")}
+                  onEdit={(service) => onEditService("jellyfin_server", service)}
+                />
+              </div>
+
+              {/* 1.3 Webhook configuration */}
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  1.3 — Webhook plugin
+                </p>
+                <JellyfinSetupPanel
+                  dashboard={dashboard}
+                  origin={origin}
+                  jellyfinTemplatePreview={jellyfinTemplatePreview}
+                  curlPreview={curlPreview}
+                  tokenConfigured={Boolean(config?.general.webhook_shared_token)}
+                  onOpenGeneral={onEditGeneral}
+                />
+              </div>
+            </div>
+          </Step>
+
+          {/* Steps 2–5: *arr services */}
+          {WIZARD_STEPS.slice(1).map(({ family, label }) =>
+            family ? (
+              <Step key={family}>
+                <div className="space-y-5 pb-4">
+                  <div>
+                    <h2 className="text-lg font-semibold">{label}</h2>
+                    <p className="text-sm text-muted-foreground">
+                      {SERVICE_META[family].description}
+                    </p>
+                  </div>
+                  <ServiceSetupPanel
+                    meta={SERVICE_META[family]}
+                    services={getServices(config, family)}
+                    isLoading={isConfigLoading}
+                    onAdd={() => onAddService(family)}
+                    onEdit={(service) => onEditService(family, service)}
+                  />
+                </div>
+              </Step>
+            ) : null,
+          )}
+        </Stepper>
       </div>
-    </section>
+    </div>
   )
 }
 
@@ -3272,19 +3314,11 @@ function isServiceFamily(step: SetupStepId): step is ServiceFamily {
 
 function isSetupStepReady(step: SetupStepId, config: RuntimeConfigPayload | null): boolean {
   if (!config) return false
-  if (step === "general" || step === "jellyfin") {
-    return Boolean(config.general.webhook_shared_token)
-  }
-  if (step === "jellyfin_server") {
-    // Jellyfin server is optional — always considered ready
-    return true
-  }
+  if (step === "general") return Boolean(config.general.webhook_shared_token)
+  if (!isServiceFamily(step)) return false
   return Boolean(resolveActiveService(getServices(config, step)))
 }
 
-function findNextIncompleteSetupStep(config: RuntimeConfigPayload | null): SetupStepId | null {
-  return SETUP_STEPS.find((step) => !isSetupStepReady(step.id, config))?.id ?? null
-}
 
 function toDraft(service: ServiceRecord): ServiceDraft {
   return {
