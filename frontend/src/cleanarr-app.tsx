@@ -36,6 +36,7 @@ import {
   Zap,
 } from "lucide-react"
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
+import { toast } from "sonner"
 
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -110,13 +111,6 @@ type ServiceRecord =
   | QbittorrentServiceConfig
   | JellyfinServiceConfig
 
-type FlashState =
-  | {
-      kind: "success" | "error"
-      message: string
-    }
-  | null
-
 type LibraryDeleteTarget =
   | {
       kind: "series"
@@ -176,12 +170,6 @@ type SetupStepMeta = {
   icon: LucideIcon
 }
 
-type JellyfinFieldInstruction = {
-  label: string
-  value: string
-  hint: string
-  copyValue?: string
-}
 
 // ─── Cookie auth ─────────────────────────────────────────────────────────────
 
@@ -432,40 +420,6 @@ const JELLYFIN_INSTALL_STEPS = [
   "After restart, open Jellyfin → Dashboard → Plugins → Webhook.",
 ]
 
-const JELLYFIN_CONFIG_STEPS = [
-  "Open Jellyfin → Dashboard → Plugins → Webhook.",
-  "Click Add Generic Destination.",
-  "Fill the form exactly like the field guide below.",
-  "Paste the exact request body template from CleanArr without editing the variable names.",
-  "Save the Webhook plugin page in Jellyfin.",
-]
-
-const JELLYFIN_ITEM_TYPE_STEPS = [
-  "Leave only ItemDeleted enabled in Notification types for this destination.",
-  "Enable Movies, Series, Seasons, and Episodes.",
-  "Disable Albums, Songs, and generic Videos.",
-  "Leave Send all properties off. CleanArr expects the explicit custom JSON body below.",
-]
-
-const JELLYFIN_SAVE_STEPS = [
-  "Click Save in Jellyfin after you finish the Generic destination form.",
-  "Do not edit the JSON keys in the template body. CleanArr validates them strictly.",
-  "If you regenerate the token in CleanArr later, update the X-Webhook-Token header in Jellyfin too.",
-]
-
-const JELLYFIN_VERIFY_STEPS = [
-  "Jellyfin Generic does not expose a built-in test button in the plugin UI.",
-  "First run the cURL smoke test below to prove CleanArr is reachable from the browser side.",
-  "Then delete one throwaway movie or episode in Jellyfin to trigger a real ItemDeleted event.",
-  "Wait up to 15 seconds for auto-refresh, or press Refresh in the CleanArr header.",
-]
-
-const JELLYFIN_TROUBLESHOOTING_STEPS = [
-  "If status stays at No delivery yet, double-check the Webhook Url and confirm the destination is enabled in Jellyfin.",
-  "If status shows Token mismatch, update the X-Webhook-Token header in Jellyfin so it matches CleanArr runtime settings exactly.",
-  "If status shows Payload rejected, paste the exact CleanArr payload template again without editing field names.",
-  "If Jellyfin still sends nothing, raise Jellyfin.Plugin.Webhook logging to Debug and inspect Jellyfin server logs.",
-]
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
@@ -473,10 +427,6 @@ function CleanArrApp() {
   const [dashboard, setDashboard] = useState<DashboardPayload | null>(null)
   const [config, setConfig] = useState<RuntimeConfigPayload | null>(null)
   const [authStatus, setAuthStatus] = useState<AuthStatusPayload | null>(null)
-  const [dashboardError, setDashboardError] = useState<string | null>(null)
-  const [configError, setConfigError] = useState<string | null>(null)
-  const [authError, setAuthError] = useState<string | null>(null)
-  const [flash, setFlash] = useState<FlashState>(null)
   const [isDashboardLoading, setIsDashboardLoading] = useState(true)
   const [isConfigLoading, setIsConfigLoading] = useState(false)
   const [isAuthLoading, setIsAuthLoading] = useState(true)
@@ -493,10 +443,8 @@ function CleanArrApp() {
 
   const [library, setLibrary] = useState<LibrarySeriesResponse | null>(null)
   const [isLibraryLoading, setIsLibraryLoading] = useState(false)
-  const [libraryError, setLibraryError] = useState<string | null>(null)
   const [libraryMovies, setLibraryMovies] = useState<LibraryMoviesResponse | null>(null)
   const [isLibraryMoviesLoading, setIsLibraryMoviesLoading] = useState(false)
-  const [libraryMoviesError, setLibraryMoviesError] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<LibraryDeleteTarget | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteResult, setDeleteResult] = useState<ManualDeleteResponse | null>(null)
@@ -518,14 +466,34 @@ function CleanArrApp() {
       const response = await fetch(url, { ...init, headers })
 
       if (!response.ok) {
-        const detail = await response.text()
         if (
           (response.status === 401 || response.status === 403) &&
           url.startsWith("/api/config")
         ) {
           setSessionToken("")
         }
-        throw new Error(`${response.status}: ${detail || response.statusText}`)
+        let message = response.statusText || `HTTP ${response.status}`
+        try {
+          const body = await response.json()
+          if (typeof body.detail === "string") {
+            message = body.detail
+          } else if (Array.isArray(body.detail) && body.detail.length > 0) {
+            message = (body.detail as Array<{ msg?: string; message?: string }>)
+              .map((e) => e.msg ?? e.message ?? JSON.stringify(e))
+              .join("; ")
+          } else if (typeof body.message === "string") {
+            message = body.message
+          }
+        } catch {
+          // JSON parse failed — try raw text
+          try {
+            const text = await response.text()
+            if (text) message = text
+          } catch {
+            // keep statusText
+          }
+        }
+        throw new Error(message)
       }
 
       if (response.status === 204) {
@@ -541,14 +509,12 @@ function CleanArrApp() {
     async (background = false) => {
       if (!background) {
         setIsDashboardLoading(true)
-        setDashboardError(null)
       }
       try {
         const payload = await fetchJson<DashboardPayload>("/api/dashboard")
         setDashboard(payload)
-        setDashboardError(null)
       } catch (error) {
-        setDashboardError(normalizeError(error))
+        toast.error(normalizeError(error))
       } finally {
         setIsDashboardLoading(false)
       }
@@ -558,7 +524,6 @@ function CleanArrApp() {
 
   const loadAuth = useCallback(async () => {
     setIsAuthLoading(true)
-    setAuthError(null)
     try {
       const payload = await fetchJson<AuthStatusPayload>("/api/auth/status")
       setAuthStatus(payload)
@@ -567,7 +532,7 @@ function CleanArrApp() {
         setConfig(null)
       }
     } catch (error) {
-      setAuthError(normalizeError(error))
+      toast.error(normalizeError(error))
     } finally {
       setIsAuthLoading(false)
     }
@@ -575,13 +540,12 @@ function CleanArrApp() {
 
   const loadConfig = useCallback(async () => {
     setIsConfigLoading(true)
-    setConfigError(null)
     try {
       const payload = await fetchJson<RuntimeConfigPayload>("/api/config")
       setConfig(payload)
     } catch (error) {
       setConfig(null)
-      setConfigError(normalizeError(error))
+      toast.error(normalizeError(error))
     } finally {
       setIsConfigLoading(false)
     }
@@ -589,12 +553,11 @@ function CleanArrApp() {
 
   const loadLibrary = useCallback(async () => {
     setIsLibraryLoading(true)
-    setLibraryError(null)
     try {
       const payload = await fetchJson<LibrarySeriesResponse>("/api/library/series")
       setLibrary(payload)
     } catch (error) {
-      setLibraryError(normalizeError(error))
+      toast.error(normalizeError(error))
     } finally {
       setIsLibraryLoading(false)
     }
@@ -602,12 +565,11 @@ function CleanArrApp() {
 
   const loadLibraryMovies = useCallback(async () => {
     setIsLibraryMoviesLoading(true)
-    setLibraryMoviesError(null)
     try {
       const payload = await fetchJson<LibraryMoviesResponse>("/api/library/movies")
       setLibraryMovies(payload)
     } catch (error) {
-      setLibraryMoviesError(normalizeError(error))
+      toast.error(normalizeError(error))
     } finally {
       setIsLibraryMoviesLoading(false)
     }
@@ -667,7 +629,6 @@ function CleanArrApp() {
       void loadConfig()
     } else if (authStatus && !authStatus.authenticated) {
       setConfig(null)
-      setConfigError(null)
     }
   }, [authStatus, loadConfig])
 
@@ -682,13 +643,6 @@ function CleanArrApp() {
   useEffect(() => {
     writeSessionCookie(sessionToken)
   }, [sessionToken])
-
-  // Auto-dismiss flash after 4s
-  useEffect(() => {
-    if (!flash) return undefined
-    const id = window.setTimeout(() => setFlash(null), 4000)
-    return () => window.clearTimeout(id)
-  }, [flash])
 
   const setupCompletionCount = useMemo(
     () => SETUP_STEPS.reduce((n, step) => n + (isSetupStepReady(step.id, config) ? 1 : 0), 0),
@@ -707,14 +661,26 @@ function CleanArrApp() {
     typeof window === "undefined"
       ? "https://cleanarr.neelov.family"
       : window.location.origin
-  const jellyfinTemplatePreview = dashboard?.jellyfin_template ?? ""
   const samplePayloadPreview = JSON.stringify(dashboard?.sample_payload ?? {}, null, 2)
+  const webhookToken = config?.general.webhook_shared_token
   const curlPreview = [
     `curl -X POST ${origin}/webhook/jellyfin \\`,
     '  -H "Content-Type: application/json" \\',
-    '  -H "X-Webhook-Token: <WEBHOOK_SHARED_TOKEN>" \\',
+    webhookToken
+      ? `  -H "X-Webhook-Token: ${webhookToken}" \\`
+      : '  -H "X-Webhook-Token: <configure_token_first>" \\',
     `  -d '${samplePayloadPreview.replaceAll("\n", "\n  ")}'`,
   ].join("\n")
+
+  const handleSetupWebhook = useCallback(
+    async (webhookUrl: string) => {
+      return await fetchJson<{ found: boolean; configured: boolean; message: string }>(
+        "/api/config/jellyfin/setup-webhook",
+        { method: "POST", body: JSON.stringify({ webhook_url: webhookUrl }) },
+      )
+    },
+    [fetchJson],
+  )
 
   const filteredActivity = useMemo(
     () => (dashboard?.recent_activity ?? []).filter((e) => matchesActivity(e, deferredFilter)),
@@ -734,11 +700,10 @@ function CleanArrApp() {
 
   const submitAuthForm = async () => {
     if (authMode === "register" && authForm.password !== authForm.confirmPassword) {
-      setAuthError("Passwords do not match.")
+      toast.error("Passwords do not match.")
       return
     }
     setIsAuthSubmitting(true)
-    setAuthError(null)
     try {
       const payload = await fetchJson<AuthSessionPayload>(
         authMode === "register" ? "/api/auth/register" : "/api/auth/login",
@@ -753,15 +718,13 @@ function CleanArrApp() {
       if (authMode === "register") {
         setShowWizard(true)
       }
-      setFlash({
-        kind: "success",
-        message:
-          authMode === "register"
-            ? "Administrator created. Use the setup wizard to configure your services."
-            : "Signed in successfully.",
-      })
+      toast.success(
+        authMode === "register"
+          ? "Administrator created. Use the setup wizard to configure your services."
+          : "Signed in successfully.",
+      )
     } catch (error) {
-      setAuthError(normalizeError(error))
+      toast.error(normalizeError(error))
     } finally {
       setIsAuthSubmitting(false)
     }
@@ -775,7 +738,6 @@ function CleanArrApp() {
     }
     setSessionToken("")
     setAuthForm({ username: "", password: "", confirmPassword: "" })
-    setFlash(null)
   }
 
   const saveGeneralSettings = async (payload: GeneralConfig) => {
@@ -784,7 +746,7 @@ function CleanArrApp() {
       body: JSON.stringify(payload),
     })
     setConfig(next)
-    setFlash({ kind: "success", message: "Runtime settings saved." })
+    toast.success("Runtime settings saved.")
   }
 
   const saveServiceDraft = async (family: ServiceFamily, draft: ServiceDraft) => {
@@ -795,7 +757,7 @@ function CleanArrApp() {
       : await fetchJson<RuntimeConfigPayload>(meta.endpoint, { method: "POST", body })
     setConfig(next)
     setServiceModal(null)
-    setFlash({ kind: "success", message: `${meta.title} ${draft.id ? "updated" : "added"}.` })
+    toast.success(`${meta.title} ${draft.id ? "updated" : "added"}.`)
   }
 
   const deleteServiceDraft = async (family: ServiceFamily, serviceId: string) => {
@@ -804,7 +766,7 @@ function CleanArrApp() {
     const next = await fetchJson<RuntimeConfigPayload>("/api/config")
     setConfig(next)
     setServiceModal(null)
-    setFlash({ kind: "success", message: `${meta.title} removed.` })
+    toast.success(`${meta.title} removed.`)
   }
 
   const testServiceDraft = async (family: ServiceFamily, draft: ServiceDraft) => {
@@ -826,7 +788,6 @@ function CleanArrApp() {
       <AuthScreen
         authMode={authMode}
         authForm={authForm}
-        authError={authError}
         isSubmitting={isAuthSubmitting}
         requiresRegistration={Boolean(authStatus?.requires_registration)}
         onFieldChange={(field, value) => setAuthForm((c) => ({ ...c, [field]: value }))}
@@ -835,7 +796,8 @@ function CleanArrApp() {
     )
   }
 
-  const isLive = dashboard ? !dashboard.service.dry_run : false
+  // Derive from config first (updated immediately after save), fall back to dashboard (polled)
+  const isLive = config != null ? !config.general.dry_run : dashboard ? !dashboard.service.dry_run : false
 
   // ─── Main app ──────────────────────────────────────────────────────────────
 
@@ -918,30 +880,6 @@ function CleanArrApp() {
 
       {/* Page content */}
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6">
-        {flash && (
-          <div className="mb-5">
-            <Alert variant={flash.kind === "error" ? "destructive" : "default"}>
-              {flash.kind === "error" ? (
-                <CircleAlert className="size-4" />
-              ) : (
-                <CheckCircle2 className="size-4 text-green-600 dark:text-green-400" />
-              )}
-              <AlertTitle>{flash.kind === "error" ? "Action failed" : "Saved"}</AlertTitle>
-              <AlertDescription>{flash.message}</AlertDescription>
-            </Alert>
-          </div>
-        )}
-
-        {(activeTab === "dashboard" || activeTab === "activity") && dashboardError && (
-          <div className="mb-5">
-            <Alert variant="destructive">
-              <CircleAlert className="size-4" />
-              <AlertTitle>Dashboard unavailable</AlertTitle>
-              <AlertDescription>{dashboardError}</AlertDescription>
-            </Alert>
-          </div>
-        )}
-
         {/* ── Dashboard ── */}
         <TabsContent value="dashboard" className="mt-0">
           <DashboardPanel
@@ -952,7 +890,9 @@ function CleanArrApp() {
             latestActivity={latestActivity}
             allServicesConfigured={allServicesConfigured}
             isLive={isLive}
-            onOpenSetup={() => setActiveTab("settings")}
+            onToggleDryRun={async () => {
+              if (config) await saveGeneralSettings({ ...config.general, dry_run: !config.general.dry_run })
+            }}
             onOpenWizard={() => setShowWizard(true)}
             onEditService={(name) => {
               const family = DASHBOARD_NAME_TO_FAMILY[name]
@@ -970,23 +910,10 @@ function CleanArrApp() {
 
         {/* ── Settings ── */}
         <TabsContent value="settings" className="mt-0">
-          {configError && (
-            <div className="mb-5">
-              <Alert variant="destructive">
-                <CircleAlert className="size-4" />
-                <AlertTitle>Config unavailable</AlertTitle>
-                <AlertDescription>{configError}</AlertDescription>
-              </Alert>
-            </div>
-          )}
           <SettingsPanel
             config={config}
-            dashboard={dashboard}
             isConfigLoading={isConfigLoading}
-            origin={origin}
-            jellyfinTemplatePreview={jellyfinTemplatePreview}
-            curlPreview={curlPreview}
-            onEditGeneral={() => setGeneralModalOpen(true)}
+            onSaveGeneral={saveGeneralSettings}
           />
         </TabsContent>
 
@@ -1004,10 +931,8 @@ function CleanArrApp() {
           <LibraryPanel
             library={library}
             isLibraryLoading={isLibraryLoading}
-            libraryError={libraryError}
             libraryMovies={libraryMovies}
             isLibraryMoviesLoading={isLibraryMoviesLoading}
-            libraryMoviesError={libraryMoviesError}
             isLive={isLive}
             onRefreshSeries={() => void loadLibrary()}
             onRefreshMovies={() => void loadLibraryMovies()}
@@ -1027,7 +952,6 @@ function CleanArrApp() {
           dashboard={dashboard}
           isConfigLoading={isConfigLoading}
           origin={origin}
-          jellyfinTemplatePreview={jellyfinTemplatePreview}
           curlPreview={curlPreview}
           onAddService={(family) => {
             setServiceModal({ family, draft: structuredClone(EMPTY_DRAFTS[family]) })
@@ -1036,6 +960,7 @@ function CleanArrApp() {
             setServiceModal({ family, draft: toDraft(service) })
           }}
           onEditGeneral={() => setGeneralModalOpen(true)}
+          onSetupWebhook={handleSetupWebhook}
           onClose={() => setShowWizard(false)}
         />
       )}
@@ -1057,6 +982,13 @@ function CleanArrApp() {
         onSave={saveServiceDraft}
         onDelete={deleteServiceDraft}
         onTest={testServiceDraft}
+        jellyfinSetupProps={serviceModal?.family === "jellyfin_server" ? {
+          dashboard,
+          origin,
+          curlPreview,
+          tokenConfigured: Boolean(config?.general.webhook_shared_token),
+          onSetupWebhook: handleSetupWebhook,
+        } : undefined}
       />
 
       <DeleteConfirmModal
@@ -1081,7 +1013,6 @@ function CleanArrApp() {
 function AuthScreen({
   authMode,
   authForm,
-  authError,
   isSubmitting,
   requiresRegistration,
   onFieldChange,
@@ -1089,7 +1020,6 @@ function AuthScreen({
 }: {
   authMode: AuthMode
   authForm: { username: string; password: string; confirmPassword: string }
-  authError: string | null
   isSubmitting: boolean
   requiresRegistration: boolean
   onFieldChange: (field: "username" | "password" | "confirmPassword", value: string) => void
@@ -1118,14 +1048,6 @@ function AuthScreen({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {authError && (
-            <Alert variant="destructive">
-              <CircleAlert className="size-4" />
-              <AlertTitle>Authentication failed</AlertTitle>
-              <AlertDescription>{authError}</AlertDescription>
-            </Alert>
-          )}
-
           <FormField label="Username" htmlFor="auth-username">
             <Input
               id="auth-username"
@@ -1261,7 +1183,7 @@ function DashboardPanel({
   latestActivity,
   allServicesConfigured,
   isLive,
-  onOpenSetup,
+  onToggleDryRun,
   onOpenWizard,
   onEditService,
 }: {
@@ -1272,7 +1194,7 @@ function DashboardPanel({
   latestActivity: DashboardActivity | null
   allServicesConfigured: boolean
   isLive: boolean
-  onOpenSetup: () => void
+  onToggleDryRun: () => Promise<void>
   onOpenWizard: () => void
   onEditService: (name: string) => void
 }) {
@@ -1303,7 +1225,7 @@ function DashboardPanel({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 ml-auto">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 ml-auto">
           <span className="text-sm text-muted-foreground">
             Setup{" "}
             <strong className="text-foreground">
@@ -1319,12 +1241,33 @@ function DashboardPanel({
               Setup wizard
             </Button>
           )}
-          {allServicesConfigured && !isLive && (
-            <Button variant="outline" size="sm" onClick={onOpenSetup}>
-              <Settings2 className="size-4 text-blue-600 dark:text-blue-400" />
-              Enable live mode
-            </Button>
-          )}
+          {/* Mode toggle */}
+          <div className="flex items-center rounded-lg border bg-background p-0.5">
+            <button
+              onClick={() => isLive ? void onToggleDryRun() : undefined}
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors",
+                !isLive
+                  ? "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <ShieldAlert className="size-3.5" />
+              Dry run
+            </button>
+            <button
+              onClick={() => !isLive ? void onToggleDryRun() : undefined}
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors",
+                isLive
+                  ? "bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-200"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Zap className="size-3.5" />
+              Live
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1491,36 +1434,159 @@ function ActivityPanel({
 
 function SettingsPanel({
   config,
-  dashboard,
   isConfigLoading,
-  origin,
-  jellyfinTemplatePreview,
-  curlPreview,
-  onEditGeneral,
+  onSaveGeneral,
 }: {
   config: RuntimeConfigPayload | null
-  dashboard: DashboardPayload | null
   isConfigLoading: boolean
-  origin: string
-  jellyfinTemplatePreview: string
-  curlPreview: string
-  onEditGeneral: () => void
+  onSaveGeneral: (payload: GeneralConfig) => Promise<void>
 }) {
+  const general = config?.general ?? null
+  const [draft, setDraft] = useState<GeneralConfig | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [tokenCopied, setTokenCopied] = useState(false)
+  const [isTokenVisible, setIsTokenVisible] = useState(false)
+
+  useEffect(() => {
+    setDraft(general ? structuredClone(general) : null)
+  }, [general])
+
+  const isDirty = draft && general && JSON.stringify(draft) !== JSON.stringify(general)
+
+  const handleSave = async () => {
+    if (!draft) return
+    setIsSaving(true)
+    try {
+      await onSaveGeneral(draft)
+    } catch (e) {
+      toast.error(normalizeError(e))
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   return (
     <section className="space-y-5">
-      <RuntimeSettingsCard
-        config={config?.general ?? null}
-        isLoading={isConfigLoading}
-        onEdit={onEditGeneral}
-      />
-      <JellyfinSetupPanel
-        dashboard={dashboard}
-        origin={origin}
-        jellyfinTemplatePreview={jellyfinTemplatePreview}
-        curlPreview={curlPreview}
-        tokenConfigured={Boolean(config?.general.webhook_shared_token)}
-        onOpenGeneral={onEditGeneral}
-      />
+      {/* General settings — inline form */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Settings2 className="size-4 text-blue-600 dark:text-blue-400" />
+            General
+          </CardTitle>
+          <CardDescription>Application behaviour and operational parameters.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {isConfigLoading && !config ? (
+            <div className="space-y-3">
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-9 w-full" />
+            </div>
+          ) : draft ? (
+            <>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <FormField label="Log level" htmlFor="settings-log-level">
+                  <select
+                    id="settings-log-level"
+                    value={draft.log_level}
+                    onChange={(e) => setDraft({ ...draft, log_level: e.target.value })}
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  >
+                    {LOG_LEVEL_OPTIONS.map((l) => <option key={l} value={l}>{l}</option>)}
+                  </select>
+                </FormField>
+
+                <FormField label="HTTP timeout (s)" htmlFor="settings-timeout">
+                  <Input
+                    id="settings-timeout"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={String(draft.http_timeout_seconds)}
+                    onChange={(e) => setDraft({ ...draft, http_timeout_seconds: Number(e.target.value) })}
+                  />
+                </FormField>
+
+                <FormField label="Activity retention" htmlFor="settings-retention">
+                  <select
+                    id="settings-retention"
+                    value={String(draft.activity_retention_days)}
+                    onChange={(e) => setDraft({ ...draft, activity_retention_days: Number(e.target.value) })}
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  >
+                    <option value="1">1 day</option>
+                    <option value="7">7 days</option>
+                    <option value="30">30 days</option>
+                    <option value="90">90 days</option>
+                    <option value="365">1 year</option>
+                  </select>
+                </FormField>
+              </div>
+
+              <FormField label="Webhook token" htmlFor="settings-webhook-token">
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 rounded-md border border-input bg-muted px-3 py-2 font-mono text-xs break-all select-all">
+                    {isTokenVisible ? (draft.webhook_shared_token ?? "—") : "•".repeat(32)}
+                  </code>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    title={isTokenVisible ? "Hide token" : "Show token"}
+                    onClick={() => setIsTokenVisible((v) => !v)}
+                  >
+                    {isTokenVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    title="Regenerate token"
+                    onClick={() => setDraft({ ...draft, webhook_shared_token: generateWebhookToken() })}
+                  >
+                    <RefreshCw className="size-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!draft.webhook_shared_token}
+                    title="Copy token"
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(draft.webhook_shared_token ?? "")
+                      setTokenCopied(true)
+                      setTimeout(() => setTokenCopied(false), 2000)
+                    }}
+                  >
+                    {tokenCopied
+                      ? <CheckCircle2 className="size-4 text-green-600 dark:text-green-400" />
+                      : <Copy className="size-4" />}
+                  </Button>
+                </div>
+                <FieldHint text="Auto-generated. Regenerate only if you need to rotate it — then re-run auto-configure in the Jellyfin step." />
+              </FormField>
+
+              <div className="flex items-center justify-between border-t pt-4">
+                <p className="text-xs text-muted-foreground">
+                  {isDirty ? "You have unsaved changes." : "All settings saved."}
+                </p>
+                <Button onClick={handleSave} disabled={!isDirty || isSaving}>
+                  {isSaving
+                    ? <LoaderCircle className="size-4 animate-spin" />
+                    : <CheckCircle2 className="size-4 text-green-600 dark:text-green-400" />}
+                  Save changes
+                </Button>
+              </div>
+            </>
+          ) : (
+            <EmptyState
+              title="Settings unavailable"
+              description="Refresh the configuration and try again."
+            />
+          )}
+        </CardContent>
+      </Card>
+
     </section>
   )
 }
@@ -1532,22 +1598,22 @@ function SetupWizard({
   dashboard,
   isConfigLoading,
   origin,
-  jellyfinTemplatePreview,
   curlPreview,
   onAddService,
   onEditService,
   onEditGeneral,
+  onSetupWebhook,
   onClose,
 }: {
   config: RuntimeConfigPayload | null
   dashboard: DashboardPayload | null
   isConfigLoading: boolean
   origin: string
-  jellyfinTemplatePreview: string
   curlPreview: string
   onAddService: (family: ServiceFamily) => void
   onEditService: (family: ServiceFamily, service: ServiceRecord) => void
   onEditGeneral: () => void
+  onSetupWebhook: (webhookUrl: string) => Promise<{ found: boolean; configured: boolean; message: string }>
   onClose: () => void
 }) {
   const WIZARD_STEPS: Array<{ family: ServiceFamily | null; label: string }> = [
@@ -1560,7 +1626,7 @@ function SetupWizard({
 
   return (
     <div className="fixed inset-0 z-50 overflow-auto bg-background/98 backdrop-blur-sm">
-      <div className="mx-auto max-w-3xl px-4 py-6">
+      <div className="mx-auto max-w-4xl px-6 py-6">
         {/* Header */}
         <div className="mb-6 flex items-center justify-between">
           <div>
@@ -1624,10 +1690,11 @@ function SetupWizard({
                 <JellyfinSetupPanel
                   dashboard={dashboard}
                   origin={origin}
-                  jellyfinTemplatePreview={jellyfinTemplatePreview}
                   curlPreview={curlPreview}
                   tokenConfigured={Boolean(config?.general.webhook_shared_token)}
+                  jellyfinConfigured={Boolean(resolveActiveService(getServices(config, "jellyfin_server")))}
                   onOpenGeneral={onEditGeneral}
+                  onSetupWebhook={onSetupWebhook}
                 />
               </div>
             </div>
@@ -1663,60 +1730,33 @@ function SetupWizard({
 
 // ─── Jellyfin setup panel ─────────────────────────────────────────────────────
 
+type SetupState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "success"; message: string }
+  | { status: "not_found"; message: string }
+  | { status: "error"; message: string }
+
 function JellyfinSetupPanel({
   dashboard,
   origin,
-  jellyfinTemplatePreview,
   curlPreview,
   tokenConfigured,
+  jellyfinConfigured,
   onOpenGeneral,
+  onSetupWebhook,
 }: {
   dashboard: DashboardPayload | null
   origin: string
-  jellyfinTemplatePreview: string
   curlPreview: string
   tokenConfigured: boolean
+  jellyfinConfigured: boolean
   onOpenGeneral: () => void
+  onSetupWebhook: (webhookUrl: string) => Promise<{ found: boolean; configured: boolean; message: string }>
 }) {
   const webhookUrl = `${origin}/webhook/jellyfin`
-  const genericFieldRows: JellyfinFieldInstruction[] = [
-    {
-      label: "Webhook name",
-      value: "CleanArr",
-      hint: "Any display name works. CleanArr makes it easy to spot.",
-      copyValue: "CleanArr",
-    },
-    {
-      label: "Webhook URL",
-      value: webhookUrl,
-      hint: "Paste this into Jellyfin's Webhook Url field exactly as-is.",
-      copyValue: webhookUrl,
-    },
-    {
-      label: "Method",
-      value: "POST",
-      hint: "The Generic destination must send a POST request.",
-      copyValue: "POST",
-    },
-    {
-      label: "Header name",
-      value: "X-Webhook-Token",
-      hint: "Add exactly one custom header with this name.",
-      copyValue: "X-Webhook-Token",
-    },
-    {
-      label: "Header value",
-      value: tokenConfigured
-        ? "Use the exact token from Runtime settings"
-        : "Open Runtime settings first and save a webhook token",
-      hint: "The value must match CleanArr runtime settings exactly, character for character.",
-    },
-    {
-      label: "Notification types",
-      value: "Enable only ItemDeleted",
-      hint: "CleanArr ignores non-destructive events.",
-    },
-  ]
+  const [setupState, setSetupState] = useState<SetupState>({ status: "idle" })
+  const [curlOpen, setCurlOpen] = useState(false)
 
   const webhookStatus = dashboard?.webhook_status
   const webhookTone = getWebhookStatusTone(webhookStatus?.outcome ?? "waiting")
@@ -1725,121 +1765,129 @@ function JellyfinSetupPanel({
     : "Not received yet"
   const statusLabel = getWebhookStatusLabel(webhookStatus?.outcome ?? "waiting")
 
+  async function handleSetup() {
+    setSetupState({ status: "loading" })
+    try {
+      const result = await onSetupWebhook(webhookUrl)
+      if (result.configured) {
+        setSetupState({ status: "success", message: result.message })
+      } else if (!result.found) {
+        setSetupState({ status: "not_found", message: result.message })
+      } else {
+        setSetupState({ status: "error", message: result.message })
+      }
+    } catch (err) {
+      setSetupState({
+        status: "error",
+        message: err instanceof Error ? err.message : "Unknown error",
+      })
+    }
+  }
+
   return (
     <div className="space-y-5">
-      <GuideCard
-        tone="blue"
-        title="Step 1 — Install the Jellyfin Webhook plugin"
-        description="CleanArr needs the Webhook plugin. Jellyfin is an event source only, not a saved downstream integration."
-      >
-        <InstructionList items={JELLYFIN_INSTALL_STEPS} />
-      </GuideCard>
-
-      <GuideCard
-        tone={tokenConfigured ? "green" : "red"}
-        title={tokenConfigured ? "Step 2 — Webhook token ready" : "Step 2 — Create the webhook token first"}
-        description={
-          tokenConfigured
-            ? "Use the same token in the Jellyfin Generic webhook header."
-            : "Open Runtime settings and save the shared webhook token before continuing."
-        }
-      >
-        <div className="flex flex-wrap items-center gap-3">
-          <StatusPill
-            tone={tokenConfigured ? "green" : "red"}
-            label={tokenConfigured ? "Token configured" : "Token missing"}
-          />
-          <Button variant="outline" size="sm" onClick={onOpenGeneral}>
-            <Settings2 className="size-4 text-blue-600 dark:text-blue-400" />
-            Open runtime settings
-          </Button>
-        </div>
-      </GuideCard>
-
+      {/* Auto-configure */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
             <Webhook className="size-4 text-blue-600 dark:text-blue-400" />
-            Step 3 — Add a Generic destination in Jellyfin
+            Auto-configure webhook
           </CardTitle>
           <CardDescription>
-            Follow these sub-steps inside Jellyfin so the destination sends ItemDeleted events to CleanArr.
+            CleanArr configures the Jellyfin Webhook plugin automatically. The plugin must already be
+            installed in Jellyfin → Dashboard → Plugins → Catalog.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <GuideCard
-            tone="blue"
-            title="3.1 Open the Generic destination form"
-            description="Jellyfin → Dashboard → Plugins → Webhook → Click Add Generic Destination."
-          >
-            <InstructionList items={JELLYFIN_CONFIG_STEPS} />
-          </GuideCard>
+          {!jellyfinConfigured && (
+            <Alert>
+              <Info className="size-4 text-blue-600 dark:text-blue-400" />
+              <AlertDescription>
+                Connect the Jellyfin server (step 1.2) before auto-configuring the webhook.
+              </AlertDescription>
+            </Alert>
+          )}
+          {jellyfinConfigured && !tokenConfigured && (
+            <Alert>
+              <CircleAlert className="size-4" />
+              <AlertDescription>
+                Set a webhook token in{" "}
+                <button
+                  type="button"
+                  className="underline underline-offset-2"
+                  onClick={onOpenGeneral}
+                >
+                  Runtime settings
+                </button>{" "}
+                first — it will be included in the plugin config.
+              </AlertDescription>
+            </Alert>
+          )}
 
-          <GuideCard
-            tone="green"
-            title="3.2 Fill these fields exactly"
-            description="These values map directly to fields in Jellyfin's Webhook plugin."
-          >
-            <div className="space-y-2">
-              {genericFieldRows.map((row) => (
-                <JellyfinFieldRow key={row.label} row={row} />
-              ))}
-            </div>
-          </GuideCard>
+          <div className="flex items-center gap-3">
+            <Button
+              disabled={!jellyfinConfigured || setupState.status === "loading"}
+              onClick={() => void handleSetup()}
+            >
+              {setupState.status === "loading" ? (
+                <RefreshCw className="size-4 animate-spin" />
+              ) : setupState.status === "success" ? (
+                <CheckCircle2 className="size-4" />
+              ) : (
+                <Webhook className="size-4" />
+              )}
+              {setupState.status === "loading"
+                ? "Configuring…"
+                : setupState.status === "success"
+                  ? "Configured"
+                  : "Auto-configure webhook"}
+            </Button>
+            {setupState.status === "success" && <StatusPill tone="green" label="Done" />}
+          </div>
 
-          <GuideCard
-            tone="blue"
-            title="3.3 Enable only supported item types"
-            description="CleanArr handles movie and TV deletion events."
-          >
-            <InstructionList items={JELLYFIN_ITEM_TYPE_STEPS} />
-          </GuideCard>
-
-          <GuideCard
-            tone="green"
-            title="3.4 Paste the request body template"
-            description="Do not replace the placeholders. Jellyfin resolves them when it sends the webhook."
-          >
-            <Textarea
-              readOnly
-              value={jellyfinTemplatePreview}
-              className="min-h-[280px] font-mono text-xs"
-            />
-            <div className="mt-3">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void navigator.clipboard.writeText(jellyfinTemplatePreview)}
+          {setupState.status === "success" && (
+            <Alert>
+              <CheckCircle2 className="size-4 text-green-600 dark:text-green-400" />
+              <AlertDescription>{setupState.message}</AlertDescription>
+            </Alert>
+          )}
+          {setupState.status === "error" && (
+            <Alert variant="destructive">
+              <CircleAlert className="size-4" />
+              <AlertDescription>{setupState.message}</AlertDescription>
+            </Alert>
+          )}
+          {setupState.status === "not_found" && (
+            <div className="space-y-3">
+              <Alert variant="destructive">
+                <CircleAlert className="size-4" />
+                <AlertDescription>{setupState.message}</AlertDescription>
+              </Alert>
+              <GuideCard
+                tone="blue"
+                title="Install the Jellyfin Webhook plugin"
+                description="Jellyfin → Dashboard → Plugins → Catalog → search Webhook → install → restart if prompted."
               >
-                <Copy className="size-4 text-blue-600 dark:text-blue-400" />
-                Copy template
-              </Button>
+                <InstructionList items={JELLYFIN_INSTALL_STEPS} />
+              </GuideCard>
             </div>
-          </GuideCard>
-
-          <GuideCard
-            tone="blue"
-            title="3.5 Save the destination"
-            description="The destination is active only after Jellyfin saves the whole Webhook plugin page."
-          >
-            <InstructionList items={JELLYFIN_SAVE_STEPS} />
-          </GuideCard>
+          )}
         </CardContent>
       </Card>
 
-      {/* Verification */}
+      {/* Verify delivery */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
             <TestTubeDiagonal className="size-4 text-green-600 dark:text-green-400" />
-            Step 4 — Verify delivery
+            Verify delivery
           </CardTitle>
           <CardDescription>
-            CleanArr exposes webhook diagnostics because the Jellyfin plugin has no built-in test button.
+            CleanArr records every inbound webhook attempt so you can confirm delivery without a real
+            deletion event.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Status row */}
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             <ReadOnlyDetail label="Delivery status" value={statusLabel} />
             <ReadOnlyDetail label="Last attempt" value={lastAttemptAt} />
@@ -1894,18 +1942,30 @@ function JellyfinSetupPanel({
             </AlertDescription>
           </Alert>
 
-          <div className="grid gap-4 xl:grid-cols-2">
-            <Card className="border-dashed">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <Sparkles className="size-4 text-green-600 dark:text-green-400" />
-                  Browser-side smoke test
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Tests connectivity only. Use the template above for the actual Jellyfin plugin body.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
+          {/* Collapsible smoke-test cURL */}
+          <Card className="border-dashed">
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm"
+              onClick={() => setCurlOpen((v) => !v)}
+            >
+              {curlOpen ? (
+                <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+              )}
+              <Sparkles className="size-4 shrink-0 text-green-600 dark:text-green-400" />
+              <span className="font-medium">Smoke test (cURL)</span>
+              <span className="ml-auto text-xs text-muted-foreground">
+                {tokenConfigured ? "token pre-filled" : "configure token first"}
+              </span>
+            </button>
+            {curlOpen && (
+              <CardContent className="space-y-3 border-t pt-3">
+                <p className="text-xs text-muted-foreground">
+                  Sends a synthetic ItemDeleted event to CleanArr. Use this to confirm network
+                  connectivity and token auth before a real deletion.
+                </p>
                 <Textarea
                   readOnly
                   value={curlPreview}
@@ -1920,26 +1980,8 @@ function JellyfinSetupPanel({
                   Copy cURL
                 </Button>
               </CardContent>
-            </Card>
-
-            <div className="space-y-3">
-              <GuideCard
-                tone="blue"
-                title="How to verify"
-                description="Use both the smoke test and a real Jellyfin deletion."
-              >
-                <InstructionList items={JELLYFIN_VERIFY_STEPS} />
-              </GuideCard>
-
-              <GuideCard
-                tone={webhookTone}
-                title="If verification fails"
-                description="Use the diagnostics above to decide what to fix."
-              >
-                <InstructionList items={JELLYFIN_TROUBLESHOOTING_STEPS} />
-              </GuideCard>
-            </div>
-          </div>
+            )}
+          </Card>
         </CardContent>
       </Card>
     </div>
@@ -2136,15 +2178,11 @@ function GeneralSettingsModal({
 }) {
   const [draft, setDraft] = useState<GeneralConfig | null>(config)
   const [isSaving, setIsSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [tokenFeedback, setTokenFeedback] = useState<FlashState>(null)
-  const [isWebhookTokenVisible, setIsWebhookTokenVisible] = useState(false)
+  const [tokenCopied, setTokenCopied] = useState(false)
 
   useEffect(() => {
     setDraft(config ? structuredClone(config) : null)
-    setError(null)
-    setTokenFeedback(null)
-    setIsWebhookTokenVisible(false)
+    setTokenCopied(false)
   }, [config, open])
 
   return (
@@ -2160,11 +2198,10 @@ function GeneralSettingsModal({
             onClick={async () => {
               if (!draft) return
               setIsSaving(true)
-              setError(null)
               try {
                 await onSave(draft)
               } catch (e) {
-                setError(normalizeError(e))
+                toast.error(normalizeError(e))
               } finally {
                 setIsSaving(false)
               }
@@ -2182,8 +2219,6 @@ function GeneralSettingsModal({
     >
       {draft ? (
         <div className="space-y-5">
-          {error && <ErrorBanner message={error} />}
-
           <GuideCard
             tone="blue"
             title="Recommended first-run settings"
@@ -2241,43 +2276,20 @@ function GeneralSettingsModal({
             </FormField>
           </div>
 
-          <FormField label="Webhook shared token" htmlFor="general-webhook-token">
-            <div className="relative">
-              <Input
-                id="general-webhook-token"
-                type={isWebhookTokenVisible ? "text" : "password"}
-                value={draft.webhook_shared_token ?? ""}
-                onChange={(e) =>
-                  setDraft({ ...draft, webhook_shared_token: e.target.value || null })
-                }
-                className="pr-11"
-              />
-              <button
-                type="button"
-                className="absolute inset-y-0 right-0 inline-flex items-center justify-center px-3 text-muted-foreground transition-colors hover:text-foreground"
-                aria-label={isWebhookTokenVisible ? "Hide token" : "Show token"}
-                onClick={() => setIsWebhookTokenVisible((v) => !v)}
-              >
-                {isWebhookTokenVisible ? (
-                  <EyeOff className="size-4 text-blue-600 dark:text-blue-400" />
-                ) : (
-                  <Eye className="size-4 text-blue-600 dark:text-blue-400" />
-                )}
-              </button>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-2">
+          <FormField label="Webhook token" htmlFor="general-webhook-token">
+            <div className="flex items-center gap-2">
+              <code className="flex-1 rounded-md border border-input bg-muted px-3 py-2 font-mono text-xs break-all select-all">
+                {draft.webhook_shared_token ?? "—"}
+              </code>
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  const next = generateWebhookToken()
-                  setDraft({ ...draft, webhook_shared_token: next })
-                  setTokenFeedback({ kind: "success", message: "New token generated." })
+                  setDraft({ ...draft, webhook_shared_token: generateWebhookToken() })
                 }}
               >
-                <RefreshCw className="size-4 text-blue-600 dark:text-blue-400" />
-                Generate
+                <RefreshCw className="size-4" />
               </Button>
               <Button
                 type="button"
@@ -2285,31 +2297,19 @@ function GeneralSettingsModal({
                 size="sm"
                 disabled={!draft.webhook_shared_token}
                 onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(draft.webhook_shared_token ?? "")
-                    setTokenFeedback({ kind: "success", message: "Copied to clipboard." })
-                  } catch (e) {
-                    setTokenFeedback({ kind: "error", message: normalizeError(e) })
-                  }
+                  await navigator.clipboard.writeText(draft.webhook_shared_token ?? "")
+                  setTokenCopied(true)
+                  setTimeout(() => setTokenCopied(false), 2000)
                 }}
               >
-                <Copy className="size-4 text-blue-600 dark:text-blue-400" />
-                Copy
+                {tokenCopied ? (
+                  <CheckCircle2 className="size-4 text-green-600 dark:text-green-400" />
+                ) : (
+                  <Copy className="size-4" />
+                )}
               </Button>
             </div>
-            <FieldHint text="Jellyfin must send this exact token in the X-Webhook-Token header." />
-            {tokenFeedback && (
-              <p
-                className={cn(
-                  "text-xs",
-                  tokenFeedback.kind === "success"
-                    ? "text-green-700 dark:text-green-300"
-                    : "text-red-700 dark:text-red-300",
-                )}
-              >
-                {tokenFeedback.message}
-              </p>
-            )}
+            <FieldHint text="Auto-generated. Regenerate only if you need to rotate it — then re-run auto-configure in the Jellyfin step." />
           </FormField>
 
           <label className="inline-flex cursor-pointer items-center gap-3 text-sm">
@@ -2339,24 +2339,28 @@ function ServiceModal({
   onSave,
   onDelete,
   onTest,
+  jellyfinSetupProps,
 }: {
   state: ServiceModalState | null
   onClose: () => void
   onSave: (family: ServiceFamily, draft: ServiceDraft) => Promise<void>
   onDelete: (family: ServiceFamily, serviceId: string) => Promise<void>
   onTest: (family: ServiceFamily, draft: ServiceDraft) => Promise<ConnectionTestResponse>
+  jellyfinSetupProps?: {
+    dashboard: DashboardPayload | null
+    origin: string
+    curlPreview: string
+    tokenConfigured: boolean
+    onSetupWebhook: (webhookUrl: string) => Promise<{ found: boolean; configured: boolean; message: string }>
+  }
 }) {
   const [draft, setDraft] = useState<ServiceDraft | null>(state?.draft ?? null)
-  const [testResult, setTestResult] = useState<ConnectionTestResponse | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [isTesting, setIsTesting] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     setDraft(state ? structuredClone(state.draft) : null)
-    setTestResult(null)
-    setError(null)
   }, [state])
 
   if (!state) return null
@@ -2379,11 +2383,10 @@ function ServiceModal({
                 onClick={async () => {
                   if (!draft?.id) return
                   setIsDeleting(true)
-                  setError(null)
                   try {
                     await onDelete(state.family, draft.id)
                   } catch (e) {
-                    setError(normalizeError(e))
+                    toast.error(normalizeError(e))
                   } finally {
                     setIsDeleting(false)
                   }
@@ -2402,13 +2405,15 @@ function ServiceModal({
               onClick={async () => {
                 if (!draft) return
                 setIsTesting(true)
-                setError(null)
-                setTestResult(null)
                 try {
                   const result = await onTest(state.family, draft)
-                  setTestResult(result)
+                  if (result.ok) {
+                    toast.success(result.message)
+                  } else {
+                    toast.error(result.message)
+                  }
                 } catch (e) {
-                  setTestResult({ ok: false, message: normalizeError(e) })
+                  toast.error(normalizeError(e))
                 } finally {
                   setIsTesting(false)
                 }
@@ -2426,11 +2431,10 @@ function ServiceModal({
               onClick={async () => {
                 if (!draft) return
                 setIsSaving(true)
-                setError(null)
                 try {
                   await onSave(state.family, draft)
                 } catch (e) {
-                  setError(normalizeError(e))
+                  toast.error(normalizeError(e))
                 } finally {
                   setIsSaving(false)
                 }
@@ -2449,9 +2453,6 @@ function ServiceModal({
     >
       {draft ? (
         <div className="space-y-4">
-          {error && <ErrorBanner message={error} />}
-          {testResult && <ConnectionResultBanner result={testResult} />}
-
           <GuideCard
             tone={meta.accent}
             title="Before you save"
@@ -2519,6 +2520,21 @@ function ServiceModal({
               Use as runtime target
             </label>
           </div>
+
+          {state.family === "jellyfin_server" && jellyfinSetupProps && (
+            <div className="mt-6 space-y-5 border-t pt-5">
+              <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Webhook</p>
+              <JellyfinSetupPanel
+                dashboard={jellyfinSetupProps.dashboard}
+                origin={jellyfinSetupProps.origin}
+                curlPreview={jellyfinSetupProps.curlPreview}
+                tokenConfigured={jellyfinSetupProps.tokenConfigured}
+                jellyfinConfigured={Boolean(draft?.id)}
+                onOpenGeneral={() => {}}
+                onSetupWebhook={jellyfinSetupProps.onSetupWebhook}
+              />
+            </div>
+          )}
         </div>
       ) : null}
     </Modal>
@@ -2609,29 +2625,6 @@ function InstructionList({ items }: { items: string[] }) {
   )
 }
 
-function JellyfinFieldRow({ row }: { row: JellyfinFieldInstruction }) {
-  return (
-    <div className="flex items-start justify-between gap-3 rounded-lg border px-3 py-2.5">
-      <div className="min-w-0 space-y-1">
-        <p className="text-xs uppercase tracking-wide text-muted-foreground">{row.label}</p>
-        <code className="block break-all text-sm">{row.value}</code>
-        <p className="text-xs text-muted-foreground">{row.hint}</p>
-      </div>
-      {row.copyValue && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="shrink-0"
-          onClick={() => void navigator.clipboard.writeText(row.copyValue!)}
-        >
-          <Copy className="size-3.5 text-blue-600 dark:text-blue-400" />
-          Copy
-        </Button>
-      )}
-    </div>
-  )
-}
 
 function SummaryTile({ label, value }: { label: string; value: string }) {
   return (
@@ -2695,28 +2688,6 @@ function StatusDot({ healthStatus }: { healthStatus: HealthStatus }) {
   return <span className="inline-flex size-2 rounded-full bg-gray-300 dark:bg-gray-600" title="Not configured" />
 }
 
-function ConnectionResultBanner({ result }: { result: ConnectionTestResponse }) {
-  return (
-    <div
-      className={cn(
-        "rounded-lg border px-4 py-3 text-sm",
-        result.ok
-          ? "border-green-200 bg-green-50 text-green-800 dark:border-green-900 dark:bg-green-950/40 dark:text-green-200"
-          : "border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200",
-      )}
-    >
-      <div className="flex items-center gap-2 font-medium">
-        {result.ok ? (
-          <CheckCircle2 className="size-4 text-green-600 dark:text-green-400" />
-        ) : (
-          <CircleAlert className="size-4 text-red-600 dark:text-red-400" />
-        )}
-        {result.ok ? "Connection successful" : "Connection failed"}
-      </div>
-      <p className="mt-1.5 text-xs">{result.message}</p>
-    </div>
-  )
-}
 
 function ErrorBanner({ message }: { message: string }) {
   return (
@@ -2808,13 +2779,11 @@ function ActionRow({ action }: { action: DashboardAction }) {
 function LibrarySeriesTab({
   library,
   isLoading,
-  error,
   onRefresh,
   onDelete,
 }: {
   library: LibrarySeriesResponse | null
   isLoading: boolean
-  error: string | null
   onRefresh: () => void
   onDelete: (target: LibraryDeleteTarget) => void
 }) {
@@ -2844,8 +2813,6 @@ function LibrarySeriesTab({
           Refresh
         </Button>
       </div>
-
-      {error && <ErrorBanner message={error} />}
 
       {isLoading && !library && (
         <div className="space-y-3">
@@ -2977,13 +2944,11 @@ function LibrarySeriesTab({
 function LibraryMoviesTab({
   movies,
   isLoading,
-  error,
   onRefresh,
   onDelete,
 }: {
   movies: LibraryMoviesResponse | null
   isLoading: boolean
-  error: string | null
   onRefresh: () => void
   onDelete: (target: LibraryDeleteTarget) => void
 }) {
@@ -3004,8 +2969,6 @@ function LibraryMoviesTab({
           Refresh
         </Button>
       </div>
-
-      {error && <ErrorBanner message={error} />}
 
       {isLoading && !movies && (
         <div className="space-y-3">
@@ -3080,10 +3043,8 @@ function LibraryMoviesTab({
 function LibraryPanel({
   library,
   isLibraryLoading,
-  libraryError,
   libraryMovies,
   isLibraryMoviesLoading,
-  libraryMoviesError,
   isLive,
   onRefreshSeries,
   onRefreshMovies,
@@ -3091,10 +3052,8 @@ function LibraryPanel({
 }: {
   library: LibrarySeriesResponse | null
   isLibraryLoading: boolean
-  libraryError: string | null
   libraryMovies: LibraryMoviesResponse | null
   isLibraryMoviesLoading: boolean
-  libraryMoviesError: string | null
   isLive: boolean
   onRefreshSeries: () => void
   onRefreshMovies: () => void
@@ -3134,7 +3093,6 @@ function LibraryPanel({
           <LibrarySeriesTab
             library={library}
             isLoading={isLibraryLoading}
-            error={libraryError}
             onRefresh={onRefreshSeries}
             onDelete={onDelete}
           />
@@ -3143,7 +3101,6 @@ function LibraryPanel({
           <LibraryMoviesTab
             movies={libraryMovies}
             isLoading={isLibraryMoviesLoading}
-            error={libraryMoviesError}
             onRefresh={onRefreshMovies}
             onDelete={onDelete}
           />
@@ -3270,12 +3227,6 @@ function normalizeError(error: unknown): string {
   return "Unexpected request error"
 }
 
-function generateWebhookToken(): string {
-  const bytes = new Uint8Array(24)
-  window.crypto.getRandomValues(bytes)
-  return Array.from(bytes, (v) => v.toString(16).padStart(2, "0")).join("")
-}
-
 function getWebhookStatusTone(outcome: string): "blue" | "green" | "red" {
   if (outcome === "processed") return "green"
   if (outcome === "rejected_auth" || outcome === "invalid_payload") return "red"
@@ -3310,6 +3261,12 @@ function resolveActiveService(services: ServiceRecord[]): ServiceRecord | null {
 
 function isServiceFamily(step: SetupStepId): step is ServiceFamily {
   return SERVICE_FAMILIES.includes(step as ServiceFamily)
+}
+
+function generateWebhookToken(): string {
+  const bytes = new Uint8Array(24)
+  window.crypto.getRandomValues(bytes)
+  return Array.from(bytes, (v) => v.toString(16).padStart(2, "0")).join("")
 }
 
 function isSetupStepReady(step: SetupStepId, config: RuntimeConfigPayload | null): boolean {
