@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Sequence
 from typing import Any
 
@@ -733,6 +734,99 @@ class JellyfinServerClient(JsonServiceClient):
     async def delete_item(self, item_id: str) -> None:
         await self._request("DELETE", f"/Items/{item_id}", expected_statuses={200, 204, 404})
 
+    async def list_plugins(self) -> list[dict[str, Any]]:
+        """Return the list of installed Jellyfin plugins."""
+        data = await self._request("GET", "/Plugins")
+        return data if isinstance(data, list) else []
+
+    async def get_plugin_config_raw(self, plugin_id: str) -> Any:
+        """Fetch a plugin's configuration object."""
+        return await self._request("GET", f"/Plugins/{plugin_id}/Configuration")
+
+    async def set_plugin_config_raw(self, plugin_id: str, config: Any) -> None:
+        """Write back a plugin's configuration object."""
+        await self._request(
+            "POST",
+            f"/Plugins/{plugin_id}/Configuration",
+            json=config,
+            expected_statuses={200, 204},
+        )
+
+    async def setup_webhook(
+        self,
+        *,
+        webhook_url: str,
+        webhook_token: str | None,
+        template: str,
+    ) -> dict[str, Any]:
+        """Auto-configure the Jellyfin Webhook plugin for CleanArr.
+
+        Returns a dict with keys: ``found``, ``configured``, ``message``.
+        """
+        plugins = await self.list_plugins()
+        webhook_plugin = next(
+            (p for p in plugins if "webhook" in p.get("Name", "").lower()),
+            None,
+        )
+        if webhook_plugin is None:
+            return {
+                "found": False,
+                "configured": False,
+                "message": (
+                    "Webhook plugin not found. "
+                    "Install it via Jellyfin → Dashboard → Plugins → Catalog → Webhook."
+                ),
+            }
+
+        plugin_id = webhook_plugin["Id"]
+        config = await self.get_plugin_config_raw(plugin_id)
+        if not isinstance(config, dict):
+            config = {}
+
+        generics: list[dict[str, Any]] = list(config.get("GenericOptions", []))
+
+        # Remove all previous CleanArr entries and leftover entries with no name
+        # and no URI (artifacts of earlier incorrect configuration attempts).
+        generics = [
+            g for g in generics
+            if g.get("WebhookName") != "CleanArr"
+            and (g.get("WebhookName") or g.get("WebhookUri"))
+        ]
+
+        headers: list[dict[str, str]] = (
+            [{"Key": "X-Webhook-Token", "Value": webhook_token}] if webhook_token else []
+        )
+        template_b64 = base64.b64encode(template.encode()).decode()
+        our_entry: dict[str, Any] = {
+            "WebhookName": "CleanArr",
+            "WebhookUri": webhook_url,
+            "NotificationTypes": ["ItemDeleted"],
+            "EnableMovies": True,
+            "EnableEpisodes": True,
+            "EnableSeries": True,
+            "EnableSeasons": True,
+            "EnableAlbums": True,
+            "EnableSongs": True,
+            "EnableVideos": True,
+            "EnableWebhook": True,
+            "SendAllProperties": False,
+            "TrimWhitespace": False,
+            "SkipEmptyMessageBody": False,
+            "Template": template_b64,
+            "Headers": headers,
+            "Fields": [],
+            "UserFilter": [],
+        }
+        generics.append(our_entry)
+        config["GenericOptions"] = generics
+
+        await self.set_plugin_config_raw(plugin_id, config)
+        return {
+            "found": True,
+            "configured": True,
+            "message": "Webhook configured in Jellyfin successfully.",
+        }
+
 
 class NullJellyfinServerClient:
     """No-op fallback when no active Jellyfin server is configured."""
@@ -748,6 +842,24 @@ class NullJellyfinServerClient:
 
     async def delete_item(self, item_id: str) -> None:
         return None
+
+    async def list_plugins(self) -> list[dict[str, Any]]:
+        return []
+
+    async def get_plugin_config_raw(self, plugin_id: str) -> Any:
+        return {}
+
+    async def set_plugin_config_raw(self, plugin_id: str, config: Any) -> None:
+        return None
+
+    async def setup_webhook(
+        self,
+        *,
+        webhook_url: str,
+        webhook_token: str | None,
+        template: str,
+    ) -> dict[str, Any]:
+        return {"found": False, "configured": False, "message": "Jellyfin not configured."}
 
 
 class NullDownloaderClient:

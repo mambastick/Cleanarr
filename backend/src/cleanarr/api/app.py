@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from cleanarr.api.auth_schemas import (
     AdminCredentialsRequest,
@@ -29,6 +29,7 @@ from cleanarr.api.config_schemas import (
     SonarrServiceRequest,
 )
 from cleanarr.api.dashboard import (
+    JELLYFIN_GENERIC_TEMPLATE,
     ActivityStore,
     DashboardResponse,
     HealthProbeStore,
@@ -145,15 +146,24 @@ async def require_admin_token(
     )
 
 
+class SetupWebhookRequest(BaseModel):
+    webhook_url: str
+
+
+class SetupWebhookResponse(BaseModel):
+    found: bool
+    configured: bool
+    message: str
+
+
 def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     """Create the FastAPI application."""
 
     own_container = container is None
     resolved_container = container or ServiceContainer.from_settings(Settings())
     settings = resolved_container.settings
-    db_path = Path(settings.config_state_path).parent / "activity.db"
     activity_store = ActivityStore(
-        db_path,
+        Path(settings.db_path),
         retention_days=resolved_container.config.general.activity_retention_days,
     )
     webhook_attempt_store = WebhookAttemptStore()
@@ -562,6 +572,23 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     ) -> ConnectionTestResponse:
         result = await request.app.state.container.config_service.test_service(payload.to_domain())
         return ConnectionTestResponse.from_domain(result)
+
+    @app.post(
+        "/api/config/jellyfin/setup-webhook",
+        response_model=SetupWebhookResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def setup_jellyfin_webhook(
+        request: Request,
+        payload: SetupWebhookRequest,
+    ) -> SetupWebhookResponse:
+        container = request.app.state.container
+        result = await container.jellyfin_server.setup_webhook(
+            webhook_url=payload.webhook_url,
+            webhook_token=container.config.general.webhook_shared_token,
+            template=JELLYFIN_GENERIC_TEMPLATE,
+        )
+        return SetupWebhookResponse(**result)
 
     @app.post(
         "/webhook/jellyfin",
