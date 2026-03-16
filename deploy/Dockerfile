@@ -18,7 +18,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN useradd --create-home --shell /usr/sbin/nologin cleanarr
+RUN useradd --create-home --shell /usr/sbin/nologin cleanarr \
+    && mkdir -p /config && chown cleanarr:cleanarr /config
 
 COPY backend/pyproject.toml README.md /app/
 COPY backend/src /app/src
