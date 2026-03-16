@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 from dataclasses import dataclass
 from typing import TypeVar
 
@@ -280,8 +281,12 @@ class RuntimeConfigurationService:
 
     @staticmethod
     def _normalize(config: RuntimeConfig) -> RuntimeConfig:
+        general = config.general
+        if not general.webhook_shared_token:
+            general = general.model_copy(update={"webhook_shared_token": secrets.token_hex(24)})
         return config.model_copy(
             update={
+                "general": general,
                 "radarr": RuntimeConfigurationService._normalize_defaults(config.radarr),
                 "sonarr": RuntimeConfigurationService._normalize_defaults(config.sonarr),
                 "jellyseerr": RuntimeConfigurationService._normalize_defaults(config.jellyseerr),
