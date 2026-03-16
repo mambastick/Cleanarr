@@ -113,14 +113,12 @@ Open **http://localhost:8089** — the setup wizard walks you through the rest.
 ### Docker (manual)
 
 ```bash
-docker build -f deploy/Dockerfile -t cleanarr:latest .
-
 docker run -d \
   --name cleanarr \
   -p 8089:8089 \
   -e DRY_RUN=true \
   -v cleanarr-config:/config \
-  cleanarr:latest
+  ghcr.io/mambastick/cleanarr:latest
 ```
 
 ### Kubernetes
