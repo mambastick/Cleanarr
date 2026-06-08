@@ -610,6 +610,8 @@ class QbittorrentClient:
         except httpx.HTTPError as exc:
             raise ExternalServiceError(self._system, f"qBittorrent login failed: {exc}") from exc
 
+        if response.status_code == 204:
+            return
         if response.status_code in {401, 403} or response.text.strip() != "Ok.":
             raise AuthenticationError(self._system, "qBittorrent rejected the configured credentials.")
 

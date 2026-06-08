@@ -166,6 +166,19 @@ async def test_jellyseerr_client_adds_xsrf_header_for_mutations() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_qbittorrent_client_accepts_no_content_login_response() -> None:
+    respx.post("http://qbt/api/v2/auth/login").respond(status_code=204)
+    respx.get("http://qbt/api/v2/app/version").respond(text="v5.2.1")
+
+    client = QbittorrentClient(base_url="http://qbt", username="user", password="pass", timeout_seconds=5)
+    try:
+        await client.ping()
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_qbittorrent_client_marks_absent_hashes() -> None:
     respx.post("http://qbt/api/v2/auth/login").respond(text="Ok.")
     respx.get("http://qbt/api/v2/torrents/info").respond(json=[{"hash": "AA"}])
