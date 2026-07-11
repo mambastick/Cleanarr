@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 import respx
 
+from cleanarr.domain import AuthenticationError, ExternalServiceError
 from cleanarr.infrastructure.clients import JellyseerrClient, QbittorrentClient, RadarrClient, SonarrClient
 
 
@@ -142,8 +143,37 @@ async def test_jellyseerr_client_parses_media_requests_and_issues() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_jellyseerr_client_adds_xsrf_header_for_mutations() -> None:
-    head_route = respx.head("http://jellyseerr/api/v1/request/2").respond(
+@pytest.mark.parametrize("scheme", ["http", "https"])
+async def test_jellyseerr_client_adds_xsrf_cookie_and_header_for_mutations(scheme: str) -> None:
+    base_url = f"{scheme}://jellyseerr/api/v1"
+    head_route = respx.head(f"{base_url}/request/2").respond(
+        status_code=405,
+        headers=[
+            ("set-cookie", "XSRF-TOKEN=test-xsrf-token; Path=/; Secure; SameSite=Strict"),
+            ("set-cookie", "_csrf=test-cookie; Path=/; HttpOnly; Secure; SameSite=Strict"),
+        ],
+    )
+    delete_route = respx.delete(f"{base_url}/request/2").respond(status_code=204)
+
+    client = JellyseerrClient(base_url=base_url, api_key="key", timeout_seconds=5)
+    try:
+        await client.delete_request(2)
+    finally:
+        await client.close()
+
+    assert head_route.called
+    assert delete_route.called
+    assert delete_route.calls[0].request.headers["X-XSRF-TOKEN"] == "test-xsrf-token"
+    assert delete_route.calls[0].request.headers["X-Api-Key"] == "key"
+    cookie_header = delete_route.calls[0].request.headers["Cookie"]
+    assert "_csrf=test-cookie" in cookie_header
+    assert "XSRF-TOKEN=test-xsrf-token" in cookie_header
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyseerr_client_preserves_existing_cookies_for_mutations() -> None:
+    respx.head("http://jellyseerr/api/v1/request/2").respond(
         status_code=405,
         headers=[
             ("set-cookie", "XSRF-TOKEN=test-xsrf-token; Path=/; Secure; SameSite=Strict"),
@@ -154,14 +184,116 @@ async def test_jellyseerr_client_adds_xsrf_header_for_mutations() -> None:
 
     client = JellyseerrClient(base_url="http://jellyseerr/api/v1", api_key="key", timeout_seconds=5)
     try:
+        await client._request_with_xsrf(
+            "DELETE",
+            "/request/2",
+            expected_statuses={204},
+            headers={"Cookie": "existing=value; _csrf=stale-secret; XSRF-TOKEN=stale-token"},
+        )
+    finally:
+        await client.close()
+
+    cookie_header = delete_route.calls[0].request.headers["Cookie"]
+    assert "existing=value" in cookie_header
+    assert "_csrf=test-cookie" in cookie_header
+    assert "XSRF-TOKEN=test-xsrf-token" in cookie_header
+    assert "stale-secret" not in cookie_header
+    assert "stale-token" not in cookie_header
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyseerr_client_mutates_without_xsrf_headers_when_csrf_is_disabled() -> None:
+    respx.head("http://jellyseerr/api/v1/request/2").respond(status_code=405)
+    delete_route = respx.delete("http://jellyseerr/api/v1/request/2").respond(status_code=204)
+
+    client = JellyseerrClient(base_url="http://jellyseerr/api/v1", api_key="key", timeout_seconds=5)
+    try:
         await client.delete_request(2)
     finally:
         await client.close()
 
-    assert head_route.called
     assert delete_route.called
-    assert delete_route.calls[0].request.headers["X-XSRF-TOKEN"] == "test-xsrf-token"
-    assert delete_route.calls[0].request.headers["X-Api-Key"] == "key"
+    assert "X-XSRF-TOKEN" not in delete_route.calls[0].request.headers
+    assert "Cookie" not in delete_route.calls[0].request.headers
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyseerr_client_requires_complete_csrf_cookie_pair() -> None:
+    respx.head("http://jellyseerr/api/v1/request/2").respond(
+        status_code=405,
+        headers={"set-cookie": "XSRF-TOKEN=test-xsrf-token; Path=/; Secure; SameSite=Strict"},
+    )
+
+    client = JellyseerrClient(base_url="http://jellyseerr/api/v1", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="_csrf missing"):
+            await client.delete_request(2)
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyseerr_client_reports_mutation_forbidden_as_downstream_error() -> None:
+    respx.head("http://jellyseerr/api/v1/request/2").respond(
+        status_code=405,
+        headers=[
+            ("set-cookie", "XSRF-TOKEN=test-xsrf-token; Path=/; Secure; SameSite=Strict"),
+            ("set-cookie", "_csrf=test-cookie; Path=/; HttpOnly; Secure; SameSite=Strict"),
+        ],
+    )
+    respx.delete("http://jellyseerr/api/v1/request/2").respond(
+        status_code=403,
+        json={"status": 403, "error": "invalid csrf token"},
+    )
+
+    client = JellyseerrClient(base_url="http://jellyseerr/api/v1", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="invalid csrf token") as exc_info:
+            await client.delete_request(2)
+    finally:
+        await client.close()
+
+    assert not isinstance(exc_info.value, AuthenticationError)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyseerr_ping_uses_authenticated_endpoint_and_checks_csrf_cookies() -> None:
+    ping_route = respx.get("http://jellyseerr/api/v1/auth/me").respond(
+        json={"id": 1},
+        headers=[
+            ("set-cookie", "XSRF-TOKEN=test-xsrf-token; Path=/; Secure; SameSite=Strict"),
+            ("set-cookie", "_csrf=test-cookie; Path=/; HttpOnly; Secure; SameSite=Strict"),
+        ],
+    )
+
+    client = JellyseerrClient(base_url="http://jellyseerr/api/v1", api_key="key", timeout_seconds=5)
+    try:
+        await client.ping()
+    finally:
+        await client.close()
+
+    assert ping_route.called
+    assert ping_route.calls[0].request.headers["X-Api-Key"] == "key"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyseerr_ping_rejects_incomplete_csrf_cookie_pair() -> None:
+    respx.get("http://jellyseerr/api/v1/auth/me").respond(
+        json={"id": 1},
+        headers={"set-cookie": "XSRF-TOKEN=test-xsrf-token; Path=/; Secure; SameSite=Strict"},
+    )
+
+    client = JellyseerrClient(base_url="http://jellyseerr/api/v1", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="_csrf missing"):
+            await client.ping()
+    finally:
+        await client.close()
 
 
 @pytest.mark.asyncio
