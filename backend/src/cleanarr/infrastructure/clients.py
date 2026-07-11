@@ -56,6 +56,7 @@ class JsonServiceClient:
         path: str,
         *,
         expected_statuses: set[int] | None = None,
+        treat_forbidden_as_authentication: bool = True,
         **kwargs: Any,
     ) -> Any:
         expected = expected_statuses or {200}
@@ -70,7 +71,9 @@ class JsonServiceClient:
                 f"{self._system} request failed: {detail}",
             ) from exc
 
-        if response.status_code in {401, 403}:
+        if response.status_code == 401 or (
+            response.status_code == 403 and treat_forbidden_as_authentication
+        ):
             raise AuthenticationError(
                 self._system,
                 f"{self._system} rejected the configured credentials.",
@@ -363,7 +366,48 @@ class JellyseerrClient(JsonServiceClient):
 
     async def ping(self) -> None:
         """Verify Jellyseerr connectivity."""
-        await self._request("GET", "/settings/public")
+
+        await self._request("GET", "/auth/me")
+        self._build_xsrf_headers()
+
+    def _build_xsrf_headers(self, response_cookies: httpx.Cookies | None = None) -> dict[str, str]:
+        """Build the complete cookie/header pair required by Seerr's CSRF middleware."""
+
+        def get_cookie(name: str) -> str | None:
+            value = response_cookies.get(name) if response_cookies is not None else None
+            return value or self._client.cookies.get(name)
+
+        xsrf_token = get_cookie("XSRF-TOKEN")
+        csrf_secret = get_cookie("_csrf")
+        if not xsrf_token and not csrf_secret:
+            return {}
+
+        missing = [name for name, value in (("XSRF-TOKEN", xsrf_token), ("_csrf", csrf_secret)) if not value]
+        if missing:
+            raise ExternalServiceError(
+                self._system,
+                f"{self._system} did not return the CSRF cookies required for mutation requests "
+                f"({', '.join(missing)} missing).",
+            )
+        assert xsrf_token is not None
+        assert csrf_secret is not None
+
+        return {
+            "X-XSRF-TOKEN": xsrf_token,
+            "Cookie": f"_csrf={csrf_secret}; XSRF-TOKEN={xsrf_token}",
+        }
+
+    @staticmethod
+    def _merge_xsrf_cookie_header(existing_cookie: str, xsrf_cookie: str) -> str:
+        """Preserve unrelated caller cookies while replacing stale CSRF values."""
+
+        preserved: list[str] = []
+        for fragment in existing_cookie.split(";"):
+            normalized = fragment.strip()
+            name, separator, _ = normalized.partition("=")
+            if normalized and (not separator or name not in {"_csrf", "XSRF-TOKEN"}):
+                preserved.append(normalized)
+        return "; ".join([*preserved, xsrf_cookie])
 
     async def _prepare_xsrf_headers(self, path: str) -> dict[str, str]:
         """Fetch a fresh XSRF token for Jellyseerr mutation endpoints."""
@@ -390,13 +434,7 @@ class JellyseerrClient(JsonServiceClient):
                 f"{self._system} returned unexpected status {response.status_code} while preparing XSRF headers.",
             )
 
-        xsrf_token = response.cookies.get("XSRF-TOKEN") or self._client.cookies.get("XSRF-TOKEN")
-        if not xsrf_token:
-            raise ExternalServiceError(
-                self._system,
-                f"{self._system} did not return an XSRF token for mutation requests.",
-            )
-        return {"X-XSRF-TOKEN": xsrf_token}
+        return self._build_xsrf_headers(response.cookies)
 
     async def _request_with_xsrf(
         self,
@@ -406,12 +444,18 @@ class JellyseerrClient(JsonServiceClient):
         expected_statuses: set[int] | None = None,
         **kwargs: Any,
     ) -> Any:
-        headers = dict(kwargs.pop("headers", {}))
-        headers.update(await self._prepare_xsrf_headers(path))
+        headers = httpx.Headers(kwargs.pop("headers", {}))
+        xsrf_headers = await self._prepare_xsrf_headers(path)
+        existing_cookie = headers.get("cookie")
+        xsrf_cookie = xsrf_headers.get("Cookie")
+        if existing_cookie and xsrf_cookie:
+            xsrf_headers["Cookie"] = self._merge_xsrf_cookie_header(existing_cookie, xsrf_cookie)
+        headers.update(xsrf_headers)
         return await self._request(
             method,
             path,
             expected_statuses=expected_statuses,
+            treat_forbidden_as_authentication=False,
             headers=headers,
             **kwargs,
         )
