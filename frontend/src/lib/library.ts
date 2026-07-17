@@ -39,4 +39,34 @@ export interface ManualDeleteRequest {
   jellyfin_item_id?: string | null
 }
 
-export interface ManualDeleteResponse extends DashboardProcessingResult {}
+export type ManualDeleteResponse = DashboardProcessingResult
+
+export type ManualDeleteJobStatus = "queued" | "running" | "completed" | "failed"
+
+export type ManualDeleteJobPhase =
+  | "queued"
+  | "locating"
+  | "cleaning"
+  | "recording"
+  | "jellyfin"
+  | "completed"
+  | "failed"
+
+export interface ManualDeleteJob {
+  id: string
+  item_type: ItemType
+  item_name: string | null
+  status: ManualDeleteJobStatus
+  phase: ManualDeleteJobPhase
+  progress_percent: number
+  message: string
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+  result: ManualDeleteResponse | null
+  error: string | null
+}
+
+export interface ManualDeleteJobListResponse {
+  jobs: ManualDeleteJob[]
+}
