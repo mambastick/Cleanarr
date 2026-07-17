@@ -87,6 +87,7 @@ Pack torrents, shared files, and anything that can't be safely attributed are al
 - **Strict ID matching** — resolves items by TMDB/TVDB/IMDB ID and path; no fuzzy guessing
 - **Conservative guardrails** — pack torrents and files shared between items are never deleted; CleanArr logs the reason and skips
 - **Dry-run mode** — enabled by default; shows exactly what *would* happen without touching anything
+- **Background library cleanup** — manual deletions are queued immediately and report live step-by-step progress in a compact task panel
 - **Live health monitoring** — probes all connected services every 30 s; status visible on the dashboard
 - **Webhook auto-configure** — one-click setup of the Jellyfin Webhook plugin directly from the UI
 - **Activity log** — every processed event is stored with full action breakdown; searchable by title, system, action, or status

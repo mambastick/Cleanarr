@@ -33,6 +33,7 @@ import {
   UserRound,
   UserRoundPlus,
   Webhook,
+  X,
   Zap,
 } from "lucide-react"
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
@@ -77,7 +78,8 @@ import { cn } from "@/lib/utils"
 import type {
   LibraryMoviesResponse,
   LibrarySeriesResponse,
-  ManualDeleteResponse,
+  ManualDeleteJob,
+  ManualDeleteJobListResponse,
 } from "@/lib/library"
 
 // ─── Brand ───────────────────────────────────────────────────────────────────
@@ -446,9 +448,12 @@ function CleanArrApp() {
   const [libraryMovies, setLibraryMovies] = useState<LibraryMoviesResponse | null>(null)
   const [isLibraryMoviesLoading, setIsLibraryMoviesLoading] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<LibraryDeleteTarget | null>(null)
-  const [isDeleting, setIsDeleting] = useState(false)
-  const [deleteResult, setDeleteResult] = useState<ManualDeleteResponse | null>(null)
+  const [isStartingDelete, setIsStartingDelete] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleteJobs, setDeleteJobs] = useState<ManualDeleteJob[]>([])
+  const knownDeleteJobStates = useRef(new Map<string, ManualDeleteJob["status"]>())
+  const hasLoadedDeleteJobs = useRef(false)
+  const deleteJobsPollFailed = useRef(false)
 
   const deferredFilter = useDeferredValue(activityFilter)
 
@@ -575,43 +580,99 @@ function CleanArrApp() {
     }
   }, [fetchJson])
 
+  const loadDeleteJobs = useCallback(async () => {
+    try {
+      const payload = await fetchJson<ManualDeleteJobListResponse>("/api/actions/delete/jobs")
+      setDeleteJobs(payload.jobs)
+      deleteJobsPollFailed.current = false
+
+      if (!hasLoadedDeleteJobs.current) {
+        payload.jobs.forEach((job) => knownDeleteJobStates.current.set(job.id, job.status))
+        hasLoadedDeleteJobs.current = true
+        return
+      }
+
+      payload.jobs.forEach((job) => {
+        const previousStatus = knownDeleteJobStates.current.get(job.id)
+        const justFinished =
+          previousStatus != null &&
+          previousStatus !== job.status &&
+          (job.status === "completed" || job.status === "failed")
+
+        if (justFinished) {
+          const name = job.item_name ?? job.item_type
+          if (job.status === "failed" || job.result?.status === "partial_failure") {
+            toast.error(`${name}: ${job.error ?? job.message}`)
+          } else {
+            toast.success(`${name}: background deletion completed.`)
+          }
+          void loadDashboard(true)
+          if (job.item_type === "Movie") {
+            void loadLibraryMovies()
+          } else {
+            void loadLibrary()
+          }
+        }
+
+        knownDeleteJobStates.current.set(job.id, job.status)
+      })
+    } catch (error) {
+      if (!deleteJobsPollFailed.current) {
+        toast.error(`Could not refresh background tasks: ${normalizeError(error)}`)
+        deleteJobsPollFailed.current = true
+      }
+    }
+  }, [fetchJson, loadDashboard, loadLibrary, loadLibraryMovies])
+
   const executeDelete = useCallback(async () => {
     if (!deleteTarget) return
-    setIsDeleting(true)
+    const target = deleteTarget
+    setIsStartingDelete(true)
     setDeleteError(null)
-    setDeleteResult(null)
     try {
       let body: Record<string, unknown>
-      if (deleteTarget.kind === "movie") {
+      if (target.kind === "movie") {
         body = {
           item_type: "Movie",
-          radarr_movie_id: deleteTarget.radarr_movie_id,
-          jellyfin_item_id: deleteTarget.jellyfin_movie_id ?? null,
+          radarr_movie_id: target.radarr_movie_id,
+          jellyfin_item_id: target.jellyfin_movie_id ?? null,
         }
       } else {
         body = {
-          item_type: deleteTarget.item_type,
-          sonarr_series_id: deleteTarget.sonarr_series_id,
-          season_number: deleteTarget.season_number ?? null,
-          jellyfin_item_id: deleteTarget.jellyfin_item_id ?? null,
+          item_type: target.item_type,
+          sonarr_series_id: target.sonarr_series_id,
+          season_number: target.season_number ?? null,
+          jellyfin_item_id: target.jellyfin_item_id ?? null,
         }
       }
-      const result = await fetchJson<ManualDeleteResponse>("/api/actions/delete", {
+      const job = await fetchJson<ManualDeleteJob>("/api/actions/delete/jobs", {
         method: "POST",
         body: JSON.stringify(body),
       })
-      setDeleteResult(result)
-      if (deleteTarget.kind === "movie") {
-        void loadLibraryMovies()
-      } else {
-        void loadLibrary()
-      }
+      knownDeleteJobStates.current.set(job.id, job.status)
+      hasLoadedDeleteJobs.current = true
+      setDeleteJobs((current) => [job, ...current.filter((item) => item.id !== job.id)])
+      setDeleteTarget(null)
+      toast.success("Deletion started in the background.")
     } catch (error) {
       setDeleteError(normalizeError(error))
     } finally {
-      setIsDeleting(false)
+      setIsStartingDelete(false)
     }
-  }, [deleteTarget, fetchJson, loadLibrary, loadLibraryMovies])
+  }, [deleteTarget, fetchJson])
+
+  const dismissDeleteJob = useCallback(
+    async (jobId: string) => {
+      try {
+        await fetchJson<void>(`/api/actions/delete/jobs/${jobId}`, { method: "DELETE" })
+        knownDeleteJobStates.current.delete(jobId)
+        setDeleteJobs((current) => current.filter((job) => job.id !== jobId))
+      } catch (error) {
+        toast.error(normalizeError(error))
+      }
+    },
+    [fetchJson],
+  )
 
   // Auto-polls
   useEffect(() => {
@@ -623,6 +684,20 @@ function CleanArrApp() {
   useEffect(() => {
     void loadAuth()
   }, [loadAuth])
+
+  const hasActiveDeleteJobs = deleteJobs.some(
+    (job) => job.status === "queued" || job.status === "running",
+  )
+
+  useEffect(() => {
+    if (!authStatus?.authenticated) return
+    void loadDeleteJobs()
+    const id = window.setInterval(
+      () => void loadDeleteJobs(),
+      hasActiveDeleteJobs ? 1000 : 5000,
+    )
+    return () => window.clearInterval(id)
+  }, [authStatus?.authenticated, hasActiveDeleteJobs, loadDeleteJobs])
 
   useEffect(() => {
     if (authStatus?.authenticated) {
@@ -738,6 +813,9 @@ function CleanArrApp() {
     }
     setSessionToken("")
     setAuthForm({ username: "", password: "", confirmPassword: "" })
+    setDeleteJobs([])
+    knownDeleteJobStates.current.clear()
+    hasLoadedDeleteJobs.current = false
   }
 
   const saveGeneralSettings = async (payload: GeneralConfig) => {
@@ -938,7 +1016,6 @@ function CleanArrApp() {
             onRefreshMovies={() => void loadLibraryMovies()}
             onDelete={(target) => {
               setDeleteTarget(target)
-              setDeleteResult(null)
               setDeleteError(null)
             }}
           />
@@ -988,16 +1065,19 @@ function CleanArrApp() {
 
       <DeleteConfirmModal
         target={deleteTarget}
-        isDeleting={isDeleting}
-        result={deleteResult}
+        isStarting={isStartingDelete}
         error={deleteError}
         isDryRun={!isLive}
         onConfirm={() => void executeDelete()}
         onClose={() => {
           setDeleteTarget(null)
-          setDeleteResult(null)
           setDeleteError(null)
         }}
+      />
+
+      <BackgroundJobsPanel
+        jobs={deleteJobs}
+        onDismiss={(jobId) => void dismissDeleteJob(jobId)}
       />
     </Tabs>
   )
@@ -2919,7 +2999,11 @@ function LibrarySeriesTab({
   const toggleExpand = (id: number) => {
     setExpanded((prev) => {
       const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
       return next
     })
   }
@@ -2967,28 +3051,29 @@ function LibrarySeriesTab({
             const totalBytes = series.seasons.reduce((sum, s) => sum + s.size_bytes, 0)
             return (
               <Card key={series.sonarr_id}>
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-3 px-4 py-3 text-left"
-                  onClick={() => toggleExpand(series.sonarr_id)}
-                >
-                  {isOpen ? (
-                    <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
-                  ) : (
-                    <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-                  )}
-                  <Tv className="size-4 shrink-0 text-blue-500" />
-                  <span className="flex-1 text-sm font-medium">{series.title}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {series.seasons.length} season{series.seasons.length !== 1 ? "s" : ""}
-                    {totalBytes > 0 && ` · ${formatBytes(totalBytes)}`}
-                  </span>
+                <div className="flex w-full items-center gap-3 px-4 py-3">
+                  <button
+                    type="button"
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    onClick={() => toggleExpand(series.sonarr_id)}
+                  >
+                    {isOpen ? (
+                      <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                    )}
+                    <Tv className="size-4 shrink-0 text-blue-500" />
+                    <span className="flex-1 text-sm font-medium">{series.title}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {series.seasons.length} season{series.seasons.length !== 1 ? "s" : ""}
+                      {totalBytes > 0 && ` · ${formatBytes(totalBytes)}`}
+                    </span>
+                  </button>
                   <Button
                     variant="ghost"
                     size="sm"
                     className="ml-2 shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
-                    onClick={(e) => {
-                      e.stopPropagation()
+                    onClick={() => {
                       onDelete({
                         kind: "series",
                         sonarr_series_id: series.sonarr_id,
@@ -3001,7 +3086,7 @@ function LibrarySeriesTab({
                     <Trash2 className="size-3.5" />
                     Delete series
                   </Button>
-                </button>
+                </div>
 
                 {isOpen && series.seasons.length > 0 && (
                   <CardContent className="border-t pt-3 pb-3">
@@ -3225,16 +3310,14 @@ function LibraryPanel({
 
 function DeleteConfirmModal({
   target,
-  isDeleting,
-  result,
+  isStarting,
   error,
   isDryRun,
   onConfirm,
   onClose,
 }: {
   target: LibraryDeleteTarget | null
-  isDeleting: boolean
-  result: ManualDeleteResponse | null
+  isStarting: boolean
   error: string | null
   isDryRun: boolean
   onConfirm: () => void
@@ -3249,73 +3332,158 @@ function DeleteConfirmModal({
         ? `Season ${target.season_number} of "${target.series_title}"`
         : `"${target.series_title}"`
 
-  const isDone = Boolean(result || error)
-
   return (
     <Modal
       open={true}
-      title={isDone ? "Deletion result" : `Delete ${label}?`}
+      title={`Delete ${label}?`}
       onClose={onClose}
       footer={
-        isDone ? (
-          <Button onClick={onClose}>Close</Button>
-        ) : (
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={onClose} disabled={isDeleting}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={onConfirm}
-              disabled={isDeleting}
-            >
-              {isDeleting ? (
-                <LoaderCircle className="mr-1 size-3.5 animate-spin" />
-              ) : (
-                <Trash2 className="mr-1 size-3.5" />
-              )}
-              {isDryRun ? "Simulate (dry run)" : "Delete"}
-            </Button>
-          </div>
-        )
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={onClose} disabled={isStarting}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={onConfirm} disabled={isStarting}>
+            {isStarting ? (
+              <LoaderCircle className="mr-1 size-3.5 animate-spin" />
+            ) : (
+              <Trash2 className="mr-1 size-3.5" />
+            )}
+            {isDryRun ? "Simulate (dry run)" : "Delete"}
+          </Button>
+        </div>
       }
     >
       <div className="space-y-4">
-        {!isDone && (
-          <>
-            {isDryRun && (
-              <Alert>
-                <Info className="size-4 text-amber-600 dark:text-amber-400" />
-                <AlertTitle>Dry run mode</AlertTitle>
-                <AlertDescription>No actual changes will be made.</AlertDescription>
-              </Alert>
-            )}
-            <p className="text-sm text-muted-foreground">
-              This will remove files from Sonarr, delete matching torrents from qBittorrent,
-              and clean up requests in Jellyseerr.
-            </p>
-          </>
+        {isDryRun && (
+          <Alert>
+            <Info className="size-4 text-amber-600 dark:text-amber-400" />
+            <AlertTitle>Dry run mode</AlertTitle>
+            <AlertDescription>No actual changes will be made.</AlertDescription>
+          </Alert>
         )}
+        <p className="text-sm text-muted-foreground">
+          This will remove files from Sonarr, delete matching torrents from qBittorrent,
+          and clean up requests in Jellyseerr. The task will continue in the background,
+          so you can keep using CleanArr.
+        </p>
 
         {error && <ErrorBanner message={error} />}
-
-        {result && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <StatusPill
-                tone={result.status === "partial_failure" ? "red" : result.status === "ignored" ? "neutral" : "green"}
-                label={result.status}
-              />
-            </div>
-            <div className="space-y-1.5">
-              {result.actions.map((action, i) => (
-                <ActionRow key={`${action.system}-${action.action}-${i}`} action={action} />
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </Modal>
+  )
+}
+
+function BackgroundJobsPanel({
+  jobs,
+  onDismiss,
+}: {
+  jobs: ManualDeleteJob[]
+  onDismiss: (jobId: string) => void
+}) {
+  const [expanded, setExpanded] = useState(true)
+  if (jobs.length === 0) return null
+
+  const activeCount = jobs.reduce(
+    (count, job) => count + (job.status === "queued" || job.status === "running" ? 1 : 0),
+    0,
+  )
+
+  return (
+    <aside
+      className="fixed inset-x-4 bottom-4 z-40 overflow-hidden rounded-xl border bg-background/98 shadow-2xl backdrop-blur sm:left-auto sm:w-[23rem]"
+      aria-label="Background tasks"
+    >
+      <button
+        type="button"
+        className="flex w-full items-center gap-2 px-3.5 py-3 text-left transition-colors hover:bg-muted/60"
+        onClick={() => setExpanded((current) => !current)}
+        aria-expanded={expanded}
+      >
+        {expanded ? (
+          <ChevronDown className="size-4 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="size-4 text-muted-foreground" />
+        )}
+        <span className="flex-1 text-sm font-medium">Background tasks</span>
+        <Badge variant="outline" className="text-xs">
+          {activeCount > 0 ? `${activeCount} active` : `${jobs.length} recent`}
+        </Badge>
+      </button>
+
+      {expanded ? (
+        <div className="max-h-[min(28rem,65vh)] space-y-2 overflow-y-auto border-t p-2.5" aria-live="polite">
+          {jobs.map((job) => {
+            const isActive = job.status === "queued" || job.status === "running"
+            const hasProblem = job.status === "failed" || job.result?.status === "partial_failure"
+            const itemName = job.item_name ?? `${job.item_type} deletion`
+
+            return (
+              <div key={job.id} className="rounded-lg border bg-card p-3" role="status">
+                <div className="flex items-start gap-2.5">
+                  <div className="mt-0.5 shrink-0">
+                    {isActive ? (
+                      <LoaderCircle className="size-4 animate-spin text-blue-500" />
+                    ) : hasProblem ? (
+                      <CircleAlert className="size-4 text-red-500" />
+                    ) : (
+                      <CheckCircle2 className="size-4 text-emerald-500" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start gap-2">
+                      <p className="min-w-0 flex-1 truncate text-sm font-medium" title={itemName}>
+                        {itemName}
+                      </p>
+                      {!isActive ? (
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          className="-mr-1 -mt-1 shrink-0 text-muted-foreground"
+                          onClick={() => onDismiss(job.id)}
+                          aria-label={`Dismiss ${itemName}`}
+                        >
+                          <X className="size-3.5" />
+                        </Button>
+                      ) : null}
+                    </div>
+                    <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                      {job.error ?? job.message}
+                    </p>
+                    <div
+                      className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted"
+                      role="progressbar"
+                      aria-label={`${itemName} progress`}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={job.progress_percent}
+                    >
+                      <div
+                        className={cn(
+                          "h-full rounded-full transition-[width] duration-500",
+                          hasProblem
+                            ? "bg-red-500"
+                            : job.status === "completed"
+                              ? "bg-emerald-500"
+                              : "bg-blue-500",
+                        )}
+                        style={{ width: `${job.progress_percent}%` }}
+                      />
+                    </div>
+                    <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                      <span className="capitalize">{job.phase}</span>
+                      <span>
+                        {job.result ? `${job.result.actions.length} actions · ` : ""}
+                        {job.progress_percent}%
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ) : null}
+    </aside>
   )
 }
 
