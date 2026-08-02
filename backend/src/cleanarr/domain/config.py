@@ -6,7 +6,7 @@ from enum import StrEnum
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ServiceKind(StrEnum):
@@ -19,6 +19,40 @@ class ServiceKind(StrEnum):
     JELLYFIN = "jellyfin"
 
 
+class SSOAuthMode(StrEnum):
+    """Available auth modes for the web UI."""
+
+    PASSWORD_ONLY = "password_only"
+    SSO_ONLY = "sso_only"
+    BOTH = "both"
+
+
+def _normalize_sso_mode_value(value: object) -> SSOAuthMode:
+    if isinstance(value, SSOAuthMode):
+        return value
+
+    if isinstance(value, bool):
+        return SSOAuthMode.BOTH if value else SSOAuthMode.PASSWORD_ONLY
+
+    if value is None:
+        return SSOAuthMode.PASSWORD_ONLY
+
+    if isinstance(value, str):
+        normalized = value.strip().lower().replace("-", "_")
+        if not normalized:
+            return SSOAuthMode.PASSWORD_ONLY
+        try:
+            return SSOAuthMode(normalized)
+        except ValueError:
+            if normalized in {"true", "1", "on", "yes", "both", "all"}:
+                return SSOAuthMode.BOTH
+            if normalized in {"password", "passwordonly", "local", "local_only"}:
+                return SSOAuthMode.PASSWORD_ONLY
+            if normalized in {"sso", "ssoonly", "oidc"}:
+                return SSOAuthMode.SSO_ONLY
+    return SSOAuthMode.PASSWORD_ONLY
+
+
 class GeneralConfig(BaseModel):
     """Mutable runtime settings controlled from the UI."""
 
@@ -29,6 +63,7 @@ class GeneralConfig(BaseModel):
     activity_retention_days: int = 30
     jellyfin_language: str = "en"
     sso_enabled: bool = False
+    sso_mode: SSOAuthMode = SSOAuthMode.PASSWORD_ONLY
     sso_issuer_url: str | None = None
     sso_client_id: str | None = None
     sso_client_secret: str | None = None
@@ -45,7 +80,13 @@ class GeneralConfig(BaseModel):
     def normalize_jellyfin_language(cls, value: str | None) -> str:
         if not value:
             return "en"
-        return value.strip().lower()
+        normalized = value.strip().replace("_", "-").lower()
+        normalized = normalized.split(",", 1)[0].strip()
+        if ";" in normalized:
+            normalized = normalized.split(";", 1)[0].strip()
+        if not normalized:
+            return "en"
+        return normalized
 
     @field_validator("sso_scopes", mode="before")
     @classmethod
@@ -54,6 +95,29 @@ class GeneralConfig(BaseModel):
             return "openid profile email"
         scopes = " ".join(part.strip() for part in str(value).split() if part.strip())
         return scopes or "openid profile email"
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_sso_fields(cls, values: object) -> object:
+        if not isinstance(values, dict):
+            return values
+        raw_mode = values.get("sso_mode")
+        if raw_mode is None and "sso_enabled" in values:
+            legacy_enabled = values.get("sso_enabled")
+            if isinstance(legacy_enabled, str):
+                legacy_enabled = legacy_enabled.strip().lower() in {"1", "true", "yes", "on"}
+            raw_mode = bool(legacy_enabled)
+
+        normalized_mode = _normalize_sso_mode_value(raw_mode)
+        values["sso_mode"] = normalized_mode.value
+        values["sso_enabled"] = normalized_mode is not SSOAuthMode.PASSWORD_ONLY
+        return values
+
+    def local_auth_enabled(self) -> bool:
+        return self.sso_mode in (SSOAuthMode.PASSWORD_ONLY, SSOAuthMode.BOTH)
+
+    def sso_auth_enabled(self) -> bool:
+        return self.sso_mode in (SSOAuthMode.SSO_ONLY, SSOAuthMode.BOTH)
 
 
 class AdminAccountConfig(BaseModel):

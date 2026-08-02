@@ -58,10 +58,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import Stepper, { Step } from "@/components/ui/stepper"
 import type { AuthSessionPayload, AuthStatusPayload, SSOLoginPayload } from "@/lib/auth"
+import type { SsoAuthMode } from "@/lib/auth"
 import type {
   DashboardAction,
   DashboardActivity,
   DashboardPayload,
+  DashboardUnifiedActivityItem,
   DashboardWebhookAttempt,
   HealthStatus,
 } from "@/lib/dashboard"
@@ -430,10 +432,24 @@ const JELLYFIN_LANGUAGE_OPTIONS = [
   { value: "fr", label: "Français" },
   { value: "it", label: "Italiano" },
   { value: "es", label: "Español" },
+  { value: "pl", label: "Polski" },
   { value: "uk", label: "Українська" },
+  { value: "cs", label: "Čeština" },
   { value: "zh", label: "中文" },
   { value: "ja", label: "日本語" },
 ]
+
+const SSO_MODE_OPTIONS: Array<{ value: SsoAuthMode; label: string }> = [
+  { value: "password_only", label: "Local credentials only" },
+  { value: "sso_only", label: "SSO only" },
+  { value: "both", label: "Local + SSO" },
+]
+
+const SSO_MODE_HINTS: Record<SsoAuthMode, string> = {
+  password_only: "Use only admin credentials in CleanArr.",
+  sso_only: "Use only SSO (OIDC) login.",
+  both: "Allow local credentials and SSO login.",
+}
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
@@ -837,7 +853,7 @@ function CleanArrApp() {
   }
 
   const startSsoAuth = async () => {
-    if (isSsoSubmitting || !authStatus?.sso_configured) return
+    if (isSsoSubmitting || authStatus?.sso_mode === "password_only" || !authStatus?.sso_configured) return
     setIsSsoSubmitting(true)
     setSsoError(null)
     try {
@@ -917,7 +933,8 @@ function CleanArrApp() {
         isSubmitting={isAuthSubmitting}
         isSsoSubmitting={isSsoSubmitting}
         requiresRegistration={Boolean(authStatus?.requires_registration)}
-        ssoEnabled={Boolean(authStatus?.sso_enabled)}
+        localAuthEnabled={Boolean(authStatus?.requires_registration) || authStatus?.sso_mode !== "sso_only"}
+        ssoMode={authStatus?.sso_mode ?? "password_only"}
         ssoConfigured={Boolean(authStatus?.sso_configured)}
         hasSsoError={Boolean(ssoError)}
         ssoError={ssoError}
@@ -1146,7 +1163,8 @@ function AuthScreen({
   isSubmitting,
   isSsoSubmitting,
   requiresRegistration,
-  ssoEnabled,
+  localAuthEnabled,
+  ssoMode,
   ssoConfigured,
   hasSsoError,
   ssoError,
@@ -1159,7 +1177,8 @@ function AuthScreen({
   isSubmitting: boolean
   isSsoSubmitting: boolean
   requiresRegistration: boolean
-  ssoEnabled: boolean
+  localAuthEnabled: boolean
+  ssoMode: SsoAuthMode
   ssoConfigured: boolean
   hasSsoError: boolean
   ssoError: string | null
@@ -1167,6 +1186,16 @@ function AuthScreen({
   onSubmit: () => void
   onSsoSubmit: () => void
 }) {
+  const showLocalAuth = requiresRegistration || localAuthEnabled
+  const showSsoAuth = ssoMode !== "password_only"
+  const authDescription = requiresRegistration
+    ? "First launch — create the admin account."
+    : showLocalAuth && showSsoAuth
+      ? "Sign in with local credentials or SSO."
+      : showLocalAuth
+        ? "Sign in with local credentials."
+        : "Sign in with SSO."
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
       <div className="w-full max-w-sm space-y-6">
@@ -1184,9 +1213,7 @@ function AuthScreen({
             {requiresRegistration ? "Create administrator" : "Sign in"}
           </CardTitle>
           <CardDescription>
-            {requiresRegistration
-              ? "First launch — create the admin account."
-              : "Sign in with local credentials or Authentik."}
+            {authDescription}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1198,73 +1225,79 @@ function AuthScreen({
             </Alert>
           )}
 
-          <FormField label="Username" htmlFor="auth-username">
-            <Input
-              id="auth-username"
-              value={authForm.username}
-              autoComplete="username"
-              onChange={(e) => onFieldChange("username", e.target.value)}
-            />
-          </FormField>
+          {showLocalAuth && (
+            <>
+              <FormField label="Username" htmlFor="auth-username">
+                <Input
+                  id="auth-username"
+                  value={authForm.username}
+                  autoComplete="username"
+                  onChange={(e) => onFieldChange("username", e.target.value)}
+                />
+              </FormField>
 
-          <FormField label="Password" htmlFor="auth-password">
-            <Input
-              id="auth-password"
-              type="password"
-              value={authForm.password}
-              autoComplete="current-password"
-              onChange={(e) => onFieldChange("password", e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !requiresRegistration) onSubmit()
-              }}
-            />
-          </FormField>
+              <FormField label="Password" htmlFor="auth-password">
+                <Input
+                  id="auth-password"
+                  type="password"
+                  value={authForm.password}
+                  autoComplete="current-password"
+                  onChange={(e) => onFieldChange("password", e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !requiresRegistration) onSubmit()
+                  }}
+                />
+              </FormField>
 
-          {requiresRegistration && (
-            <FormField label="Confirm password" htmlFor="auth-confirm">
-              <Input
-                id="auth-confirm"
-                type="password"
-                value={authForm.confirmPassword}
-                onChange={(e) => onFieldChange("confirmPassword", e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") onSubmit()
-                }}
-              />
-            </FormField>
+              {requiresRegistration && (
+                <FormField label="Confirm password" htmlFor="auth-confirm">
+                  <Input
+                    id="auth-confirm"
+                    type="password"
+                    value={authForm.confirmPassword}
+                    onChange={(e) => onFieldChange("confirmPassword", e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") onSubmit()
+                    }}
+                  />
+                </FormField>
+              )}
+
+              <Button className="w-full" disabled={isSubmitting} onClick={onSubmit}>
+                {isSubmitting ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : authMode === "register" ? (
+                  <UserRoundPlus className="size-4" />
+                ) : (
+                  <KeyRound className="size-4" />
+                )}
+                {authMode === "register" ? "Create administrator" : "Sign in with credentials"}
+              </Button>
+            </>
           )}
 
-          <Button className="w-full" disabled={isSubmitting} onClick={onSubmit}>
-            {isSubmitting ? (
-              <LoaderCircle className="size-4 animate-spin" />
-            ) : authMode === "register" ? (
-              <UserRoundPlus className="size-4" />
-            ) : (
-              <KeyRound className="size-4" />
-            )}
-            {authMode === "register" ? "Create administrator" : "Sign in with credentials"}
-          </Button>
-
-          {ssoEnabled && !requiresRegistration && (
+          {showSsoAuth && !requiresRegistration && (
             <div className="space-y-2">
-              <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                <div className="h-px flex-1 bg-border" />
-                <span>or</span>
-                <div className="h-px flex-1 bg-border" />
-              </div>
+              {showLocalAuth && (
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <div className="h-px flex-1 bg-border" />
+                  <span>or</span>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+              )}
               <Button
                 className="w-full"
                 variant="outline"
                 disabled={isSsoSubmitting || !ssoConfigured}
                 onClick={onSsoSubmit}
-                title={ssoConfigured ? "Continue with Authentik" : "SSO is not configured yet"}
+                title={ssoConfigured ? "Continue with SSO" : "SSO is not configured yet"}
               >
                 {isSsoSubmitting ? (
                   <LoaderCircle className="size-4 animate-spin" />
                 ) : (
                   <ShieldCheck className="size-4" />
                 )}
-                {isSsoSubmitting ? "Connecting..." : "Sign in with Authentik"}
+                {isSsoSubmitting ? "Connecting..." : "Sign in with SSO"}
               </Button>
               {!ssoConfigured && (
                 <p className="text-xs text-muted-foreground">
@@ -1273,6 +1306,11 @@ function AuthScreen({
               )}
             </div>
           )}
+          {!showLocalAuth && !showSsoAuth ? (
+            <p className="rounded-md border border-dashed p-2 text-xs text-muted-foreground">
+              No authentication method is currently configured.
+            </p>
+          ) : null}
         </CardContent>
       </Card>
       </div>
@@ -1569,7 +1607,26 @@ function ActivityPanel({
   activityFilter: string
   onFilterChange: (v: string) => void
 }) {
-  const activityCount = filteredActivity.length + webhookAttempts.length
+  const activityItems = useMemo(() => {
+    const merged = [
+      ...filteredActivity.map((entry) => ({
+        kind: "processed_activity" as const,
+        ...entry,
+        sort_at: Date.parse(entry.processed_at),
+      })),
+      ...webhookAttempts.map((attempt) => ({
+        kind: "webhook_attempt" as const,
+        ...attempt,
+        sort_at: Date.parse(attempt.attempted_at),
+      })),
+    ]
+      .map((item) => ({ ...item, sort_at: Number.isNaN(item.sort_at) ? 0 : item.sort_at }))
+      .sort((left, right) => right.sort_at - left.sort_at) as DashboardUnifiedActivityItem[]
+
+    return merged
+  }, [filteredActivity, webhookAttempts])
+
+  const activityCount = activityItems.length
 
   return (
     <section className="space-y-4">
@@ -1590,78 +1647,163 @@ function ActivityPanel({
         </span>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Webhook className="size-4 text-blue-500" />
-              Webhook deliveries
-            </CardTitle>
-            <CardDescription>Incoming Jellyfin requests and their validation result.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ScrollArea className="h-[290px]">
-              {webhookAttempts.length === 0 ? (
-                <EmptyState
-                  title="No deliveries yet"
-                  description={
-                    activityFilter
-                      ? "No webhook deliveries match the current filter."
-                      : "No webhook reached CleanArr yet."
-                  }
-                />
-              ) : (
-                <div className="space-y-2 p-px">
-                  {webhookAttempts.map((attempt) => (
-                    <WebhookAttemptEntry
-                      key={`${attempt.attempted_at}-${attempt.message}`}
-                      attempt={attempt}
-                    />
-                  ))}
-                </div>
-              )}
-            </ScrollArea>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Activity className="size-4 text-emerald-500" />
-              Processed events
-            </CardTitle>
-            <CardDescription>Background cleanup activity records.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ScrollArea className="h-[290px]">
-              {filteredActivity.length === 0 ? (
-                <EmptyState
-                  title="No events"
-                  description={
-                    activityFilter
-                      ? "No processed events match the current filter."
-                      : "Send a Jellyfin webhook to populate the activity log."
-                  }
-                />
-              ) : (
-                <div className="space-y-2 p-px">
-                  {filteredActivity.map((entry) => (
-                    <ActivityEntry
-                      key={`${entry.processed_at}-${entry.result.item_id}`}
-                      entry={entry}
-                    />
-                  ))}
-                </div>
-              )}
-            </ScrollArea>
-          </CardContent>
-        </Card>
-      </div>
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Activity className="size-4 text-emerald-500" />
+            Runtime activity timeline
+          </CardTitle>
+          <CardDescription>
+            Incoming Jellyfin webhooks and processed deletion events in one stream.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ScrollArea className="h-[480px]">
+            {activityItems.length === 0 ? (
+              <EmptyState
+                title="No activity yet"
+                description={
+                  activityFilter
+                    ? "No items match the current filter."
+                    : "Send a Jellyfin webhook or process a cleanup event to populate the timeline."
+                }
+              />
+            ) : (
+              <div className="space-y-2 p-px">
+                {activityItems.map((item) =>
+                  item.kind === "webhook_attempt" ? (
+                    <WebhookAttemptEntry key={`${item.kind}-${item.attempted_at}-${item.message}`} attempt={item} />
+                  ) : (
+                    <ActivityEntry key={`${item.kind}-${item.processed_at}-${item.result.item_id}`} entry={item} />
+                  ),
+                )}
+              </div>
+            )}
+          </ScrollArea>
+        </CardContent>
+      </Card>
     </section>
   )
 }
 
 // ─── Settings panel ───────────────────────────────────────────────────────────
+
+function SsoConfigSection({
+  draft,
+  onDraftChange,
+  namespace,
+  isSecretVisible,
+  onToggleSecretVisibility,
+}: {
+  draft: GeneralConfig
+  namespace: "settings" | "wizard" | "general"
+  onDraftChange: (next: GeneralConfig) => void
+  isSecretVisible: boolean
+  onToggleSecretVisibility: () => void
+}) {
+  const ssoEnabled = draft.sso_mode !== "password_only"
+
+  const handleModeChange = (nextMode: SsoAuthMode) => {
+    onDraftChange({
+      ...draft,
+      sso_mode: nextMode,
+      sso_enabled: nextMode !== "password_only",
+    })
+  }
+
+  return (
+    <div className="space-y-3 border-t pt-4">
+      <FormField label="SSO auth mode" htmlFor={`${namespace}-sso-mode`}>
+        <select
+          id={`${namespace}-sso-mode`}
+          value={draft.sso_mode}
+          onChange={(e) => handleModeChange(e.target.value as SsoAuthMode)}
+          className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        >
+          {SSO_MODE_OPTIONS.map((mode) => (
+            <option key={mode.value} value={mode.value}>
+              {mode.label}
+            </option>
+          ))}
+        </select>
+        <FieldHint text={SSO_MODE_HINTS[draft.sso_mode]} />
+      </FormField>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <FormField label="Issuer URL" htmlFor={`${namespace}-sso-issuer`}>
+          <Input
+            id={`${namespace}-sso-issuer`}
+            type="url"
+            value={draft.sso_issuer_url ?? ""}
+            disabled={!ssoEnabled}
+            onChange={(e) => onDraftChange({ ...draft, sso_issuer_url: e.target.value || null })}
+            placeholder="https://id.example.com/realms/cleanarr"
+          />
+          <FieldHint text="Full OIDC issuer URL from your provider." />
+        </FormField>
+
+        <FormField label="Client ID" htmlFor={`${namespace}-sso-client-id`}>
+          <Input
+            id={`${namespace}-sso-client-id`}
+            value={draft.sso_client_id ?? ""}
+            disabled={!ssoEnabled}
+            onChange={(e) => onDraftChange({ ...draft, sso_client_id: e.target.value || null })}
+          />
+          <FieldHint text="Public client ID for your OIDC application." />
+        </FormField>
+
+        <FormField label="Client Secret" htmlFor={`${namespace}-sso-client-secret`}>
+          <div className="flex items-center gap-2">
+            <Input
+              id={`${namespace}-sso-client-secret`}
+              type={isSecretVisible ? "text" : "password"}
+              value={draft.sso_client_secret ?? ""}
+              disabled={!ssoEnabled}
+              onChange={(e) => onDraftChange({ ...draft, sso_client_secret: e.target.value || null })}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onToggleSecretVisibility}
+              disabled={!ssoEnabled}
+            >
+              {isSecretVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </Button>
+          </div>
+          <FieldHint text="Secret sent to your provider's token endpoint." />
+        </FormField>
+
+        <FormField label="Redirect URI" htmlFor={`${namespace}-sso-redirect-uri`}>
+          <Input
+            id={`${namespace}-sso-redirect-uri`}
+            value={draft.sso_redirect_uri ?? ""}
+            disabled={!ssoEnabled}
+            onChange={(e) => onDraftChange({ ...draft, sso_redirect_uri: e.target.value || null })}
+          />
+          <FieldHint text="Usually your CleanArr public URL + /api/auth/sso/callback." />
+        </FormField>
+
+        <FormField label="Scopes" htmlFor={`${namespace}-sso-scopes`}>
+          <Input
+            id={`${namespace}-sso-scopes`}
+            value={draft.sso_scopes}
+            disabled={!ssoEnabled}
+            onChange={(e) => onDraftChange({ ...draft, sso_scopes: e.target.value })}
+            placeholder="openid profile email"
+          />
+          <FieldHint text="Optional override for OIDC scope list." />
+        </FormField>
+      </div>
+
+      {!ssoEnabled && (
+        <p className="text-xs text-muted-foreground">
+          SSO fields are disabled while auth mode is Password-only.
+        </p>
+      )}
+    </div>
+  )
+}
 
 function SettingsPanel({
   config,
@@ -1755,7 +1897,7 @@ function SettingsPanel({
                 </FormField>
               </div>
 
-              <FormField label="Jellyfin UI language" htmlFor="settings-jellyfin-language">
+              <FormField label="Jellyfin metadata language" htmlFor="settings-jellyfin-language">
                 <select
                   id="settings-jellyfin-language"
                   value={draft.jellyfin_language}
@@ -1768,7 +1910,7 @@ function SettingsPanel({
                     </option>
                   ))}
                 </select>
-                <FieldHint text="Used when requesting library names from Jellyfin metadata API." />
+                <FieldHint text="Used when requesting series and movie titles from Jellyfin metadata." />
               </FormField>
 
               <FormField label="Webhook token" htmlFor="settings-webhook-token">
@@ -1814,101 +1956,13 @@ function SettingsPanel({
                 <FieldHint text="Auto-generated. Regenerate only if you need to rotate it — then re-run auto-configure in the Jellyfin step." />
               </FormField>
 
-              <div className="space-y-3 border-t pt-4">
-                <div className="flex flex-wrap gap-3">
-                  <label className="inline-flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={draft.sso_enabled}
-                      onChange={(e) => setDraft({ ...draft, sso_enabled: e.target.checked })}
-                    />
-                    Enable Authentik SSO
-                  </label>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <FormField label="Issuer URL" htmlFor="settings-sso-issuer">
-                    <Input
-                      id="settings-sso-issuer"
-                      type="url"
-                      value={draft.sso_issuer_url ?? ""}
-                      disabled={!draft.sso_enabled}
-                      onChange={(e) =>
-                        setDraft({ ...draft, sso_issuer_url: e.target.value || null })
-                      }
-                      placeholder="https://authentik.domain/application/o/cleanarr/"
-                    />
-                    <FieldHint text="Full OIDC issuer URL from Authentik." />
-                  </FormField>
-
-                  <FormField label="Client ID" htmlFor="settings-sso-client-id">
-                    <Input
-                      id="settings-sso-client-id"
-                      value={draft.sso_client_id ?? ""}
-                      disabled={!draft.sso_enabled}
-                      onChange={(e) =>
-                        setDraft({ ...draft, sso_client_id: e.target.value || null })
-                      }
-                    />
-                    <FieldHint text="Public client ID created in Authentik application settings." />
-                  </FormField>
-
-                  <FormField label="Client Secret" htmlFor="settings-sso-client-secret">
-                    <div className="flex items-center gap-2">
-                      <Input
-                        id="settings-sso-client-secret"
-                        type={isSSOSecretVisible ? "text" : "password"}
-                        value={draft.sso_client_secret ?? ""}
-                        disabled={!draft.sso_enabled}
-                        onChange={(e) =>
-                          setDraft({ ...draft, sso_client_secret: e.target.value || null })
-                        }
-                      />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setIsSSOSecretVisible((v: boolean) => !v)}
-                        disabled={!draft.sso_enabled}
-                      >
-                        {isSSOSecretVisible ? (
-                          <EyeOff className="size-4" />
-                        ) : (
-                          <Eye className="size-4" />
-                        )}
-                      </Button>
-                    </div>
-                    <FieldHint text="Secret is sent to Authentik token endpoint only." />
-                  </FormField>
-
-                  <FormField label="Redirect URI" htmlFor="settings-sso-redirect-uri">
-                    <Input
-                      id="settings-sso-redirect-uri"
-                      value={draft.sso_redirect_uri ?? ""}
-                      disabled={!draft.sso_enabled}
-                      onChange={(e) =>
-                        setDraft({ ...draft, sso_redirect_uri: e.target.value || null })
-                      }
-                    />
-                    <FieldHint text="Usually your CleanArr public URL + /api/auth/sso/callback." />
-                  </FormField>
-
-                  <FormField label="Scopes" htmlFor="settings-sso-scopes">
-                    <Input
-                      id="settings-sso-scopes"
-                      value={draft.sso_scopes}
-                      disabled={!draft.sso_enabled}
-                      onChange={(e) => setDraft({ ...draft, sso_scopes: e.target.value })}
-                      placeholder="openid profile email"
-                    />
-                  </FormField>
-                </div>
-                {!draft.sso_enabled && (
-                  <p className="text-xs text-muted-foreground">
-                    Disable SSO in settings if you want to use only local credentials.
-                  </p>
-                )}
-              </div>
+              <SsoConfigSection
+                namespace="settings"
+                draft={draft}
+                onDraftChange={setDraft}
+                isSecretVisible={isSSOSecretVisible}
+                onToggleSecretVisibility={() => setIsSSOSecretVisible((v) => !v)}
+              />
 
               <div className="flex items-center justify-between border-t pt-4">
                 <p className="text-xs text-muted-foreground">
@@ -1983,7 +2037,7 @@ function WizardGeneralStep({
       <div>
         <h2 className="text-lg font-semibold">General</h2>
         <p className="text-sm text-muted-foreground">
-          Runtime settings — log level, HTTP timeout, activity retention, Jellyfin language, SSO, and webhook token.
+          Runtime settings — log level, HTTP timeout, activity retention, metadata language, SSO, and webhook token.
         </p>
       </div>
 
@@ -2025,7 +2079,7 @@ function WizardGeneralStep({
           </select>
         </FormField>
 
-        <FormField label="Jellyfin UI language" htmlFor="wizard-jellyfin-language">
+        <FormField label="Jellyfin metadata language" htmlFor="wizard-jellyfin-language">
           <select
             id="wizard-jellyfin-language"
             value={draft.jellyfin_language}
@@ -2085,98 +2139,13 @@ function WizardGeneralStep({
         <FieldHint text="Auto-generated. Regenerate only if you need to rotate it — then re-run auto-configure in the Jellyfin step." />
       </FormField>
 
-      <div className="space-y-3 border-t pt-4">
-        <div className="flex flex-wrap gap-3">
-          <label className="inline-flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm">
-            <input
-              type="checkbox"
-              checked={draft.sso_enabled}
-              onChange={(e) => setDraft({ ...draft, sso_enabled: e.target.checked })}
-            />
-            Enable Authentik SSO
-          </label>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <FormField label="Issuer URL" htmlFor="wizard-sso-issuer">
-            <Input
-              id="wizard-sso-issuer"
-              type="url"
-              value={draft.sso_issuer_url ?? ""}
-              disabled={!draft.sso_enabled}
-              onChange={(e) =>
-                setDraft({ ...draft, sso_issuer_url: e.target.value || null })
-              }
-              placeholder="https://authentik.domain/application/o/cleanarr/"
-            />
-            <FieldHint text="Full OIDC issuer URL from Authentik." />
-          </FormField>
-
-          <FormField label="Client ID" htmlFor="wizard-sso-client-id">
-            <Input
-              id="wizard-sso-client-id"
-              value={draft.sso_client_id ?? ""}
-              disabled={!draft.sso_enabled}
-              onChange={(e) => setDraft({ ...draft, sso_client_id: e.target.value || null })}
-            />
-            <FieldHint text="Public client ID created in Authentik application settings." />
-          </FormField>
-
-          <FormField label="Client Secret" htmlFor="wizard-sso-client-secret">
-            <div className="flex items-center gap-2">
-              <Input
-                id="wizard-sso-client-secret"
-                type={isSSOSecretVisible ? "text" : "password"}
-                value={draft.sso_client_secret ?? ""}
-                disabled={!draft.sso_enabled}
-                onChange={(e) =>
-                  setDraft({ ...draft, sso_client_secret: e.target.value || null })
-                }
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setIsSSOSecretVisible((v: boolean) => !v)}
-                disabled={!draft.sso_enabled}
-              >
-                {isSSOSecretVisible ? (
-                  <EyeOff className="size-4" />
-                ) : (
-                  <Eye className="size-4" />
-                )}
-              </Button>
-            </div>
-            <FieldHint text="Secret is sent to Authentik token endpoint only." />
-          </FormField>
-
-          <FormField label="Redirect URI" htmlFor="wizard-sso-redirect-uri">
-            <Input
-              id="wizard-sso-redirect-uri"
-              value={draft.sso_redirect_uri ?? ""}
-              disabled={!draft.sso_enabled}
-              onChange={(e) => setDraft({ ...draft, sso_redirect_uri: e.target.value || null })}
-            />
-            <FieldHint text="Usually your CleanArr public URL + /api/auth/sso/callback." />
-          </FormField>
-
-          <FormField label="Scopes" htmlFor="wizard-sso-scopes">
-            <Input
-              id="wizard-sso-scopes"
-              value={draft.sso_scopes}
-              disabled={!draft.sso_enabled}
-              onChange={(e) => setDraft({ ...draft, sso_scopes: e.target.value })}
-              placeholder="openid profile email"
-            />
-          </FormField>
-        </div>
-
-        {!draft.sso_enabled && (
-          <p className="text-xs text-muted-foreground">
-            Disable SSO in settings if you want to use only local credentials.
-          </p>
-        )}
-      </div>
+        <SsoConfigSection
+          namespace="wizard"
+          draft={draft}
+          onDraftChange={setDraft}
+          isSecretVisible={isSSOSecretVisible}
+          onToggleSecretVisibility={() => setIsSSOSecretVisible((v) => !v)}
+        />
 
       <div className="flex justify-end border-t pt-4">
         <Button onClick={() => void handleSave()} disabled={isSaving}>
@@ -2909,7 +2878,7 @@ function GeneralSettingsModal({
             <FieldHint text="Auto-generated. Regenerate only if you need to rotate it — then re-run auto-configure in the Jellyfin step." />
           </FormField>
 
-          <FormField label="Jellyfin UI language" htmlFor="general-jellyfin-language">
+          <FormField label="Jellyfin metadata language" htmlFor="general-jellyfin-language">
             <select
               id="general-jellyfin-language"
               value={draft.jellyfin_language}
@@ -2925,99 +2894,13 @@ function GeneralSettingsModal({
             <FieldHint text="Used when requesting metadata titles from Jellyfin." />
           </FormField>
 
-          <div className="space-y-3 border-t pt-4">
-            <div className="flex flex-wrap gap-3">
-              <label className="inline-flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={draft.sso_enabled}
-                  onChange={(e) => setDraft({ ...draft, sso_enabled: e.target.checked })}
-                />
-                Enable Authentik SSO
-              </label>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <FormField label="Issuer URL" htmlFor="general-sso-issuer">
-                <Input
-                  id="general-sso-issuer"
-                  type="url"
-                  value={draft.sso_issuer_url ?? ""}
-                  disabled={!draft.sso_enabled}
-                  onChange={(e) =>
-                    setDraft({ ...draft, sso_issuer_url: e.target.value || null })
-                  }
-                  placeholder="https://authentik.domain/application/o/cleanarr/"
-                />
-                <FieldHint text="Full OIDC issuer URL from Authentik." />
-              </FormField>
-
-              <FormField label="Client ID" htmlFor="general-sso-client-id">
-                <Input
-                  id="general-sso-client-id"
-                  value={draft.sso_client_id ?? ""}
-                  disabled={!draft.sso_enabled}
-                  onChange={(e) =>
-                    setDraft({ ...draft, sso_client_id: e.target.value || null })
-                  }
-                />
-                <FieldHint text="Public client ID created in Authentik application settings." />
-              </FormField>
-
-              <FormField label="Client Secret" htmlFor="general-sso-client-secret">
-                <div className="flex items-center gap-2">
-                  <Input
-                    id="general-sso-client-secret"
-                    type={isSSOSecretVisible ? "text" : "password"}
-                    value={draft.sso_client_secret ?? ""}
-                    disabled={!draft.sso_enabled}
-                    onChange={(e) =>
-                      setDraft({ ...draft, sso_client_secret: e.target.value || null })
-                    }
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setIsSSOSecretVisible((v: boolean) => !v)}
-                    disabled={!draft.sso_enabled}
-                  >
-                    {isSSOSecretVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                  </Button>
-                </div>
-                <FieldHint text="Secret is sent to Authentik token endpoint only." />
-              </FormField>
-
-              <FormField label="Redirect URI" htmlFor="general-sso-redirect-uri">
-                <Input
-                  id="general-sso-redirect-uri"
-                  value={draft.sso_redirect_uri ?? ""}
-                  disabled={!draft.sso_enabled}
-                  onChange={(e) =>
-                    setDraft({ ...draft, sso_redirect_uri: e.target.value || null })
-                  }
-                />
-                <FieldHint text="Usually your CleanArr public URL + /api/auth/sso/callback." />
-              </FormField>
-
-              <FormField label="Scopes" htmlFor="general-sso-scopes">
-                <Input
-                  id="general-sso-scopes"
-                  value={draft.sso_scopes}
-                  disabled={!draft.sso_enabled}
-                  onChange={(e) => setDraft({ ...draft, sso_scopes: e.target.value })}
-                  placeholder="openid profile email"
-                />
-                <FieldHint text="Optional: override default OIDC scopes list." />
-              </FormField>
-            </div>
-
-            {!draft.sso_enabled && (
-              <p className="text-xs text-muted-foreground">
-                Disable SSO in settings if you want to use only local credentials.
-              </p>
-            )}
-          </div>
+          <SsoConfigSection
+            draft={draft}
+            onDraftChange={setDraft}
+            namespace="general"
+            isSecretVisible={isSSOSecretVisible}
+            onToggleSecretVisibility={() => setIsSSOSecretVisible((v: boolean) => !v)}
+          />
 
           <label className="inline-flex cursor-pointer items-center gap-3 text-sm">
             <input

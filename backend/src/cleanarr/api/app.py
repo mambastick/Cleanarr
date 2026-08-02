@@ -415,7 +415,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
             if own_container:
                 await resolved_container.close()
 
-    app = FastAPI(title="CleanArr", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="CleanArr", version="0.2.4", lifespan=lifespan)
     app.state.container = resolved_container
     app.state.activity_store = activity_store
     app.state.webhook_attempt_store = webhook_attempt_store
@@ -456,7 +456,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     async def sso_start(request: Request) -> SSOLoginResponse:
         container = request.app.state.container
         general = container.config.general
-        if not container.auth_service.is_sso_configured(general):
+        if not container.auth_service.is_sso_auth_enabled(general) or not container.auth_service.is_sso_configured(general):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="SSO is not configured yet.",
@@ -504,7 +504,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
 
         container = request.app.state.container
         general = container.config.general
-        if not container.auth_service.is_sso_configured(general):
+        if not container.auth_service.is_sso_auth_enabled(general) or not container.auth_service.is_sso_configured(general):
             return RedirectResponse(_sso_error_target("SSO is not configured."))
 
         if not container.auth_service.consume_sso_state(state):
@@ -569,6 +569,11 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
+        except PermissionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
                 detail=str(exc),
             ) from exc
         _set_session_cookie(response, request, session.token)

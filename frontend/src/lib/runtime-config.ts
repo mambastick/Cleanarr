@@ -1,3 +1,5 @@
+import type { SsoAuthMode } from "@/lib/auth"
+
 export interface GeneralConfig {
   dry_run: boolean
   log_level: string
@@ -6,6 +8,7 @@ export interface GeneralConfig {
   activity_retention_days: number
   jellyfin_language: string
   sso_enabled: boolean
+  sso_mode: SsoAuthMode
   sso_issuer_url: string | null
   sso_client_id: string | null
   sso_client_secret: string | null

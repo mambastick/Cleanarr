@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from cleanarr.application.authentication import AuthSession, AuthStatus
+from cleanarr.domain.config import SSOAuthMode
 
 
 class AuthStatusResponse(BaseModel):
@@ -15,6 +16,7 @@ class AuthStatusResponse(BaseModel):
     authenticated: bool
     username: str | None = None
     sso_enabled: bool
+    sso_mode: SSOAuthMode
     sso_configured: bool
 
     @classmethod

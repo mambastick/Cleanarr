@@ -51,6 +51,7 @@ class GeneralConfigRequest(BaseModel):
     activity_retention_days: int = 30
     jellyfin_language: str = "en"
     sso_enabled: bool = False
+    sso_mode: str = "password_only"
     sso_issuer_url: str | None = None
     sso_client_id: str | None = None
     sso_client_secret: str | None = None

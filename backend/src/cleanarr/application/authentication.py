@@ -9,7 +9,7 @@ import time
 
 from cleanarr.application.configuration import RuntimeConfigurationService
 from cleanarr.infrastructure.auth import InMemorySessionStore, PasswordHasher
-from cleanarr.domain.config import GeneralConfig
+from cleanarr.domain.config import GeneralConfig, SSOAuthMode
 
 
 @dataclass(frozen=True)
@@ -21,6 +21,7 @@ class AuthStatus:
     authenticated: bool
     username: str | None
     sso_enabled: bool
+    sso_mode: SSOAuthMode
     sso_configured: bool
 
 
@@ -64,12 +65,14 @@ class AuthenticationService:
         username = self.resolve_session(session_token)
         configured = admin.configured
         sso_configured = self.is_sso_configured(config.general)
+        local_auth_enabled = self.is_password_auth_enabled(config.general)
         return AuthStatus(
             admin_configured=configured,
             requires_registration=not configured and not sso_configured,
             authenticated=username is not None,
             username=username,
-            sso_enabled=config.general.sso_enabled,
+            sso_enabled=local_auth_enabled,
+            sso_mode=config.general.sso_mode,
             sso_configured=sso_configured,
         )
 
@@ -83,6 +86,8 @@ class AuthenticationService:
 
     def register_admin(self, *, username: str, password: str) -> AuthSession:
         config = self._config_service.get_config()
+        if not self.is_password_auth_enabled(config.general):
+            raise PermissionError("Local authentication is disabled.")
         if config.admin.configured:
             raise ValueError("Admin account is already configured.")
 
@@ -97,6 +102,8 @@ class AuthenticationService:
 
     def login(self, *, username: str, password: str) -> AuthSession:
         config = self._config_service.get_config()
+        if not self.is_password_auth_enabled(config.general):
+            raise PermissionError("Local authentication is disabled.")
         admin = config.admin
         if not admin.configured or admin.username is None or admin.password_salt is None or admin.password_hash is None:
             raise LookupError("Admin account is not configured yet.")
@@ -130,7 +137,7 @@ class AuthenticationService:
         return True
 
     def is_sso_configured(self, general: GeneralConfig) -> bool:
-        if not general.sso_enabled:
+        if not self.is_sso_auth_enabled(general):
             return False
         if not general.sso_issuer_url:
             return False
@@ -139,6 +146,21 @@ class AuthenticationService:
         if not general.sso_client_secret:
             return False
         return True
+
+    def is_password_auth_enabled(self, general: GeneralConfig) -> bool:
+        return general.local_auth_enabled()
+
+    def is_sso_auth_enabled(self, general: GeneralConfig) -> bool:
+        return general.sso_auth_enabled()
+
+    def is_sso_mode_both(self, general: GeneralConfig) -> bool:
+        return general.sso_mode == SSOAuthMode.BOTH
+
+    def is_sso_mode_sso_only(self, general: GeneralConfig) -> bool:
+        return general.sso_mode == SSOAuthMode.SSO_ONLY
+
+    def is_password_only_mode(self, general: GeneralConfig) -> bool:
+        return general.sso_mode == SSOAuthMode.PASSWORD_ONLY
 
     def logout(self, session_token: str | None) -> None:
         if session_token:

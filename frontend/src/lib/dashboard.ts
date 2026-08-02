@@ -90,6 +90,12 @@ export interface DashboardWebhookAttempt {
   result_status: string | null
 }
 
+export type UnifiedActivityKind = "webhook_attempt" | "processed_activity"
+
+export type DashboardUnifiedActivityItem =
+  | ({ kind: "webhook_attempt" } & DashboardWebhookAttempt & { sort_at: number })
+  | ({ kind: "processed_activity" } & DashboardActivity & { sort_at: number })
+
 export interface DashboardPayload {
   service: DashboardService
   endpoints: DashboardEndpoint[]
