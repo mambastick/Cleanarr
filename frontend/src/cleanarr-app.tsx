@@ -1951,6 +1951,7 @@ function WizardGeneralStep({
   const [isSaving, setIsSaving] = useState(false)
   const [tokenCopied, setTokenCopied] = useState(false)
   const [isTokenVisible, setIsTokenVisible] = useState(false)
+  const [isSSOSecretVisible, setIsSSOSecretVisible] = useState(false)
 
   useEffect(() => {
     setDraft(general ? structuredClone(general) : null)
