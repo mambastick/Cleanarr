@@ -7,6 +7,7 @@ from typing import Protocol
 
 from cleanarr.domain import (
     DownloaderRemovalResult,
+    JellyfinItem,
     JellyseerrIssue,
     JellyseerrMedia,
     JellyseerrRequest,
@@ -17,6 +18,13 @@ from cleanarr.domain import (
     SonarrHistoryRecord,
     SonarrSeries,
 )
+
+
+class JellyfinServerClientPort(Protocol):
+    """Jellyfin operations used to confirm webhook deletions."""
+
+    async def list_items(self, *, include_types: list[str]) -> Sequence[JellyfinItem]:
+        """Return current Jellyfin items of the requested types."""
 
 
 class RadarrClientPort(Protocol):

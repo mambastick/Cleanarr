@@ -48,6 +48,7 @@ class FailureReason(StrEnum):
     DOWNSTREAM_ERROR = "downstream_error"
     AUTHENTICATION_FAILED = "authentication_failed"
     UNSUPPORTED_EVENT = "unsupported_event"
+    SOURCE_STILL_PRESENT = "source_still_present"
 
 
 @dataclass(frozen=True)
