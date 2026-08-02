@@ -229,7 +229,7 @@ class ServiceContainer:
         )
         return ServiceRuntime(
             config=config,
-            service=CascadeDeletionService(strategy_factory),
+            service=CascadeDeletionService(strategy_factory, jellyfin=jellyfin_server),
             strategy_factory=strategy_factory,
             radarr=radarr,
             sonarr=sonarr,
