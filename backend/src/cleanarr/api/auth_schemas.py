@@ -14,10 +14,19 @@ class AuthStatusResponse(BaseModel):
     requires_registration: bool
     authenticated: bool
     username: str | None = None
+    sso_enabled: bool
+    sso_configured: bool
 
     @classmethod
     def from_domain(cls, status: AuthStatus) -> AuthStatusResponse:
         return cls.model_validate(status.__dict__)
+
+
+class SSOLoginResponse(BaseModel):
+    """Information for redirecting the browser into the provider."""
+
+    authorize_url: str
+    state: str
 
 
 class AdminCredentialsRequest(BaseModel):

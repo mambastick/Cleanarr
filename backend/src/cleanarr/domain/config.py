@@ -27,11 +27,33 @@ class GeneralConfig(BaseModel):
     webhook_shared_token: str | None = None
     http_timeout_seconds: float = 15.0
     activity_retention_days: int = 30
+    jellyfin_language: str = "en"
+    sso_enabled: bool = False
+    sso_issuer_url: str | None = None
+    sso_client_id: str | None = None
+    sso_client_secret: str | None = None
+    sso_redirect_uri: str | None = None
+    sso_scopes: str = "openid profile email"
 
     @field_validator("log_level", mode="before")
     @classmethod
     def normalize_log_level(cls, value: str) -> str:
         return value.upper()
+
+    @field_validator("jellyfin_language", mode="before")
+    @classmethod
+    def normalize_jellyfin_language(cls, value: str | None) -> str:
+        if not value:
+            return "en"
+        return value.strip().lower()
+
+    @field_validator("sso_scopes", mode="before")
+    @classmethod
+    def normalize_sso_scopes(cls, value: str | None) -> str:
+        if not value:
+            return "openid profile email"
+        scopes = " ".join(part.strip() for part in str(value).split() if part.strip())
+        return scopes or "openid profile email"
 
 
 class AdminAccountConfig(BaseModel):

@@ -746,7 +746,15 @@ class JellyfinServerClient(JsonServiceClient):
         """Verify Jellyfin connectivity."""
         await self._request("GET", "/System/Ping", expected_statuses={200, 204})
 
-    async def list_items(self, *, include_types: list[str]) -> Sequence[JellyfinItem]:
+    async def list_items(
+        self,
+        *,
+        include_types: list[str],
+        accept_language: str | None = None,
+    ) -> Sequence[JellyfinItem]:
+        request_kwargs: dict[str, Any] = {}
+        if accept_language:
+            request_kwargs["headers"] = {"Accept-Language": accept_language}
         payload = await self._request(
             "GET",
             "/Items",
@@ -756,6 +764,7 @@ class JellyfinServerClient(JsonServiceClient):
                 "Fields": "ProviderIds,ParentId,IndexNumber",
                 "Limit": 5000,
             },
+            **request_kwargs,
         )
         raw_items = payload.get("Items", []) if isinstance(payload, dict) else []
         result: list[JellyfinItem] = []
@@ -883,7 +892,12 @@ class NullJellyfinServerClient:
     async def ping(self) -> None:
         return None
 
-    async def list_items(self, *, include_types: list[str]) -> Sequence[JellyfinItem]:
+    async def list_items(
+        self,
+        *,
+        include_types: list[str],
+        accept_language: str | None = None,
+    ) -> Sequence[JellyfinItem]:
         return []
 
     async def delete_item(self, item_id: str) -> None:

@@ -4,6 +4,13 @@ export interface GeneralConfig {
   webhook_shared_token: string | null
   http_timeout_seconds: number
   activity_retention_days: number
+  jellyfin_language: string
+  sso_enabled: boolean
+  sso_issuer_url: string | null
+  sso_client_id: string | null
+  sso_client_secret: string | null
+  sso_redirect_uri: string | null
+  sso_scopes: string
 }
 
 export interface BaseServiceConfig {

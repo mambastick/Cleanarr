@@ -19,6 +19,7 @@ class SeasonSummary(BaseModel):
     episode_count: int
     episode_file_count: int
     size_bytes: int
+    jellyfin_title: str | None = None
     jellyfin_season_id: str | None = None
 
 
@@ -27,6 +28,7 @@ class SeriesSummary(BaseModel):
 
     sonarr_id: int
     title: str
+    jellyfin_series_title: str | None = None
     seasons: list[SeasonSummary]
     jellyfin_series_id: str | None = None
 
@@ -42,6 +44,7 @@ class MovieSummary(BaseModel):
 
     radarr_id: int
     title: str
+    jellyfin_movie_title: str | None = None
     size_bytes: int
     has_file: bool
     jellyfin_movie_id: str | None = None

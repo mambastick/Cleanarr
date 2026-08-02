@@ -276,6 +276,13 @@ class RuntimeConfigurationService:
                 log_level=settings.log_level,
                 webhook_shared_token=settings.webhook_shared_token,
                 http_timeout_seconds=settings.http_timeout_seconds,
+                jellyfin_language=settings.jellyfin_language,
+                sso_enabled=settings.sso_enabled,
+                sso_issuer_url=settings.sso_issuer_url,
+                sso_client_id=settings.sso_client_id,
+                sso_client_secret=settings.sso_client_secret,
+                sso_redirect_uri=settings.sso_redirect_uri,
+                sso_scopes=settings.sso_scopes,
             )
         )
 

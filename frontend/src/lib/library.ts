@@ -5,12 +5,14 @@ export interface SeasonSummary {
   episode_count: number
   episode_file_count: number
   size_bytes: number
+  jellyfin_title?: string | null
   jellyfin_season_id?: string | null
 }
 
 export interface SeriesSummary {
   sonarr_id: number
   title: string
+  jellyfin_series_title?: string | null
   seasons: SeasonSummary[]
   jellyfin_series_id?: string | null
 }
@@ -22,6 +24,7 @@ export interface LibrarySeriesResponse {
 export interface MovieSummary {
   radarr_id: number
   title: string
+  jellyfin_movie_title?: string | null
   size_bytes: number
   has_file: boolean
   jellyfin_movie_id?: string | null

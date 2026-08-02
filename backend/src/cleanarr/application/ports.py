@@ -23,7 +23,12 @@ from cleanarr.domain import (
 class JellyfinServerClientPort(Protocol):
     """Jellyfin operations used to confirm webhook deletions."""
 
-    async def list_items(self, *, include_types: list[str]) -> Sequence[JellyfinItem]:
+    async def list_items(
+        self,
+        *,
+        include_types: list[str],
+        accept_language: str | None = None,
+    ) -> Sequence[JellyfinItem]:
         """Return current Jellyfin items of the requested types."""
 
 

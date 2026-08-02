@@ -49,6 +49,13 @@ class GeneralConfigRequest(BaseModel):
     webhook_shared_token: str | None = None
     http_timeout_seconds: float
     activity_retention_days: int = 30
+    jellyfin_language: str = "en"
+    sso_enabled: bool = False
+    sso_issuer_url: str | None = None
+    sso_client_id: str | None = None
+    sso_client_secret: str | None = None
+    sso_redirect_uri: str | None = None
+    sso_scopes: str = "openid profile email"
 
     def to_domain(self) -> GeneralConfig:
         return GeneralConfig.model_validate(self.model_dump())

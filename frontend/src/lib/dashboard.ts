@@ -78,6 +78,18 @@ export interface DashboardWebhookStatus {
   result_status: string | null
 }
 
+export interface DashboardWebhookAttempt {
+  attempted_at: string
+  outcome: string
+  http_status: number | null
+  message: string
+  payload_event_count: number | null
+  notification_type: string | null
+  item_type: string | null
+  item_name: string | null
+  result_status: string | null
+}
+
 export interface DashboardPayload {
   service: DashboardService
   endpoints: DashboardEndpoint[]
@@ -87,4 +99,5 @@ export interface DashboardPayload {
   sample_payload: Record<string, string | number | null>
   recent_activity: DashboardActivity[]
   webhook_status: DashboardWebhookStatus
+  webhook_attempts: DashboardWebhookAttempt[]
 }

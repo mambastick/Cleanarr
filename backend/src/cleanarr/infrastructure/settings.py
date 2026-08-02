@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     dry_run: bool = Field(default=True, alias="DRY_RUN")
     webhook_shared_token: str | None = Field(default=None, alias="WEBHOOK_SHARED_TOKEN")
     http_timeout_seconds: float = Field(default=15.0, alias="HTTP_TIMEOUT_SECONDS")
+    jellyfin_language: str = Field(default="en", alias="JELLYFIN_LANGUAGE")
+    sso_enabled: bool = Field(default=False, alias="SSO_ENABLED")
+    sso_issuer_url: str | None = Field(default=None, alias="SSO_ISSUER_URL")
+    sso_client_id: str | None = Field(default=None, alias="SSO_CLIENT_ID")
+    sso_client_secret: str | None = Field(default=None, alias="SSO_CLIENT_SECRET")
+    sso_redirect_uri: str | None = Field(default=None, alias="SSO_REDIRECT_URI")
+    sso_scopes: str = Field(default="openid profile email", alias="SSO_SCOPES")
 
     radarr_url: str | None = Field(default=None, alias="RADARR_URL")
     radarr_api_key: str | None = Field(default=None, alias="RADARR_API_KEY")

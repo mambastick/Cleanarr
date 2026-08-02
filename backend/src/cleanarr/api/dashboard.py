@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 import sqlite3
 from collections import Counter
 from collections.abc import Sequence
@@ -146,6 +147,7 @@ class WebhookAttemptRecord:
     outcome: str
     http_status: int
     message: str
+    payload_event_count: int | None = None
     notification_type: str | None = None
     item_type: str | None = None
     item_name: str | None = None
@@ -153,10 +155,12 @@ class WebhookAttemptRecord:
 
 
 class WebhookAttemptStore:
-    """Keep only the latest webhook attempt so the UI can guide setup."""
+    """Keep a bounded in-memory webhook-attempt log for UI inspection."""
+
+    _MAX_ATTEMPTS = 80
 
     def __init__(self) -> None:
-        self._latest: WebhookAttemptRecord | None = None
+        self._attempts: deque[WebhookAttemptRecord] = deque(maxlen=self._MAX_ATTEMPTS)
         self._lock = Lock()
 
     def record(
@@ -165,26 +169,49 @@ class WebhookAttemptStore:
         outcome: str,
         http_status: int,
         message: str,
+        payload_event_count: int | None = None,
         notification_type: str | None = None,
         item_type: str | None = None,
         item_name: str | None = None,
         result_status: str | None = None,
     ) -> None:
         with self._lock:
-            self._latest = WebhookAttemptRecord(
-                attempted_at=datetime.now(UTC),
-                outcome=outcome,
-                http_status=http_status,
-                message=message,
-                notification_type=notification_type,
-                item_type=item_type,
-                item_name=item_name,
-                result_status=result_status,
+            self._attempts.appendleft(
+                WebhookAttemptRecord(
+                    attempted_at=datetime.now(UTC),
+                    outcome=outcome,
+                    http_status=http_status,
+                    message=message,
+                    payload_event_count=payload_event_count,
+                    notification_type=notification_type,
+                    item_type=item_type,
+                    item_name=item_name,
+                    result_status=result_status,
+                ),
             )
+
+    def snapshot(self, limit: int = 20) -> list[WebhookAttemptRecord]:
+        with self._lock:
+            records = list(self._attempts)
+        return records[:limit]
 
     def latest(self) -> WebhookAttemptRecord | None:
         with self._lock:
-            return self._latest
+            return self._attempts[0] if self._attempts else None
+
+
+class DashboardWebhookAttemptResponse(BaseModel):
+    """History item for inbound webhook deliveries."""
+
+    attempted_at: datetime
+    outcome: str
+    http_status: int | None
+    message: str
+    payload_event_count: int | None = None
+    notification_type: str | None = None
+    item_type: str | None = None
+    item_name: str | None = None
+    result_status: str | None = None
 
 
 class DashboardServiceResponse(BaseModel):
@@ -277,6 +304,7 @@ class DashboardResponse(BaseModel):
     sample_payload: dict[str, str | int | None]
     recent_activity: list[DashboardActivityResponse]
     webhook_status: DashboardWebhookStatusResponse
+    webhook_attempts: list[DashboardWebhookAttemptResponse]
 
 
 async def build_dashboard_response(
@@ -298,6 +326,7 @@ async def build_dashboard_response(
     active_downloader = _pick_active_url(config.downloaders)
     health = health_probe_store.snapshot()
     activity_records = await activity_store.snapshot()
+    webhook_attempts = webhook_attempt_store.snapshot()
 
     return DashboardResponse(
         service=DashboardServiceResponse(
@@ -384,6 +413,20 @@ async def build_dashboard_response(
             for record in activity_records
         ],
         webhook_status=_build_webhook_status(webhook_attempt_store.latest()),
+        webhook_attempts=[
+            DashboardWebhookAttemptResponse(
+                attempted_at=record.attempted_at,
+                outcome=record.outcome,
+                http_status=record.http_status,
+                message=record.message,
+                payload_event_count=record.payload_event_count,
+                notification_type=record.notification_type,
+                item_type=record.item_type,
+                item_name=record.item_name,
+                result_status=record.result_status,
+            )
+            for record in webhook_attempts
+        ],
     )
 
 
