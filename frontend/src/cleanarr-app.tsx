@@ -1678,7 +1678,6 @@ function SettingsPanel({
   const [tokenCopied, setTokenCopied] = useState(false)
   const [isTokenVisible, setIsTokenVisible] = useState(false)
   const [isSSOSecretVisible, setIsSSOSecretVisible] = useState(false)
-  const [isSSOSecretVisible, setIsSSOSecretVisible] = useState(false)
 
   useEffect(() => {
     setDraft(general ? structuredClone(general) : null)
@@ -1869,7 +1868,7 @@ function SettingsPanel({
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() => setIsSSOSecretVisible((v) => !v)}
+                        onClick={() => setIsSSOSecretVisible((v: boolean) => !v)}
                         disabled={!draft.sso_enabled}
                       >
                         {isSSOSecretVisible ? (
@@ -2137,7 +2136,7 @@ function WizardGeneralStep({
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => setIsSSOSecretVisible((v) => !v)}
+                onClick={() => setIsSSOSecretVisible((v: boolean) => !v)}
                 disabled={!draft.sso_enabled}
               >
                 {isSSOSecretVisible ? (
@@ -2979,7 +2978,7 @@ function GeneralSettingsModal({
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => setIsSSOSecretVisible((v) => !v)}
+                    onClick={() => setIsSSOSecretVisible((v: boolean) => !v)}
                     disabled={!draft.sso_enabled}
                   >
                     {isSSOSecretVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
