@@ -412,19 +412,6 @@ const DASHBOARD_NAME_TO_FAMILY: Partial<Record<string, ServiceFamily>> = {
   Downloader: "downloaders",
 }
 
-const GENERAL_SETUP_STEPS = [
-  "Keep CleanArr in Dry Run until all services test green.",
-  "Set a webhook token. Jellyfin must send the same X-Webhook-Token header.",
-  "Only switch to Live mode after Radarr, Sonarr, Jellyseerr, and qBittorrent are configured.",
-]
-
-const JELLYFIN_INSTALL_STEPS = [
-  "Open Jellyfin → Dashboard → Catalog.",
-  "Find the plugin named Webhook and install it.",
-  "Restart Jellyfin if the plugin manager asks for it.",
-  "After restart, open Jellyfin → Dashboard → Plugins → Webhook.",
-]
-
 const JELLYFIN_LANGUAGE_OPTIONS = [
   { value: "en", label: "English" },
   { value: "ru", label: "Русский" },
@@ -586,6 +573,129 @@ type UiTextKey =
   | "webhookNotificationLabel"
   | "webhookResultStatusLabel"
   | "reasonLabel"
+  | "add"
+  | "edit"
+  | "test"
+  | "next"
+  | "back"
+  | "skipForNow"
+  | "done"
+  | "enabled"
+  | "runtimeTarget"
+  | "displayName"
+  | "baseUrl"
+  | "alreadyConfigured"
+  | "beforeYouSave"
+  | "beforeSaveDescription"
+  | "webhook"
+  | "notConfigured"
+  | "healthy"
+  | "unreachable"
+  | "noStatus"
+  | "none"
+  | "active"
+  | "recent"
+  | "dismiss"
+  | "progress"
+  | "actions"
+  | "deletion"
+  | "unexpectedRequestError"
+  | "unknownError"
+  | "passwordsDoNotMatch"
+  | "adminCreated"
+  | "signedIn"
+  | "deletionStarted"
+  | "backgroundRefreshFailed"
+  | "serviceUpdated"
+  | "serviceAdded"
+  | "serviceRemoved"
+  | "runtimeSettingsSummary"
+  | "jellyfinLanguageHint"
+  | "uiLanguageHint"
+  | "runtimeSettingsDescription"
+  | "recommendedFirstRun"
+  | "recommendedDryRun"
+  | "httpTimeoutHint"
+  | "retentionHint"
+  | "closeAndRefresh"
+  | "keepDryRun"
+  | "oneDay"
+  | "sevenDays"
+  | "thirtyDays"
+  | "ninetyDays"
+  | "oneYear"
+  | "serviceRadarrDescription"
+  | "serviceSonarrDescription"
+  | "serviceJellyseerrDescription"
+  | "serviceDownloaderDescription"
+  | "serviceJellyfinDescription"
+  | "apiKey"
+  | "exampleUrl"
+  | "reverseProxyHint"
+  | "serviceUrlHint"
+  | "downloaderUrlHint"
+  | "radarrApiHint"
+  | "sonarrApiHint"
+  | "jellyseerrApiHint"
+  | "downloaderUsernameHint"
+  | "downloaderPasswordHint"
+  | "jellyfinApiHint"
+  | "firstTimeSetup"
+  | "autoConfigureWebhook"
+  | "autoConfigureWebhookDescription"
+  | "connectJellyfinFirst"
+  | "setWebhookTokenFirst"
+  | "configuring"
+  | "configured"
+  | "installJellyfinWebhook"
+  | "installJellyfinWebhookDescription"
+  | "jellyfinInstallStep1"
+  | "jellyfinInstallStep2"
+  | "jellyfinInstallStep3"
+  | "jellyfinInstallStep4"
+  | "verifyDelivery"
+  | "verifyDeliveryDescription"
+  | "deliveryStatus"
+  | "lastAttempt"
+  | "httpStatus"
+  | "lastItem"
+  | "notReceivedYet"
+  | "noItemReceived"
+  | "processing"
+  | "latestWebhookAttempt"
+  | "noJellyfinWebhook"
+  | "smokeTestCurl"
+  | "tokenPrefilled"
+  | "configureTokenFirst"
+  | "smokeTestDescription"
+  | "copyCurl"
+  | "generalSetupStep1"
+  | "generalSetupStep2"
+  | "generalSetupStep3"
+  | "tryDifferentSearch"
+  | "noSeriesSetup"
+  | "noMoviesSetup"
+  | "onDisk"
+  | "noFile"
+  | "episodes"
+  | "seasons"
+  | "dryRunNoChanges"
+  | "seasonOfSeries"
+  | "movie"
+  | "item"
+  | "webhookReceived"
+  | "tokenMismatch"
+  | "payloadRejected"
+  | "noDeliveryYet"
+  | "partialFailure"
+  | "success"
+  | "failed"
+  | "deleted"
+  | "queued"
+  | "running"
+  | "completed"
+  | "skipped"
+  | "unknown"
 
 type UiTextMap = Record<UiTextKey, string>
 
@@ -718,6 +828,129 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     ssoModePasswordOnlyHint: "Use only local credentials. SSO fields are disabled.",
     ssoModeSsoOnlyHint: "Use only external identity provider authentication.",
     ssoModeBothHint: "Allow both local credentials and external identity provider authentication.",
+    add: "Add",
+    edit: "Edit",
+    test: "Test",
+    next: "Next",
+    back: "Back",
+    skipForNow: "Skip for now",
+    done: "Done",
+    enabled: "Enabled",
+    runtimeTarget: "Use as runtime target",
+    displayName: "Display name",
+    baseUrl: "Base URL",
+    alreadyConfigured: "Already configured",
+    beforeYouSave: "Before you save",
+    beforeSaveDescription: "Paste the service URL and credentials, then run Test. The result must turn green before switching live.",
+    webhook: "Webhook",
+    notConfigured: "Not configured",
+    healthy: "Healthy",
+    unreachable: "Unreachable",
+    noStatus: "No status",
+    none: "None",
+    active: "active",
+    recent: "recent",
+    dismiss: "Dismiss",
+    progress: "progress",
+    actions: "actions",
+    deletion: "deletion",
+    unexpectedRequestError: "Unexpected request error",
+    unknownError: "Unknown error",
+    passwordsDoNotMatch: "Passwords do not match.",
+    adminCreated: "Administrator created. Use the setup wizard to configure your services.",
+    signedIn: "Signed in successfully.",
+    deletionStarted: "Deletion started in the background.",
+    backgroundRefreshFailed: "Could not refresh background tasks",
+    serviceUpdated: "updated",
+    serviceAdded: "added",
+    serviceRemoved: "removed",
+    runtimeSettingsSummary: "Runtime settings: log level, HTTP timeout, activity retention, metadata language, SSO, and webhook token.",
+    jellyfinLanguageHint: "Used when requesting series and movie titles from Jellyfin metadata.",
+    uiLanguageHint: "Changes the language of the CleanArr interface.",
+    runtimeSettingsDescription: "Changes are persisted and immediately rebuild the live runtime.",
+    recommendedFirstRun: "Recommended first-run settings",
+    recommendedDryRun: "Leave Dry Run enabled while you validate every downstream integration.",
+    httpTimeoutHint: "Increase only if your Arr services are slow to respond.",
+    retentionHint: "Events older than this are deleted from the SQLite database.",
+    closeAndRefresh: "Close this window and refresh the configuration.",
+    keepDryRun: "Keep CleanArr in Dry Run",
+    oneDay: "1 day",
+    sevenDays: "7 days",
+    thirtyDays: "30 days",
+    ninetyDays: "90 days",
+    oneYear: "1 year",
+    serviceRadarrDescription: "Movie cleanup target used to resolve and delete movies.",
+    serviceSonarrDescription: "Series, season, and episode cleanup target.",
+    serviceJellyseerrDescription: "Request and issue cleanup target.",
+    serviceDownloaderDescription: "Downloader used for torrent hash deletion with files.",
+    serviceJellyfinDescription: "Jellyfin media server used for library browsing and immediate item removal.",
+    apiKey: "API key",
+    exampleUrl: "Example URL",
+    reverseProxyHint: "Reverse-proxy paths are supported.",
+    serviceUrlHint: "Paste the service URL only. CleanArr appends the correct API path automatically.",
+    downloaderUrlHint: "Paste the qBittorrent Web UI URL only. CleanArr strips /api/v2 automatically.",
+    radarrApiHint: "Radarr → Settings → General → Security → API Key.",
+    sonarrApiHint: "Sonarr → Settings → General → Security → API Key.",
+    jellyseerrApiHint: "Jellyseerr → Settings → General → API Key.",
+    downloaderUsernameHint: "Use the same username you use to sign in to the qBittorrent Web UI.",
+    downloaderPasswordHint: "Use the same password you use to sign in to the qBittorrent Web UI.",
+    jellyfinApiHint: "Jellyfin → Dashboard → API Keys → + → create a key for CleanArr.",
+    firstTimeSetup: "First-time setup — configure each service to get started.",
+    autoConfigureWebhook: "Auto-configure webhook",
+    autoConfigureWebhookDescription: "CleanArr configures the Jellyfin Webhook plugin automatically. The plugin must already be installed in Jellyfin.",
+    connectJellyfinFirst: "Connect the Jellyfin server before auto-configuring the webhook.",
+    setWebhookTokenFirst: "Set a webhook token in Runtime settings first — it will be included in the plugin config.",
+    configuring: "Configuring…",
+    configured: "Configured",
+    installJellyfinWebhook: "Install the Jellyfin Webhook plugin",
+    installJellyfinWebhookDescription: "Jellyfin → Dashboard → Plugins → Catalog → search Webhook → install → restart if prompted.",
+    jellyfinInstallStep1: "Open Jellyfin → Dashboard → Catalog.",
+    jellyfinInstallStep2: "Find the plugin named Webhook and install it.",
+    jellyfinInstallStep3: "Restart Jellyfin if the plugin manager asks for it.",
+    jellyfinInstallStep4: "After restart, open Jellyfin → Dashboard → Plugins → Webhook.",
+    verifyDelivery: "Verify delivery",
+    verifyDeliveryDescription: "CleanArr records every inbound webhook attempt so you can confirm delivery without a real deletion event.",
+    deliveryStatus: "Delivery status",
+    lastAttempt: "Last attempt",
+    httpStatus: "HTTP status",
+    lastItem: "Last item",
+    notReceivedYet: "Not received yet",
+    noItemReceived: "No item received yet",
+    processing: "Processing",
+    latestWebhookAttempt: "Latest webhook attempt",
+    noJellyfinWebhook: "No Jellyfin webhook has reached CleanArr yet.",
+    smokeTestCurl: "Smoke test (cURL)",
+    tokenPrefilled: "token pre-filled",
+    configureTokenFirst: "configure token first",
+    smokeTestDescription: "Sends a synthetic ItemDeleted event to CleanArr. Use it to confirm network connectivity and token authentication before a real deletion.",
+    copyCurl: "Copy cURL",
+    generalSetupStep1: "Keep CleanArr in Dry Run until all services test green.",
+    generalSetupStep2: "Set a webhook token. Jellyfin must send the same X-Webhook-Token header.",
+    generalSetupStep3: "Only switch to Live mode after all downstream services are configured.",
+    tryDifferentSearch: "Try a different search term.",
+    noSeriesSetup: "Sonarr returned no series. Configure Sonarr in Setup first.",
+    noMoviesSetup: "Radarr returned no movies. Configure Radarr in Setup first.",
+    onDisk: "On disk",
+    noFile: "No file",
+    episodes: "episodes",
+    seasons: "seasons",
+    dryRunNoChanges: "No actual changes will be made.",
+    seasonOfSeries: "Season {{season}} of {{series}}",
+    movie: "Movie",
+    item: "Item",
+    webhookReceived: "Webhook received",
+    tokenMismatch: "Token mismatch",
+    payloadRejected: "Payload rejected",
+    noDeliveryYet: "No delivery yet",
+    partialFailure: "Partial failure",
+    success: "Success",
+    failed: "Failed",
+    deleted: "Deleted",
+    queued: "Queued",
+    running: "Running",
+    completed: "Completed",
+    skipped: "Skipped",
+    unknown: "Unknown",
   },
   ru: {
     dashboard: "Панель",
@@ -726,7 +959,7 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     library: "Библиотека",
     live: "Включен",
     dryRun: "Тестовый режим",
-    liveMode: "Live режим",
+    liveMode: "Рабочий режим",
     liveModeDescription: "Выполняются реальные удаления",
     dryRunDescription: "Реальные удаления отключены",
     status: "Статус",
@@ -774,7 +1007,7 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     libraryDescription:
       "Просматривайте медиатеку и удаляйте элементы — очистка затем выполняется в Sonarr/Radarr, qBittorrent, Jellyseerr и Jellyfin.",
     dryRunModeInfo: "Тестовый режим",
-    noLiveChanges: "Никакие реальные изменения не будут применены. Включите Live режим в Runtime settings для реальных удалений.",
+    noLiveChanges: "Реальные изменения не выполняются. Включите рабочий режим в настройках приложения, чтобы разрешить удаление.",
     deleteButton: "Удалить",
     confirmDelete: "Удалить",
     simulate: "Симулировать (тест)",
@@ -790,10 +1023,10 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     general: "Общее",
     settingsUnavailable: "Настройки недоступны",
     tryAgain: "Обновите конфигурацию и повторите.",
-    runtimeSettings: "Настройки runtime",
+    runtimeSettings: "Настройки приложения",
     appBehaviour: "Параметры работы и поведения приложения.",
     logLevel: "Уровень логирования",
-    httpTimeoutSeconds: "HTTP timeout (сек.)",
+    httpTimeoutSeconds: "Тайм-аут HTTP (с)",
     activityRetention: "Хранение активности",
     jellyfinMetadataLanguage: "Язык метаданных Jellyfin",
     uiLanguage: "Язык интерфейса",
@@ -821,7 +1054,7 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     continueWithSso: "Продолжить через SSO",
     ssoNotConfigured: "SSO ещё не настроен",
     connecting: "Подключение...",
-    configureSsoBefore: "Настройте SSO в Runtime settings, затем перезагрузите экран.",
+    configureSsoBefore: "Настройте SSO в настройках приложения, затем перезагрузите экран.",
     noAuthConfigured: "Метод авторизации не настроен.",
     requestFailed: "Ошибка запроса",
     ssoAuthMode: "Режим SSO",
@@ -847,6 +1080,129 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     ssoModePasswordOnlyHint: "Только локальные учётные данные. Поля SSO отключены.",
     ssoModeSsoOnlyHint: "Только внешняя аутентификация через OIDC.",
     ssoModeBothHint: "Локальная и SSO авторизация включены.",
+    add: "Добавить",
+    edit: "Изменить",
+    test: "Проверить",
+    next: "Далее",
+    back: "Назад",
+    skipForNow: "Пропустить пока",
+    done: "Готово",
+    enabled: "Включено",
+    runtimeTarget: "Использовать как основной сервис",
+    displayName: "Отображаемое имя",
+    baseUrl: "Базовый URL",
+    alreadyConfigured: "Уже настроено",
+    beforeYouSave: "Перед сохранением",
+    beforeSaveDescription: "Укажите URL и учётные данные сервиса, затем запустите проверку. До включения рабочего режима результат должен быть успешным.",
+    webhook: "Webhook",
+    notConfigured: "Не настроено",
+    healthy: "Доступен",
+    unreachable: "Недоступен",
+    noStatus: "Нет статуса",
+    none: "Нет",
+    active: "активных",
+    recent: "недавних",
+    dismiss: "Скрыть",
+    progress: "прогресс",
+    actions: "действий",
+    deletion: "удаление",
+    unexpectedRequestError: "Неожиданная ошибка запроса",
+    unknownError: "Неизвестная ошибка",
+    passwordsDoNotMatch: "Пароли не совпадают.",
+    adminCreated: "Администратор создан. Настройте сервисы в мастере настройки.",
+    signedIn: "Вход выполнен.",
+    deletionStarted: "Удаление запущено в фоне.",
+    backgroundRefreshFailed: "Не удалось обновить фоновые задачи",
+    serviceUpdated: "обновлён",
+    serviceAdded: "добавлен",
+    serviceRemoved: "удалён",
+    runtimeSettingsSummary: "Параметры приложения: журналирование, HTTP-таймаут, срок хранения событий, язык метаданных, SSO и токен webhook.",
+    jellyfinLanguageHint: "Используется при запросе названий сериалов и фильмов из метаданных Jellyfin.",
+    uiLanguageHint: "Изменяет язык интерфейса CleanArr.",
+    runtimeSettingsDescription: "Изменения сохраняются и сразу применяются к работающему приложению.",
+    recommendedFirstRun: "Рекомендуемые настройки первого запуска",
+    recommendedDryRun: "Оставьте тестовый режим включённым, пока не проверите все интеграции.",
+    httpTimeoutHint: "Увеличивайте только если сервисы Arr отвечают слишком медленно.",
+    retentionHint: "Более старые события удаляются из базы данных SQLite.",
+    closeAndRefresh: "Закройте это окно и обновите конфигурацию.",
+    keepDryRun: "Оставить CleanArr в тестовом режиме",
+    oneDay: "1 день",
+    sevenDays: "7 дней",
+    thirtyDays: "30 дней",
+    ninetyDays: "90 дней",
+    oneYear: "1 год",
+    serviceRadarrDescription: "Сервис поиска и удаления фильмов.",
+    serviceSonarrDescription: "Сервис поиска и удаления сериалов, сезонов и эпизодов.",
+    serviceJellyseerrDescription: "Сервис очистки запросов и обращений.",
+    serviceDownloaderDescription: "Загрузчик для удаления торрентов вместе с файлами.",
+    serviceJellyfinDescription: "Медиасервер для просмотра библиотеки и немедленного удаления элементов.",
+    apiKey: "API-ключ",
+    exampleUrl: "Пример URL",
+    reverseProxyHint: "Поддерживаются пути через обратный прокси.",
+    serviceUrlHint: "Укажите только URL сервиса. CleanArr автоматически добавит правильный путь API.",
+    downloaderUrlHint: "Укажите только URL веб-интерфейса qBittorrent. CleanArr автоматически уберёт /api/v2.",
+    radarrApiHint: "Radarr → Настройки → Общие → Безопасность → API Key.",
+    sonarrApiHint: "Sonarr → Настройки → Общие → Безопасность → API Key.",
+    jellyseerrApiHint: "Jellyseerr → Настройки → Общие → API Key.",
+    downloaderUsernameHint: "Используйте имя пользователя от веб-интерфейса qBittorrent.",
+    downloaderPasswordHint: "Используйте пароль от веб-интерфейса qBittorrent.",
+    jellyfinApiHint: "Jellyfin → Панель управления → API Keys → + → создайте ключ для CleanArr.",
+    firstTimeSetup: "Первичная настройка — подключите необходимые сервисы.",
+    autoConfigureWebhook: "Настроить webhook автоматически",
+    autoConfigureWebhookDescription: "CleanArr автоматически настроит плагин Webhook в Jellyfin. Плагин должен быть заранее установлен.",
+    connectJellyfinFirst: "Сначала подключите сервер Jellyfin, затем настройте webhook.",
+    setWebhookTokenFirst: "Сначала задайте токен webhook в настройках приложения — он будет добавлен в конфигурацию плагина.",
+    configuring: "Настройка…",
+    configured: "Настроено",
+    installJellyfinWebhook: "Установите плагин Webhook для Jellyfin",
+    installJellyfinWebhookDescription: "Jellyfin → Панель управления → Плагины → Каталог → найдите Webhook → установите → при необходимости перезапустите Jellyfin.",
+    jellyfinInstallStep1: "Откройте Jellyfin → Панель управления → Каталог.",
+    jellyfinInstallStep2: "Найдите плагин Webhook и установите его.",
+    jellyfinInstallStep3: "Перезапустите Jellyfin, если этого потребует менеджер плагинов.",
+    jellyfinInstallStep4: "После перезапуска откройте Jellyfin → Панель управления → Плагины → Webhook.",
+    verifyDelivery: "Проверка доставки",
+    verifyDeliveryDescription: "CleanArr сохраняет каждую попытку webhook, поэтому доставку можно проверить без реального удаления.",
+    deliveryStatus: "Статус доставки",
+    lastAttempt: "Последняя попытка",
+    httpStatus: "Статус HTTP",
+    lastItem: "Последний элемент",
+    notReceivedYet: "Пока не получено",
+    noItemReceived: "Элементы пока не получены",
+    processing: "Обработка",
+    latestWebhookAttempt: "Последняя попытка webhook",
+    noJellyfinWebhook: "Webhook из Jellyfin ещё не поступал в CleanArr.",
+    smokeTestCurl: "Проверочный запрос (cURL)",
+    tokenPrefilled: "токен уже подставлен",
+    configureTokenFirst: "сначала настройте токен",
+    smokeTestDescription: "Отправляет синтетическое событие ItemDeleted в CleanArr. Используйте его для проверки сети и токена до реального удаления.",
+    copyCurl: "Копировать cURL",
+    generalSetupStep1: "Оставьте CleanArr в тестовом режиме, пока все проверки сервисов не будут успешными.",
+    generalSetupStep2: "Задайте токен webhook. Jellyfin должен отправлять его в заголовке X-Webhook-Token.",
+    generalSetupStep3: "Включайте рабочий режим только после настройки всех внешних сервисов.",
+    tryDifferentSearch: "Попробуйте изменить поисковый запрос.",
+    noSeriesSetup: "Sonarr не вернул сериалов. Сначала настройте Sonarr.",
+    noMoviesSetup: "Radarr не вернул фильмов. Сначала настройте Radarr.",
+    onDisk: "На диске",
+    noFile: "Файла нет",
+    episodes: "эпизодов",
+    seasons: "сезонов",
+    dryRunNoChanges: "Реальные изменения не выполняются.",
+    seasonOfSeries: "Сезон {{season}} сериала {{series}}",
+    movie: "Фильм",
+    item: "Элемент",
+    webhookReceived: "Webhook получен",
+    tokenMismatch: "Токен не совпадает",
+    payloadRejected: "Данные отклонены",
+    noDeliveryYet: "Доставок пока нет",
+    partialFailure: "Частичная ошибка",
+    success: "Успешно",
+    failed: "Ошибка",
+    deleted: "Удалено",
+    queued: "В очереди",
+    running: "Выполняется",
+    completed: "Завершено",
+    skipped: "Пропущено",
+    unknown: "Неизвестно",
   },
 }
 
@@ -876,6 +1232,71 @@ function getUiText(value: string | null | undefined): UiTextMap {
   const languageOverride = UI_TEXTS[language] ?? FALLBACK_UI_TEXTS[language] ?? {}
   const translations = { ...UI_TEXTS[DEFAULT_UI_LANG], ...languageOverride }
   return translations as UiTextMap
+}
+
+function getServiceDescription(family: ServiceFamily, text: UiTextMap): string {
+  switch (family) {
+    case "radarr": return text.serviceRadarrDescription
+    case "sonarr": return text.serviceSonarrDescription
+    case "jellyseerr": return text.serviceJellyseerrDescription
+    case "downloaders": return text.serviceDownloaderDescription
+    case "jellyfin_server": return text.serviceJellyfinDescription
+  }
+}
+
+function getServiceHelp(meta: ServiceMeta, text: UiTextMap): string[] {
+  return [`${text.exampleUrl}: ${meta.example}`, text.reverseProxyHint]
+}
+
+function getServiceFieldLabel(
+  key: ServiceMeta["fields"][number]["key"],
+  text: UiTextMap,
+): string {
+  if (key === "username") return text.username
+  if (key === "password") return text.password
+  return text.apiKey
+}
+
+function getServiceFieldHint(
+  family: ServiceFamily,
+  key: ServiceMeta["fields"][number]["key"],
+  text: UiTextMap,
+): string {
+  if (key === "username") return text.downloaderUsernameHint
+  if (key === "password") return text.downloaderPasswordHint
+  switch (family) {
+    case "radarr": return text.radarrApiHint
+    case "sonarr": return text.sonarrApiHint
+    case "jellyseerr": return text.jellyseerrApiHint
+    case "jellyfin_server": return text.jellyfinApiHint
+    case "downloaders": return text.apiKey
+  }
+}
+
+function getStatusLabel(status: string, text: UiTextMap): string {
+  switch (status.toLowerCase()) {
+    case "partial_failure": return text.partialFailure
+    case "success": return text.success
+    case "failed": return text.failed
+    case "deleted": return text.deleted
+    case "queued": return text.queued
+    case "running": return text.running
+    case "completed": return text.completed
+    case "skipped": return text.skipped
+    case "healthy": return text.healthy
+    case "unreachable": return text.unreachable
+    case "unconfigured": return text.notConfigured
+    default: return status || text.unknown
+  }
+}
+
+function getItemTypeLabel(itemType: string, text: UiTextMap): string {
+  switch (itemType.toLowerCase()) {
+    case "movie": return text.movie
+    case "series": return text.series
+    case "season": return text.season
+    default: return itemType || text.item
+  }
 }
 
 const SSO_MODE_OPTIONS: Array<{
@@ -1090,7 +1511,7 @@ function CleanArrApp() {
       })
     } catch (error) {
       if (!deleteJobsPollFailed.current) {
-        toast.error(`Could not refresh background tasks: ${normalizeError(error)}`)
+        toast.error(`${uiText.backgroundRefreshFailed}: ${normalizeError(error)}`)
         deleteJobsPollFailed.current = true
       }
     }
@@ -1125,7 +1546,7 @@ function CleanArrApp() {
       hasLoadedDeleteJobs.current = true
       setDeleteJobs((current) => [job, ...current.filter((item) => item.id !== job.id)])
       setDeleteTarget(null)
-      toast.success("Deletion started in the background.")
+      toast.success(uiText.deletionStarted)
     } catch (error) {
       setDeleteError(normalizeError(error))
     } finally {
@@ -1269,7 +1690,7 @@ function CleanArrApp() {
 
   const submitAuthForm = async () => {
     if (authMode === "register" && authForm.password !== authForm.confirmPassword) {
-      toast.error("Passwords do not match.")
+      toast.error(uiText.passwordsDoNotMatch)
       return
     }
     setIsAuthSubmitting(true)
@@ -1288,9 +1709,7 @@ function CleanArrApp() {
         setShowWizard(true)
       }
       toast.success(
-        authMode === "register"
-          ? "Administrator created. Use the setup wizard to configure your services."
-          : "Signed in successfully.",
+        authMode === "register" ? uiText.adminCreated : uiText.signedIn,
       )
     } catch (error) {
       toast.error(normalizeError(error))
@@ -1346,7 +1765,7 @@ function CleanArrApp() {
       : await fetchJson<RuntimeConfigPayload>(meta.endpoint, { method: "POST", body })
     setConfig(next)
     setServiceModal(null)
-    toast.success(`${meta.title} ${draft.id ? "updated" : "added"}.`)
+    toast.success(`${meta.title} ${draft.id ? uiText.serviceUpdated : uiText.serviceAdded}.`)
   }
 
   const deleteServiceDraft = async (family: ServiceFamily, serviceId: string) => {
@@ -1355,7 +1774,7 @@ function CleanArrApp() {
     const next = await fetchJson<RuntimeConfigPayload>("/api/config")
     setConfig(next)
     setServiceModal(null)
-    toast.success(`${meta.title} removed.`)
+    toast.success(`${meta.title} ${uiText.serviceRemoved}.`)
   }
 
   const testServiceDraft = async (family: ServiceFamily, draft: ServiceDraft) => {
@@ -1576,6 +1995,7 @@ function CleanArrApp() {
 
       <ServiceModal
         state={serviceModal}
+        text={uiText}
         onClose={() => setServiceModal(null)}
         onSave={saveServiceDraft}
         onDelete={deleteServiceDraft}
@@ -1591,6 +2011,7 @@ function CleanArrApp() {
 
       <DeleteConfirmModal
         target={deleteTarget}
+        text={uiText}
         isStarting={isStartingDelete}
         error={deleteError}
         isDryRun={!isLive}
@@ -1603,6 +2024,7 @@ function CleanArrApp() {
 
       <BackgroundJobsPanel
         jobs={deleteJobs}
+        text={uiText}
         onDismiss={(jobId) => void dismissDeleteJob(jobId)}
       />
     </Tabs>
@@ -1676,7 +2098,6 @@ function AuthScreen({
           {hasSsoError && (
             <Alert variant="destructive">
               <CircleAlert className="size-4" />
-              <AlertTitle>SSO sign-in error</AlertTitle>
               <AlertTitle>{text.ssoSignInError}</AlertTitle>
               <AlertDescription>{ssoError}</AlertDescription>
             </Alert>
@@ -1801,9 +2222,11 @@ const DOWNSTREAM_META: Partial<Record<string, { icon: LucideIcon; color: string 
 
 function ServiceHealthCard({
   service,
+  text,
   onEdit,
 }: {
   service: { name: string; role: string; url: string; configured: boolean; health_status: HealthStatus }
+  text: UiTextMap
   onEdit?: () => void
 }) {
   const meta = DOWNSTREAM_META[service.name] ?? { icon: Server, color: "text-muted-foreground" }
@@ -1815,7 +2238,7 @@ function ServiceHealthCard({
           <Icon className={cn("size-4", meta.color)} />
         </div>
         <div className="flex items-center gap-1.5">
-          <StatusDot healthStatus={service.health_status} />
+          <StatusDot healthStatus={service.health_status} text={text} />
           <span
             className={cn(
               "text-xs capitalize",
@@ -1824,14 +2247,14 @@ function ServiceHealthCard({
               service.health_status === "unconfigured" && "text-muted-foreground",
             )}
           >
-            {service.health_status}
+            {getStatusLabel(service.health_status, text)}
           </span>
           {onEdit && (
             <button
               type="button"
               onClick={onEdit}
               className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors"
-              title={`Edit ${service.name}`}
+              title={`${text.edit} ${service.name}`}
             >
               <PenSquare className="size-3.5" />
             </button>
@@ -1845,7 +2268,7 @@ function ServiceHealthCard({
       {service.url ? (
         <code className="block truncate text-[11px] text-muted-foreground">{service.url}</code>
       ) : (
-        <span className="text-[11px] text-muted-foreground italic">Not configured</span>
+        <span className="text-[11px] text-muted-foreground italic">{text.notConfigured}</span>
       )}
     </div>
   )
@@ -1966,6 +2389,7 @@ function DashboardPanel({
               <ServiceHealthCard
                 key={service.name}
                 service={service}
+                text={text}
                 onEdit={() => onEditService(service.name)}
               />
             ))}
@@ -2319,9 +2743,9 @@ function SettingsPanel({
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
             <Settings2 className="size-4 text-blue-600 dark:text-blue-400" />
-            General
+            {text.general}
           </CardTitle>
-          <CardDescription>Application behaviour and operational parameters.</CardDescription>
+          <CardDescription>{text.appBehaviour}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
           {isConfigLoading && !config ? (
@@ -2332,7 +2756,7 @@ function SettingsPanel({
           ) : draft ? (
             <>
               <div className="grid gap-4 sm:grid-cols-3">
-                <FormField label="Log level" htmlFor="settings-log-level">
+                <FormField label={text.logLevel} htmlFor="settings-log-level">
                   <select
                     id="settings-log-level"
                     value={draft.log_level}
@@ -2343,7 +2767,7 @@ function SettingsPanel({
                   </select>
                 </FormField>
 
-                <FormField label="HTTP timeout (s)" htmlFor="settings-timeout">
+                <FormField label={text.httpTimeoutSeconds} htmlFor="settings-timeout">
                   <Input
                     id="settings-timeout"
                     type="number"
@@ -2354,23 +2778,23 @@ function SettingsPanel({
                   />
                 </FormField>
 
-                <FormField label="Activity retention" htmlFor="settings-retention">
+                <FormField label={text.activityRetention} htmlFor="settings-retention">
                   <select
                     id="settings-retention"
                     value={String(draft.activity_retention_days)}
                     onChange={(e) => setDraft({ ...draft, activity_retention_days: Number(e.target.value) })}
                     className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
                   >
-                    <option value="1">1 day</option>
-                    <option value="7">7 days</option>
-                    <option value="30">30 days</option>
-                    <option value="90">90 days</option>
-                    <option value="365">1 year</option>
+                    <option value="1">{text.oneDay}</option>
+                    <option value="7">{text.sevenDays}</option>
+                    <option value="30">{text.thirtyDays}</option>
+                    <option value="90">{text.ninetyDays}</option>
+                    <option value="365">{text.oneYear}</option>
                   </select>
                 </FormField>
               </div>
 
-              <FormField label="Jellyfin metadata language" htmlFor="settings-jellyfin-language">
+              <FormField label={text.jellyfinMetadataLanguage} htmlFor="settings-jellyfin-language">
                 <select
                   id="settings-jellyfin-language"
                   value={draft.jellyfin_language}
@@ -2383,10 +2807,10 @@ function SettingsPanel({
                     </option>
                   ))}
                 </select>
-                <FieldHint text="Used when requesting series and movie titles from Jellyfin metadata." />
+                <FieldHint text={text.jellyfinLanguageHint} />
               </FormField>
 
-              <FormField label="UI language" htmlFor="settings-ui-language">
+              <FormField label={text.uiLanguage} htmlFor="settings-ui-language">
                 <select
                   id="settings-ui-language"
                   value={draft.ui_language}
@@ -2399,10 +2823,10 @@ function SettingsPanel({
                     </option>
                   ))}
                 </select>
-                <FieldHint text="Changes the primary language preference stored in the CleanArr UI config." />
+                <FieldHint text={text.uiLanguageHint} />
               </FormField>
 
-              <FormField label="Webhook token" htmlFor="settings-webhook-token">
+              <FormField label={text.webhookToken} htmlFor="settings-webhook-token">
                 <div className="flex items-center gap-2">
                   <code className="flex-1 rounded-md border border-input bg-muted px-3 py-2 font-mono text-xs break-all select-all">
                     {isTokenVisible ? (draft.webhook_shared_token ?? "—") : "•".repeat(32)}
@@ -2411,7 +2835,7 @@ function SettingsPanel({
                     type="button"
                     variant="outline"
                     size="sm"
-                    title={isTokenVisible ? "Hide token" : "Show token"}
+                    title={isTokenVisible ? text.hideToken : text.showToken}
                     onClick={() => setIsTokenVisible((v) => !v)}
                   >
                     {isTokenVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
@@ -2420,7 +2844,7 @@ function SettingsPanel({
                     type="button"
                     variant="outline"
                     size="sm"
-                    title="Regenerate token"
+                    title={text.regenerateToken}
                     onClick={() => setDraft({ ...draft, webhook_shared_token: generateWebhookToken() })}
                   >
                     <RefreshCw className="size-4" />
@@ -2430,7 +2854,7 @@ function SettingsPanel({
                     variant="outline"
                     size="sm"
                     disabled={!draft.webhook_shared_token}
-                    title="Copy token"
+                    title={text.copyToken}
                     onClick={async () => {
                       await navigator.clipboard.writeText(draft.webhook_shared_token ?? "")
                       setTokenCopied(true)
@@ -2442,7 +2866,7 @@ function SettingsPanel({
                       : <Copy className="size-4" />}
                   </Button>
                 </div>
-                <FieldHint text="Auto-generated. Regenerate only if you need to rotate it — then re-run auto-configure in the Jellyfin step." />
+                <FieldHint text={text.tokenHint} />
               </FormField>
 
               <SsoConfigSection
@@ -2456,20 +2880,20 @@ function SettingsPanel({
 
               <div className="flex items-center justify-between border-t pt-4">
                 <p className="text-xs text-muted-foreground">
-                  {isDirty ? "You have unsaved changes." : "All settings saved."}
+                  {isDirty ? text.unsavedChanges : text.allSettingsSaved}
                 </p>
                 <Button onClick={handleSave} disabled={!isDirty || isSaving}>
                   {isSaving
                     ? <LoaderCircle className="size-4 animate-spin" />
                     : <CheckCircle2 className="size-4 text-green-600 dark:text-green-400" />}
-                  Save changes
+                  {text.saveChanges}
                 </Button>
               </div>
             </>
           ) : (
             <EmptyState
-              title="Settings unavailable"
-              description="Refresh the configuration and try again."
+              title={text.settingsUnavailable}
+              description={text.tryAgain}
             />
           )}
         </CardContent>
@@ -2518,8 +2942,8 @@ function WizardGeneralStep({
   if (!draft) {
     return (
       <EmptyState
-        title="Settings unavailable"
-        description="Refresh the page and try again."
+        title={text.settingsUnavailable}
+        description={text.tryAgain}
       />
     )
   }
@@ -2527,14 +2951,14 @@ function WizardGeneralStep({
   return (
     <div className="space-y-5 pb-4">
       <div>
-        <h2 className="text-lg font-semibold">General</h2>
+        <h2 className="text-lg font-semibold">{text.general}</h2>
         <p className="text-sm text-muted-foreground">
-          Runtime settings — log level, HTTP timeout, activity retention, metadata language, SSO, and webhook token.
+          {text.runtimeSettingsSummary}
         </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <FormField label="Log level" htmlFor="wizard-log-level">
+        <FormField label={text.logLevel} htmlFor="wizard-log-level">
           <select
             id="wizard-log-level"
             value={draft.log_level}
@@ -2545,7 +2969,7 @@ function WizardGeneralStep({
           </select>
         </FormField>
 
-        <FormField label="HTTP timeout (s)" htmlFor="wizard-timeout">
+        <FormField label={text.httpTimeoutSeconds} htmlFor="wizard-timeout">
           <Input
             id="wizard-timeout"
             type="number"
@@ -2556,22 +2980,22 @@ function WizardGeneralStep({
           />
         </FormField>
 
-        <FormField label="Activity retention" htmlFor="wizard-retention">
+        <FormField label={text.activityRetention} htmlFor="wizard-retention">
           <select
             id="wizard-retention"
             value={String(draft.activity_retention_days)}
             onChange={(e) => setDraft({ ...draft, activity_retention_days: Number(e.target.value) })}
             className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
-            <option value="1">1 day</option>
-            <option value="7">7 days</option>
-            <option value="30">30 days</option>
-            <option value="90">90 days</option>
-            <option value="365">1 year</option>
+            <option value="1">{text.oneDay}</option>
+            <option value="7">{text.sevenDays}</option>
+            <option value="30">{text.thirtyDays}</option>
+            <option value="90">{text.ninetyDays}</option>
+            <option value="365">{text.oneYear}</option>
           </select>
         </FormField>
 
-        <FormField label="Jellyfin metadata language" htmlFor="wizard-jellyfin-language">
+        <FormField label={text.jellyfinMetadataLanguage} htmlFor="wizard-jellyfin-language">
           <select
             id="wizard-jellyfin-language"
             value={draft.jellyfin_language}
@@ -2584,10 +3008,10 @@ function WizardGeneralStep({
               </option>
             ))}
           </select>
-          <FieldHint text="Used when requesting series/movie names from Jellyfin metadata." />
+          <FieldHint text={text.jellyfinLanguageHint} />
         </FormField>
 
-        <FormField label="UI language" htmlFor="wizard-ui-language">
+        <FormField label={text.uiLanguage} htmlFor="wizard-ui-language">
           <select
             id="wizard-ui-language"
             value={draft.ui_language}
@@ -2600,11 +3024,11 @@ function WizardGeneralStep({
               </option>
             ))}
           </select>
-          <FieldHint text="Stored for UI preference and browser locale hints." />
+          <FieldHint text={text.uiLanguageHint} />
         </FormField>
       </div>
 
-      <FormField label="Webhook token" htmlFor="wizard-webhook-token">
+      <FormField label={text.webhookToken} htmlFor="wizard-webhook-token">
         <div className="flex items-center gap-2">
           <code className="flex-1 rounded-md border border-input bg-muted px-3 py-2 font-mono text-xs break-all select-all">
             {isTokenVisible ? (draft.webhook_shared_token ?? "—") : "•".repeat(32)}
@@ -2613,7 +3037,7 @@ function WizardGeneralStep({
             type="button"
             variant="outline"
             size="sm"
-            title={isTokenVisible ? "Hide token" : "Show token"}
+            title={isTokenVisible ? text.hideToken : text.showToken}
             onClick={() => setIsTokenVisible((v) => !v)}
           >
             {isTokenVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
@@ -2622,7 +3046,7 @@ function WizardGeneralStep({
             type="button"
             variant="outline"
             size="sm"
-            title="Regenerate token"
+            title={text.regenerateToken}
             onClick={() => setDraft({ ...draft, webhook_shared_token: generateWebhookToken() })}
           >
             <RefreshCw className="size-4" />
@@ -2632,7 +3056,7 @@ function WizardGeneralStep({
             variant="outline"
             size="sm"
             disabled={!draft.webhook_shared_token}
-            title="Copy token"
+            title={text.copyToken}
             onClick={async () => {
               await navigator.clipboard.writeText(draft.webhook_shared_token ?? "")
               setTokenCopied(true)
@@ -2644,7 +3068,7 @@ function WizardGeneralStep({
               : <Copy className="size-4" />}
           </Button>
         </div>
-        <FieldHint text="Auto-generated. Regenerate only if you need to rotate it — then re-run auto-configure in the Jellyfin step." />
+        <FieldHint text={text.tokenHint} />
       </FormField>
 
         <SsoConfigSection
@@ -2661,7 +3085,7 @@ function WizardGeneralStep({
           {isSaving
             ? <LoaderCircle className="size-4 animate-spin" />
             : <CheckCircle2 className="size-4 text-green-600 dark:text-green-400" />}
-          Save
+          {text.save}
         </Button>
       </div>
     </div>
@@ -2671,12 +3095,14 @@ function WizardGeneralStep({
 function WizardServiceStep({
   family,
   config,
+  text,
   onSave,
   onTest,
   jellyfinSetupProps,
 }: {
   family: ServiceFamily
   config: RuntimeConfigPayload | null
+  text: UiTextMap
   onSave: (family: ServiceFamily, draft: ServiceDraft) => Promise<void>
   onTest: (family: ServiceFamily, draft: ServiceDraft) => Promise<ConnectionTestResponse>
   jellyfinSetupProps?: {
@@ -2736,22 +3162,22 @@ function WizardServiceStep({
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">{meta.title}</h2>
-          <p className="text-sm text-muted-foreground">{meta.description}</p>
+          <p className="text-sm text-muted-foreground">{getServiceDescription(family, text)}</p>
         </div>
         {alreadyConfigured && (
-          <StatusPill tone="green" label="Already configured" />
+          <StatusPill tone="green" label={text.alreadyConfigured} />
         )}
       </div>
 
       <GuideCard
         tone={meta.accent}
-        title="Before you save"
-        description="Paste the service URL and credentials, then run Test. The result must turn green before switching live."
+        title={text.beforeYouSave}
+        description={text.beforeSaveDescription}
       >
-        <InstructionList items={meta.help} />
+        <InstructionList items={getServiceHelp(meta, text)} />
       </GuideCard>
 
-      <FormField label="Display name" htmlFor={`wizard-${family}-name`}>
+      <FormField label={text.displayName} htmlFor={`wizard-${family}-name`}>
         <Input
           id={`wizard-${family}-name`}
           value={draft.name}
@@ -2759,7 +3185,7 @@ function WizardServiceStep({
         />
       </FormField>
 
-      <FormField label="Base URL" htmlFor={`wizard-${family}-url`}>
+      <FormField label={text.baseUrl} htmlFor={`wizard-${family}-url`}>
         <Input
           id={`wizard-${family}-url`}
           type="url"
@@ -2769,9 +3195,7 @@ function WizardServiceStep({
         />
         <FieldHint
           text={
-            family === "downloaders"
-              ? "Paste the qBittorrent Web UI URL only. CleanArr strips /api/v2 automatically."
-              : `Paste the service URL only. CleanArr appends the correct API path for ${meta.title} automatically.`
+            family === "downloaders" ? text.downloaderUrlHint : text.serviceUrlHint
           }
         />
       </FormField>
@@ -2779,7 +3203,7 @@ function WizardServiceStep({
       {meta.fields.map((field) => (
         <FormField
           key={field.key}
-          label={field.label}
+          label={getServiceFieldLabel(field.key, text)}
           htmlFor={`wizard-${family}-${field.key}`}
         >
           <Input
@@ -2788,7 +3212,7 @@ function WizardServiceStep({
             value={draft[field.key]}
             onChange={(e) => setDraft({ ...draft, [field.key]: e.target.value })}
           />
-          <FieldHint text={field.hint} />
+          <FieldHint text={getServiceFieldHint(family, field.key, text)} />
         </FormField>
       ))}
 
@@ -2799,7 +3223,7 @@ function WizardServiceStep({
             checked={draft.enabled}
             onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
           />
-          Enabled
+          {text.enabled}
         </label>
         <label className="inline-flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm">
           <input
@@ -2807,7 +3231,7 @@ function WizardServiceStep({
             checked={draft.is_default}
             onChange={(e) => setDraft({ ...draft, is_default: e.target.checked })}
           />
-          Use as runtime target
+          {text.runtimeTarget}
         </label>
       </div>
 
@@ -2822,7 +3246,7 @@ function WizardServiceStep({
           ) : (
             <TestTubeDiagonal className="size-4 text-blue-600 dark:text-blue-400" />
           )}
-          Test
+          {text.test}
         </Button>
         <Button
           disabled={isSaving}
@@ -2833,14 +3257,15 @@ function WizardServiceStep({
           ) : (
             <CheckCircle2 className="size-4 text-green-600 dark:text-green-400" />
           )}
-          Save
+          {text.save}
         </Button>
       </div>
 
       {jellyfinSetupProps && (
         <div className="space-y-5 border-t pt-5">
-          <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Webhook</p>
+          <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">{text.webhook}</p>
           <JellyfinSetupPanel
+            text={text}
             dashboard={jellyfinSetupProps.dashboard}
             origin={jellyfinSetupProps.origin}
             curlPreview={jellyfinSetupProps.curlPreview}
@@ -2886,18 +3311,18 @@ function SetupWizard({
           <div>
             <CleanArrBrand size="sm" />
             <p className="mt-1 text-sm text-muted-foreground">
-              First-time setup — configure each service to get started.
+              {text.firstTimeSetup}
             </p>
           </div>
           <Button variant="ghost" size="sm" onClick={onClose}>
-            Skip for now
+            {text.skipForNow}
           </Button>
         </div>
 
         <Stepper
           onFinalStepCompleted={onClose}
-          nextButtonText="Next"
-          backButtonText="Back"
+          nextButtonText={text.next}
+          backButtonText={text.back}
           stepCircleContainerClassName="bg-card"
         >
           {/* Step 1: General */}
@@ -2910,6 +3335,7 @@ function SetupWizard({
             <WizardServiceStep
               family="jellyfin_server"
               config={config}
+              text={text}
               onSave={onSaveService}
               onTest={onTestService}
               jellyfinSetupProps={{
@@ -2927,6 +3353,7 @@ function SetupWizard({
             <WizardServiceStep
               family="radarr"
               config={config}
+              text={text}
               onSave={onSaveService}
               onTest={onTestService}
             />
@@ -2937,6 +3364,7 @@ function SetupWizard({
             <WizardServiceStep
               family="sonarr"
               config={config}
+              text={text}
               onSave={onSaveService}
               onTest={onTestService}
             />
@@ -2947,6 +3375,7 @@ function SetupWizard({
             <WizardServiceStep
               family="jellyseerr"
               config={config}
+              text={text}
               onSave={onSaveService}
               onTest={onTestService}
             />
@@ -2957,6 +3386,7 @@ function SetupWizard({
             <WizardServiceStep
               family="downloaders"
               config={config}
+              text={text}
               onSave={onSaveService}
               onTest={onTestService}
             />
@@ -2977,6 +3407,7 @@ type SetupState =
   | { status: "error"; message: string }
 
 function JellyfinSetupPanel({
+  text,
   dashboard,
   origin,
   curlPreview,
@@ -2985,6 +3416,7 @@ function JellyfinSetupPanel({
   onOpenGeneral,
   onSetupWebhook,
 }: {
+  text: UiTextMap
   dashboard: DashboardPayload | null
   origin: string
   curlPreview: string
@@ -3001,8 +3433,8 @@ function JellyfinSetupPanel({
   const webhookTone = getWebhookStatusTone(webhookStatus?.outcome ?? "waiting")
   const lastAttemptAt = webhookStatus?.attempted_at
     ? new Date(webhookStatus.attempted_at).toLocaleString()
-    : "Not received yet"
-  const statusLabel = getWebhookStatusLabel(webhookStatus?.outcome ?? "waiting")
+    : text.notReceivedYet
+  const statusLabel = getWebhookStatusLabel(webhookStatus?.outcome ?? "waiting", text)
 
   async function handleSetup() {
     setSetupState({ status: "loading" })
@@ -3018,7 +3450,7 @@ function JellyfinSetupPanel({
     } catch (err) {
       setSetupState({
         status: "error",
-        message: err instanceof Error ? err.message : "Unknown error",
+        message: err instanceof Error ? err.message : text.unknownError,
       })
     }
   }
@@ -3030,11 +3462,10 @@ function JellyfinSetupPanel({
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
             <Webhook className="size-4 text-blue-600 dark:text-blue-400" />
-            Auto-configure webhook
+            {text.autoConfigureWebhook}
           </CardTitle>
           <CardDescription>
-            CleanArr configures the Jellyfin Webhook plugin automatically. The plugin must already be
-            installed in Jellyfin → Dashboard → Plugins → Catalog.
+            {text.autoConfigureWebhookDescription}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -3042,7 +3473,7 @@ function JellyfinSetupPanel({
             <Alert>
               <Info className="size-4 text-blue-600 dark:text-blue-400" />
               <AlertDescription>
-                Connect the Jellyfin server (step 1.2) before auto-configuring the webhook.
+                {text.connectJellyfinFirst}
               </AlertDescription>
             </Alert>
           )}
@@ -3050,15 +3481,13 @@ function JellyfinSetupPanel({
             <Alert>
               <CircleAlert className="size-4" />
               <AlertDescription>
-                Set a webhook token in{" "}
                 <button
                   type="button"
                   className="underline underline-offset-2"
                   onClick={onOpenGeneral}
                 >
-                  Runtime settings
-                </button>{" "}
-                first — it will be included in the plugin config.
+                  {text.setWebhookTokenFirst}
+                </button>
               </AlertDescription>
             </Alert>
           )}
@@ -3076,12 +3505,12 @@ function JellyfinSetupPanel({
                 <Webhook className="size-4" />
               )}
               {setupState.status === "loading"
-                ? "Configuring…"
+                ? text.configuring
                 : setupState.status === "success"
-                  ? "Configured"
-                  : "Auto-configure webhook"}
+                  ? text.configured
+                  : text.autoConfigureWebhook}
             </Button>
-            {setupState.status === "success" && <StatusPill tone="green" label="Done" />}
+            {setupState.status === "success" && <StatusPill tone="green" label={text.done} />}
           </div>
 
           {setupState.status === "success" && (
@@ -3104,10 +3533,15 @@ function JellyfinSetupPanel({
               </Alert>
               <GuideCard
                 tone="blue"
-                title="Install the Jellyfin Webhook plugin"
-                description="Jellyfin → Dashboard → Plugins → Catalog → search Webhook → install → restart if prompted."
+                title={text.installJellyfinWebhook}
+                description={text.installJellyfinWebhookDescription}
               >
-                <InstructionList items={JELLYFIN_INSTALL_STEPS} />
+                <InstructionList items={[
+                  text.jellyfinInstallStep1,
+                  text.jellyfinInstallStep2,
+                  text.jellyfinInstallStep3,
+                  text.jellyfinInstallStep4,
+                ]} />
               </GuideCard>
             </div>
           )}
@@ -3119,27 +3553,26 @@ function JellyfinSetupPanel({
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
             <TestTubeDiagonal className="size-4 text-green-600 dark:text-green-400" />
-            Verify delivery
+            {text.verifyDelivery}
           </CardTitle>
           <CardDescription>
-            CleanArr records every inbound webhook attempt so you can confirm delivery without a real
-            deletion event.
+            {text.verifyDeliveryDescription}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            <ReadOnlyDetail label="Delivery status" value={statusLabel} />
-            <ReadOnlyDetail label="Last attempt" value={lastAttemptAt} />
+            <ReadOnlyDetail label={text.deliveryStatus} value={statusLabel} />
+            <ReadOnlyDetail label={text.lastAttempt} value={lastAttemptAt} />
             <ReadOnlyDetail
-              label="HTTP status"
-              value={webhookStatus?.http_status ? String(webhookStatus.http_status) : "None"}
+              label={text.httpStatus}
+              value={webhookStatus?.http_status ? String(webhookStatus.http_status) : text.none}
             />
             <ReadOnlyDetail
-              label="Last item"
+              label={text.lastItem}
               value={
                 webhookStatus?.item_name
-                  ? formatMediaTitle(webhookStatus.item_type ?? "Item", webhookStatus.item_name)
-                  : "No item received yet"
+                  ? formatMediaTitle(getItemTypeLabel(webhookStatus.item_type ?? "Item", text), webhookStatus.item_name)
+                  : text.noItemReceived
               }
             />
           </div>
@@ -3149,7 +3582,7 @@ function JellyfinSetupPanel({
             {webhookStatus?.result_status && (
               <StatusPill
                 tone={webhookStatus.result_status === "partial_failure" ? "red" : "green"}
-                label={`Processing: ${webhookStatus.result_status}`}
+                label={`${text.processing}: ${getStatusLabel(webhookStatus.result_status, text)}`}
               />
             )}
             {webhookStatus?.notification_type && (
@@ -3175,9 +3608,9 @@ function JellyfinSetupPanel({
             ) : (
               <Info className="size-4 text-blue-600 dark:text-blue-400" />
             )}
-            <AlertTitle>Latest webhook attempt</AlertTitle>
+            <AlertTitle>{text.latestWebhookAttempt}</AlertTitle>
             <AlertDescription>
-              {webhookStatus?.message ?? "No Jellyfin webhook has reached CleanArr yet."}
+              {webhookStatus?.message ?? text.noJellyfinWebhook}
             </AlertDescription>
           </Alert>
 
@@ -3194,16 +3627,15 @@ function JellyfinSetupPanel({
                 <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
               )}
               <Sparkles className="size-4 shrink-0 text-green-600 dark:text-green-400" />
-              <span className="font-medium">Smoke test (cURL)</span>
+              <span className="font-medium">{text.smokeTestCurl}</span>
               <span className="ml-auto text-xs text-muted-foreground">
-                {tokenConfigured ? "token pre-filled" : "configure token first"}
+                {tokenConfigured ? text.tokenPrefilled : text.configureTokenFirst}
               </span>
             </button>
             {curlOpen && (
               <CardContent className="space-y-3 border-t pt-3">
                 <p className="text-xs text-muted-foreground">
-                  Sends a synthetic ItemDeleted event to CleanArr. Use this to confirm network
-                  connectivity and token auth before a real deletion.
+                  {text.smokeTestDescription}
                 </p>
                 <Textarea
                   readOnly
@@ -3216,7 +3648,7 @@ function JellyfinSetupPanel({
                   onClick={() => void navigator.clipboard.writeText(curlPreview)}
                 >
                   <Copy className="size-4 text-blue-600 dark:text-blue-400" />
-                  Copy cURL
+                  {text.copyCurl}
                 </Button>
               </CardContent>
             )}
@@ -3259,8 +3691,8 @@ function GeneralSettingsModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Runtime settings"
-      description="Changes are persisted and immediately rebuild the live runtime."
+      title={text.runtimeSettings}
+      description={text.runtimeSettingsDescription}
       footer={
         <div className="flex justify-end">
           <Button
@@ -3282,7 +3714,7 @@ function GeneralSettingsModal({
             ) : (
               <CheckCircle2 className="size-4 text-green-600 dark:text-green-400" />
             )}
-            Save settings
+            {text.saveSettings}
           </Button>
         </div>
       }
@@ -3291,14 +3723,18 @@ function GeneralSettingsModal({
         <div className="space-y-5">
           <GuideCard
             tone="blue"
-            title="Recommended first-run settings"
-            description="Leave Dry Run enabled while you validate every downstream integration."
+            title={text.recommendedFirstRun}
+            description={text.recommendedDryRun}
           >
-            <InstructionList items={GENERAL_SETUP_STEPS} />
+            <InstructionList items={[
+              text.generalSetupStep1,
+              text.generalSetupStep2,
+              text.generalSetupStep3,
+            ]} />
           </GuideCard>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <FormField label="Log level" htmlFor="general-log-level">
+            <FormField label={text.logLevel} htmlFor="general-log-level">
               <select
                 id="general-log-level"
                 value={draft.log_level}
@@ -3313,7 +3749,7 @@ function GeneralSettingsModal({
               </select>
             </FormField>
 
-            <FormField label="HTTP timeout (seconds)" htmlFor="general-timeout">
+            <FormField label={text.httpTimeoutSeconds} htmlFor="general-timeout">
               <Input
                 id="general-timeout"
                 type="number"
@@ -3324,10 +3760,10 @@ function GeneralSettingsModal({
                   setDraft({ ...draft, http_timeout_seconds: Number(e.target.value) })
                 }
               />
-              <FieldHint text="Increase only if your Arr services are slow to respond." />
+              <FieldHint text={text.httpTimeoutHint} />
             </FormField>
 
-            <FormField label="Activity history retention" htmlFor="general-retention">
+            <FormField label={text.activityRetention} htmlFor="general-retention">
               <select
                 id="general-retention"
                 value={String(draft.activity_retention_days)}
@@ -3336,17 +3772,17 @@ function GeneralSettingsModal({
                 }
                 className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
               >
-                <option value="1">1 day</option>
-                <option value="7">7 days</option>
-                <option value="30">30 days</option>
-                <option value="90">90 days</option>
-                <option value="365">1 year</option>
+                <option value="1">{text.oneDay}</option>
+                <option value="7">{text.sevenDays}</option>
+                <option value="30">{text.thirtyDays}</option>
+                <option value="90">{text.ninetyDays}</option>
+                <option value="365">{text.oneYear}</option>
               </select>
-              <FieldHint text="Events older than this are deleted from the SQLite database." />
+              <FieldHint text={text.retentionHint} />
             </FormField>
           </div>
 
-          <FormField label="Webhook token" htmlFor="general-webhook-token">
+          <FormField label={text.webhookToken} htmlFor="general-webhook-token">
             <div className="flex items-center gap-2">
               <code className="flex-1 rounded-md border border-input bg-muted px-3 py-2 font-mono text-xs break-all select-all">
                 {isTokenVisible ? (draft.webhook_shared_token ?? "—") : "•".repeat(32)}
@@ -3355,7 +3791,7 @@ function GeneralSettingsModal({
                 type="button"
                 variant="outline"
                 size="sm"
-                title={isTokenVisible ? "Hide token" : "Show token"}
+                title={isTokenVisible ? text.hideToken : text.showToken}
                 onClick={() => setIsTokenVisible((v) => !v)}
               >
                 {isTokenVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
@@ -3364,6 +3800,7 @@ function GeneralSettingsModal({
                 type="button"
                 variant="outline"
                 size="sm"
+                title={text.regenerateToken}
                 onClick={() => {
                   setDraft({ ...draft, webhook_shared_token: generateWebhookToken() })
                 }}
@@ -3375,6 +3812,7 @@ function GeneralSettingsModal({
                 variant="outline"
                 size="sm"
                 disabled={!draft.webhook_shared_token}
+                title={text.copyToken}
                 onClick={async () => {
                   await navigator.clipboard.writeText(draft.webhook_shared_token ?? "")
                   setTokenCopied(true)
@@ -3388,10 +3826,10 @@ function GeneralSettingsModal({
                 )}
               </Button>
             </div>
-            <FieldHint text="Auto-generated. Regenerate only if you need to rotate it — then re-run auto-configure in the Jellyfin step." />
+            <FieldHint text={text.tokenHint} />
           </FormField>
 
-          <FormField label="Jellyfin metadata language" htmlFor="general-jellyfin-language">
+          <FormField label={text.jellyfinMetadataLanguage} htmlFor="general-jellyfin-language">
             <select
               id="general-jellyfin-language"
               value={draft.jellyfin_language}
@@ -3404,10 +3842,10 @@ function GeneralSettingsModal({
                 </option>
               ))}
             </select>
-            <FieldHint text="Used when requesting metadata titles from Jellyfin." />
+            <FieldHint text={text.jellyfinLanguageHint} />
           </FormField>
 
-          <FormField label="UI language" htmlFor="general-ui-language">
+          <FormField label={text.uiLanguage} htmlFor="general-ui-language">
             <select
               id="general-ui-language"
               value={draft.ui_language}
@@ -3420,7 +3858,7 @@ function GeneralSettingsModal({
                 </option>
               ))}
             </select>
-            <FieldHint text="Stored UI language code used for interface localization." />
+            <FieldHint text={text.uiLanguageHint} />
           </FormField>
 
           <SsoConfigSection
@@ -3438,13 +3876,13 @@ function GeneralSettingsModal({
               checked={draft.dry_run}
               onChange={(e) => setDraft({ ...draft, dry_run: e.target.checked })}
             />
-            Keep CleanArr in Dry Run
+            {text.keepDryRun}
           </label>
         </div>
       ) : (
         <EmptyState
-          title="Settings unavailable"
-          description="Close the modal and refresh the configuration."
+          title={text.settingsUnavailable}
+          description={text.closeAndRefresh}
         />
       )}
     </Modal>
@@ -3455,6 +3893,7 @@ function GeneralSettingsModal({
 
 function ServiceModal({
   state,
+  text,
   onClose,
   onSave,
   onDelete,
@@ -3462,6 +3901,7 @@ function ServiceModal({
   jellyfinSetupProps,
 }: {
   state: ServiceModalState | null
+  text: UiTextMap
   onClose: () => void
   onSave: (family: ServiceFamily, draft: ServiceDraft) => Promise<void>
   onDelete: (family: ServiceFamily, serviceId: string) => Promise<void>
@@ -3491,8 +3931,8 @@ function ServiceModal({
     <Modal
       open={state !== null}
       onClose={onClose}
-      title={`${draft?.id ? "Edit" : "Add"} ${meta.title}`}
-      description={meta.description}
+      title={`${draft?.id ? text.edit : text.add} ${meta.title}`}
+      description={getServiceDescription(state.family, text)}
       footer={
         <div className="flex flex-wrap justify-between gap-3">
           <div>
@@ -3513,7 +3953,7 @@ function ServiceModal({
                 }}
               >
                 {isDeleting ? <LoaderCircle className="size-4 animate-spin" /> : <CircleAlert className="size-4" />}
-                Delete
+                {text.delete}
               </Button>
             )}
           </div>
@@ -3544,7 +3984,7 @@ function ServiceModal({
               ) : (
                 <TestTubeDiagonal className="size-4 text-blue-600 dark:text-blue-400" />
               )}
-              Test
+              {text.test}
             </Button>
             <Button
               disabled={!draft || isSaving}
@@ -3565,7 +4005,7 @@ function ServiceModal({
               ) : (
                 <CheckCircle2 className="size-4 text-green-600 dark:text-green-400" />
               )}
-              Save
+              {text.save}
             </Button>
           </div>
         </div>
@@ -3575,13 +4015,13 @@ function ServiceModal({
         <div className="space-y-4">
           <GuideCard
             tone={meta.accent}
-            title="Before you save"
-            description="Paste the service URL and credentials, then run Test. The result must turn green before switching live."
+            title={text.beforeYouSave}
+            description={text.beforeSaveDescription}
           >
-            <InstructionList items={meta.help} />
+            <InstructionList items={getServiceHelp(meta, text)} />
           </GuideCard>
 
-          <FormField label="Display name" htmlFor={`${state.family}-name`}>
+          <FormField label={text.displayName} htmlFor={`${state.family}-name`}>
             <Input
               id={`${state.family}-name`}
               value={draft.name}
@@ -3589,7 +4029,7 @@ function ServiceModal({
             />
           </FormField>
 
-          <FormField label="Base URL" htmlFor={`${state.family}-url`}>
+          <FormField label={text.baseUrl} htmlFor={`${state.family}-url`}>
             <Input
               id={`${state.family}-url`}
               type="url"
@@ -3599,9 +4039,7 @@ function ServiceModal({
             />
             <FieldHint
               text={
-                state.family === "downloaders"
-                  ? "Paste the qBittorrent Web UI URL only. CleanArr strips /api/v2 automatically."
-                  : `Paste the service URL only. CleanArr appends the correct API path for ${meta.title} automatically.`
+                state.family === "downloaders" ? text.downloaderUrlHint : text.serviceUrlHint
               }
             />
           </FormField>
@@ -3609,7 +4047,7 @@ function ServiceModal({
           {meta.fields.map((field) => (
             <FormField
               key={field.key}
-              label={field.label}
+              label={getServiceFieldLabel(field.key, text)}
               htmlFor={`${state.family}-${field.key}`}
             >
               <Input
@@ -3618,7 +4056,7 @@ function ServiceModal({
                 value={draft[field.key]}
                 onChange={(e) => setDraft({ ...draft, [field.key]: e.target.value })}
               />
-              <FieldHint text={field.hint} />
+              <FieldHint text={getServiceFieldHint(state.family, field.key, text)} />
             </FormField>
           ))}
 
@@ -3629,7 +4067,7 @@ function ServiceModal({
                 checked={draft.enabled}
                 onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
               />
-              Enabled
+              {text.enabled}
             </label>
             <label className="inline-flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm">
               <input
@@ -3637,14 +4075,15 @@ function ServiceModal({
                 checked={draft.is_default}
                 onChange={(e) => setDraft({ ...draft, is_default: e.target.checked })}
               />
-              Use as runtime target
+              {text.runtimeTarget}
             </label>
           </div>
 
           {state.family === "jellyfin_server" && jellyfinSetupProps && (
             <div className="mt-6 space-y-5 border-t pt-5">
-              <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Webhook</p>
+              <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">{text.webhook}</p>
               <JellyfinSetupPanel
+                text={text}
                 dashboard={jellyfinSetupProps.dashboard}
                 origin={jellyfinSetupProps.origin}
                 curlPreview={jellyfinSetupProps.curlPreview}
@@ -3790,22 +4229,22 @@ function StatusPill({
   )
 }
 
-function StatusDot({ healthStatus }: { healthStatus: HealthStatus }) {
+function StatusDot({ healthStatus, text }: { healthStatus: HealthStatus; text: UiTextMap }) {
   if (healthStatus === "healthy") {
-    return <span className="inline-flex size-2 rounded-full bg-green-500" title="Healthy" />
+    return <span className="inline-flex size-2 rounded-full bg-green-500" title={text.healthy} />
   }
   if (healthStatus === "unreachable") {
-    return <span className="inline-flex size-2 rounded-full bg-red-500" title="Unreachable" />
+    return <span className="inline-flex size-2 rounded-full bg-red-500" title={text.unreachable} />
   }
-  return <span className="inline-flex size-2 rounded-full bg-gray-300 dark:bg-gray-600" title="Not configured" />
+  return <span className="inline-flex size-2 rounded-full bg-gray-300 dark:bg-gray-600" title={text.notConfigured} />
 }
 
 
-function ErrorBanner({ message }: { message: string }) {
+function ErrorBanner({ message, text }: { message: string; text: UiTextMap }) {
   return (
     <Alert variant="destructive">
       <CircleAlert className="size-4" />
-      <AlertTitle>Request failed</AlertTitle>
+      <AlertTitle>{text.requestFailed}</AlertTitle>
       <AlertDescription>{message}</AlertDescription>
     </Alert>
   )
@@ -3836,9 +4275,9 @@ function WebhookAttemptEntry({ attempt, text }: { attempt: DashboardWebhookAttem
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Badge variant="outline" className="text-xs">
-            {attempt.http_status != null ? attempt.http_status : "no status"}
+            {attempt.http_status != null ? attempt.http_status : text.noStatus}
           </Badge>
-          <StatusPill tone={tone} label={attempt.outcome} />
+          <StatusPill tone={tone} label={getWebhookStatusLabel(attempt.outcome, text)} />
         </div>
       </button>
 
@@ -3860,7 +4299,7 @@ function WebhookAttemptEntry({ attempt, text }: { attempt: DashboardWebhookAttem
             </p>
             {attempt.result_status && (
               <p>
-                <span className="text-foreground">{text.webhookResultStatusLabel}</span> {attempt.result_status}
+                <span className="text-foreground">{text.webhookResultStatusLabel}</span> {getStatusLabel(attempt.result_status, text)}
               </p>
             )}
           </div>
@@ -3889,10 +4328,10 @@ function ActivityEntry({ entry, text }: { entry: DashboardActivity; text: UiText
         <Icon className="size-4 shrink-0 text-blue-500" />
         <span className="flex-1 truncate text-sm font-medium">{entry.result.name}</span>
         <div className="flex shrink-0 items-center gap-2">
-          <Badge variant="outline" className="text-xs">{entry.result.item_type}</Badge>
+          <Badge variant="outline" className="text-xs">{getItemTypeLabel(entry.result.item_type, text)}</Badge>
           <StatusPill
             tone={entry.result.status === "partial_failure" ? "red" : "green"}
-            label={entry.result.status}
+            label={getStatusLabel(entry.result.status, text)}
           />
           <span className="hidden text-xs text-muted-foreground sm:block">
             {new Date(entry.processed_at).toLocaleString()}
@@ -3936,7 +4375,7 @@ function ActionRow({ action, text }: { action: DashboardAction; text: UiTextMap 
         </div>
         <StatusPill
           tone={action.status === "failed" ? "red" : action.status === "deleted" ? "green" : "blue"}
-          label={action.status}
+          label={getStatusLabel(action.status, text)}
         />
       </div>
       <p className="mt-1.5 text-xs text-muted-foreground">{action.message}</p>
@@ -3952,11 +4391,13 @@ function ActionRow({ action, text }: { action: DashboardAction; text: UiTextMap 
 // ─── Library panel ────────────────────────────────────────────────────────────
 
 function LibrarySeriesTab({
+  text,
   library,
   isLoading,
   onRefresh,
   onDelete,
 }: {
+  text: UiTextMap
   library: LibrarySeriesResponse | null
   isLoading: boolean
   onRefresh: () => void
@@ -3989,7 +4430,7 @@ function LibrarySeriesTab({
       <div className="flex justify-end">
         <Button variant="outline" size="sm" onClick={onRefresh} disabled={isLoading}>
           <RefreshCw className={cn("size-4", isLoading && "animate-spin")} />
-          Refresh
+          {text.refresh}
         </Button>
       </div>
 
@@ -4003,18 +4444,16 @@ function LibrarySeriesTab({
 
       {!isLoading && library && filtered.length === 0 && (
         <EmptyState
-          title={search ? "No series match your search" : "No series found"}
+          title={search ? text.noSeriesMatch : text.noSeriesFound}
           description={
-            search
-              ? "Try a different search term."
-              : "Sonarr returned no series. Configure Sonarr in Setup first."
+            search ? text.tryDifferentSearch : text.noSeriesSetup
           }
         />
       )}
 
       {library && library.series.length > 0 && (
         <Input
-          placeholder="Search series…"
+          placeholder={text.searchPlaceholderSeries}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -4042,7 +4481,7 @@ function LibrarySeriesTab({
                     <Tv className="size-4 shrink-0 text-blue-500" />
                     <span className="flex-1 text-sm font-medium">{seriesTitle}</span>
                     <span className="text-xs text-muted-foreground">
-                      {series.seasons.length} season{series.seasons.length !== 1 ? "s" : ""}
+                      {series.seasons.length} {text.seasons}
                       {totalBytes > 0 && ` · ${formatBytes(totalBytes)}`}
                     </span>
                   </button>
@@ -4061,7 +4500,7 @@ function LibrarySeriesTab({
                     }}
                   >
                     <Trash2 className="size-3.5" />
-                    Delete series
+                    {text.deleteSeries}
                   </Button>
                 </div>
 
@@ -4074,10 +4513,10 @@ function LibrarySeriesTab({
                           className="flex items-center gap-3 rounded-md px-2 py-2 hover:bg-muted/40"
                         >
                           <span className="min-w-[80px] text-sm font-medium">
-                            Season {season.season_number}
+                            {text.season} {season.season_number}
                           </span>
                           <span className="flex-1 text-xs text-muted-foreground">
-                            {season.episode_file_count}/{season.episode_count} episodes
+                            {season.episode_file_count}/{season.episode_count} {text.episodes}
                             {season.size_bytes > 0 && ` · ${formatBytes(season.size_bytes)}`}
                           </span>
                           <Button
@@ -4096,7 +4535,7 @@ function LibrarySeriesTab({
                             }
                           >
                             <Trash2 className="size-3.5" />
-                            Delete
+                            {text.delete}
                           </Button>
                         </div>
                       ))}
@@ -4106,7 +4545,7 @@ function LibrarySeriesTab({
 
                 {isOpen && series.seasons.length === 0 && (
                   <CardContent className="border-t pt-3 pb-3">
-                    <p className="text-xs text-muted-foreground">No seasons with episodes found.</p>
+                    <p className="text-xs text-muted-foreground">{text.noSeasonsFound}</p>
                   </CardContent>
                 )}
               </Card>
@@ -4119,11 +4558,13 @@ function LibrarySeriesTab({
 }
 
 function LibraryMoviesTab({
+  text,
   movies,
   isLoading,
   onRefresh,
   onDelete,
 }: {
+  text: UiTextMap
   movies: LibraryMoviesResponse | null
   isLoading: boolean
   onRefresh: () => void
@@ -4143,7 +4584,7 @@ function LibraryMoviesTab({
       <div className="flex justify-end">
         <Button variant="outline" size="sm" onClick={onRefresh} disabled={isLoading}>
           <RefreshCw className={cn("size-4", isLoading && "animate-spin")} />
-          Refresh
+          {text.refresh}
         </Button>
       </div>
 
@@ -4157,18 +4598,16 @@ function LibraryMoviesTab({
 
       {!isLoading && movies && filtered.length === 0 && (
         <EmptyState
-          title={search ? "No movies match your search" : "No movies found"}
+          title={search ? text.noMoviesMatch : text.noMoviesFound}
           description={
-            search
-              ? "Try a different search term."
-              : "Radarr returned no movies. Configure Radarr in Setup first."
+            search ? text.tryDifferentSearch : text.noMoviesSetup
           }
         />
       )}
 
       {movies && movies.movies.length > 0 && (
         <Input
-          placeholder="Search movies…"
+          placeholder={text.searchPlaceholderMovies}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -4185,8 +4624,8 @@ function LibraryMoviesTab({
                   {movie.has_file
                     ? movie.size_bytes > 0
                       ? formatBytes(movie.size_bytes)
-                      : "On disk"
-                    : "No file"}
+                      : text.onDisk
+                    : text.noFile}
                 </span>
                 <Button
                   variant="ghost"
@@ -4202,7 +4641,7 @@ function LibraryMoviesTab({
                   }
                 >
                   <Trash2 className="size-3.5" />
-                  Delete
+                  {text.delete}
                 </Button>
               </div>
             </Card>
@@ -4239,16 +4678,16 @@ function LibraryPanel({
       <div>
         <h2 className="text-lg font-semibold">{text.library}</h2>
         <p className="text-sm text-muted-foreground">
-          Browse your media library and delete items — cascades to Sonarr/Radarr, qBittorrent, Jellyseerr, and Jellyfin.
+          {text.libraryDescription}
         </p>
       </div>
 
       {!isLive && (
         <Alert>
           <Info className="size-4 text-amber-600 dark:text-amber-400" />
-          <AlertTitle>Dry run mode</AlertTitle>
+          <AlertTitle>{text.dryRunModeInfo}</AlertTitle>
           <AlertDescription>
-            No actual changes will be made. Enable Live mode in Runtime settings to execute real deletions.
+            {text.noLiveChanges}
           </AlertDescription>
         </Alert>
       )}
@@ -4257,15 +4696,16 @@ function LibraryPanel({
         <TabsList>
           <TabsTrigger value="series">
             <Tv className="mr-1.5 size-3.5" />
-            Series
+            {text.series}
           </TabsTrigger>
           <TabsTrigger value="movies">
             <Film className="mr-1.5 size-3.5" />
-            Movies
+            {text.movies}
           </TabsTrigger>
         </TabsList>
         <TabsContent value="series" className="mt-4">
           <LibrarySeriesTab
+            text={text}
             library={library}
             isLoading={isLibraryLoading}
             onRefresh={onRefreshSeries}
@@ -4274,6 +4714,7 @@ function LibraryPanel({
         </TabsContent>
         <TabsContent value="movies" className="mt-4">
           <LibraryMoviesTab
+            text={text}
             movies={libraryMovies}
             isLoading={isLibraryMoviesLoading}
             onRefresh={onRefreshMovies}
@@ -4289,6 +4730,7 @@ function LibraryPanel({
 
 function DeleteConfirmModal({
   target,
+  text,
   isStarting,
   error,
   isDryRun,
@@ -4296,6 +4738,7 @@ function DeleteConfirmModal({
   onClose,
 }: {
   target: LibraryDeleteTarget | null
+  text: UiTextMap
   isStarting: boolean
   error: string | null
   isDryRun: boolean
@@ -4308,18 +4751,20 @@ function DeleteConfirmModal({
     target.kind === "movie"
       ? `"${target.movie_title}"`
       : target.item_type === "Season"
-        ? `Season ${target.season_number} of "${target.series_title}"`
+        ? text.seasonOfSeries
+            .replace("{{season}}", String(target.season_number))
+            .replace("{{series}}", `"${target.series_title}"`)
         : `"${target.series_title}"`
 
   return (
     <Modal
       open={true}
-      title={`Delete ${label}?`}
+      title={text.titleDeleteConfirmation.replace("{{title}}", label)}
       onClose={onClose}
       footer={
         <div className="flex gap-2">
           <Button variant="outline" onClick={onClose} disabled={isStarting}>
-            Cancel
+            {text.cancel}
           </Button>
           <Button variant="destructive" onClick={onConfirm} disabled={isStarting}>
             {isStarting ? (
@@ -4327,7 +4772,7 @@ function DeleteConfirmModal({
             ) : (
               <Trash2 className="mr-1 size-3.5" />
             )}
-            {isDryRun ? "Simulate (dry run)" : "Delete"}
+            {isDryRun ? text.simulate : text.delete}
           </Button>
         </div>
       }
@@ -4336,17 +4781,15 @@ function DeleteConfirmModal({
         {isDryRun && (
           <Alert>
             <Info className="size-4 text-amber-600 dark:text-amber-400" />
-            <AlertTitle>Dry run mode</AlertTitle>
-            <AlertDescription>No actual changes will be made.</AlertDescription>
+            <AlertTitle>{text.dryRunModeNotice}</AlertTitle>
+            <AlertDescription>{text.dryRunNoChanges}</AlertDescription>
           </Alert>
         )}
         <p className="text-sm text-muted-foreground">
-          This will remove files from Sonarr, delete matching torrents from qBittorrent,
-          and clean up requests in Jellyseerr. The task will continue in the background,
-          so you can keep using CleanArr.
+          {text.confirmDeleteDescription}
         </p>
 
-        {error && <ErrorBanner message={error} />}
+        {error && <ErrorBanner message={error} text={text} />}
       </div>
     </Modal>
   )
@@ -4354,9 +4797,11 @@ function DeleteConfirmModal({
 
 function BackgroundJobsPanel({
   jobs,
+  text,
   onDismiss,
 }: {
   jobs: ManualDeleteJob[]
+  text: UiTextMap
   onDismiss: (jobId: string) => void
 }) {
   const [expanded, setExpanded] = useState(true)
@@ -4370,7 +4815,7 @@ function BackgroundJobsPanel({
   return (
     <aside
       className="fixed inset-x-4 bottom-4 z-40 overflow-hidden rounded-xl border bg-background/98 shadow-2xl backdrop-blur sm:left-auto sm:w-[23rem]"
-      aria-label="Background tasks"
+      aria-label={text.backgroundTasks}
     >
       <button
         type="button"
@@ -4383,9 +4828,9 @@ function BackgroundJobsPanel({
         ) : (
           <ChevronRight className="size-4 text-muted-foreground" />
         )}
-        <span className="flex-1 text-sm font-medium">Background tasks</span>
+        <span className="flex-1 text-sm font-medium">{text.backgroundTasks}</span>
         <Badge variant="outline" className="text-xs">
-          {activeCount > 0 ? `${activeCount} active` : `${jobs.length} recent`}
+          {activeCount > 0 ? `${activeCount} ${text.active}` : `${jobs.length} ${text.recent}`}
         </Badge>
       </button>
 
@@ -4394,7 +4839,7 @@ function BackgroundJobsPanel({
           {jobs.map((job) => {
             const isActive = job.status === "queued" || job.status === "running"
             const hasProblem = job.status === "failed" || job.result?.status === "partial_failure"
-            const itemName = job.item_name ?? `${job.item_type} deletion`
+            const itemName = job.item_name ?? `${getItemTypeLabel(job.item_type, text)}: ${text.deletion}`
 
             return (
               <div key={job.id} className="rounded-lg border bg-card p-3" role="status">
@@ -4419,7 +4864,7 @@ function BackgroundJobsPanel({
                           size="icon-xs"
                           className="-mr-1 -mt-1 shrink-0 text-muted-foreground"
                           onClick={() => onDismiss(job.id)}
-                          aria-label={`Dismiss ${itemName}`}
+                          aria-label={`${text.dismiss}: ${itemName}`}
                         >
                           <X className="size-3.5" />
                         </Button>
@@ -4431,7 +4876,7 @@ function BackgroundJobsPanel({
                     <div
                       className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted"
                       role="progressbar"
-                      aria-label={`${itemName} progress`}
+                      aria-label={`${itemName}: ${text.progress}`}
                       aria-valuemin={0}
                       aria-valuemax={100}
                       aria-valuenow={job.progress_percent}
@@ -4449,9 +4894,9 @@ function BackgroundJobsPanel({
                       />
                     </div>
                     <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                      <span className="capitalize">{job.phase}</span>
+                      <span>{getStatusLabel(job.phase, text)}</span>
                       <span>
-                        {job.result ? `${job.result.actions.length} actions · ` : ""}
+                        {job.result ? `${job.result.actions.length} ${text.actions} · ` : ""}
                         {job.progress_percent}%
                       </span>
                     </div>
@@ -4491,12 +4936,12 @@ function getWebhookStatusTone(outcome: string): "blue" | "green" | "red" {
   return "blue"
 }
 
-function getWebhookStatusLabel(outcome: string): string {
+function getWebhookStatusLabel(outcome: string, text: UiTextMap = getUiText(DEFAULT_UI_LANG)): string {
   switch (outcome) {
-    case "processed": return "Webhook received"
-    case "rejected_auth": return "Token mismatch"
-    case "invalid_payload": return "Payload rejected"
-    default: return "No delivery yet"
+    case "processed": return text.webhookReceived
+    case "rejected_auth": return text.tokenMismatch
+    case "invalid_payload": return text.payloadRejected
+    default: return text.noDeliveryYet
   }
 }
 

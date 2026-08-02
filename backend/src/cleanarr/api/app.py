@@ -415,7 +415,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
             if own_container:
                 await resolved_container.close()
 
-    app = FastAPI(title="CleanArr", version="0.2.5", lifespan=lifespan)
+    app = FastAPI(title="CleanArr", version="0.2.6", lifespan=lifespan)
     app.state.container = resolved_container
     app.state.activity_store = activity_store
     app.state.webhook_attempt_store = webhook_attempt_store
