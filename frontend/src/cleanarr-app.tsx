@@ -4214,6 +4214,7 @@ function LibraryMoviesTab({
 }
 
 function LibraryPanel({
+  text,
   library,
   isLibraryLoading,
   libraryMovies,
@@ -4223,6 +4224,7 @@ function LibraryPanel({
   onRefreshMovies,
   onDelete,
 }: {
+  text: UiTextMap
   library: LibrarySeriesResponse | null
   isLibraryLoading: boolean
   libraryMovies: LibraryMoviesResponse | null
@@ -4235,7 +4237,7 @@ function LibraryPanel({
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-lg font-semibold">Library</h2>
+        <h2 className="text-lg font-semibold">{text.library}</h2>
         <p className="text-sm text-muted-foreground">
           Browse your media library and delete items — cascades to Sonarr/Radarr, qBittorrent, Jellyseerr, and Jellyfin.
         </p>
@@ -4476,14 +4478,6 @@ function formatBytes(bytes: number): string {
   const sizes = ["B", "KB", "MB", "GB", "TB"]
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
-}
-
-function normalizeUiLanguage(value: string | null | undefined): string {
-  if (!value) return "en"
-  const normalized = value.trim().replace("_", "-").toLowerCase()
-    .split(",", 1)[0]
-    .trim()
-  return normalized || "en"
 }
 
 function normalizeError(error: unknown): string {
