@@ -7,6 +7,7 @@ export interface GeneralConfig {
   http_timeout_seconds: number
   activity_retention_days: number
   jellyfin_language: string
+  ui_language: string
   sso_enabled: boolean
   sso_mode: SsoAuthMode
   sso_issuer_url: string | null

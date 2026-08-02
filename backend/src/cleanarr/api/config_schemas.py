@@ -50,6 +50,7 @@ class GeneralConfigRequest(BaseModel):
     http_timeout_seconds: float
     activity_retention_days: int = 30
     jellyfin_language: str = "en"
+    ui_language: str = "en"
     sso_enabled: bool = False
     sso_mode: str = "password_only"
     sso_issuer_url: str | None = None

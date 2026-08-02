@@ -62,6 +62,7 @@ class GeneralConfig(BaseModel):
     http_timeout_seconds: float = 15.0
     activity_retention_days: int = 30
     jellyfin_language: str = "en"
+    ui_language: str = "en"
     sso_enabled: bool = False
     sso_mode: SSOAuthMode = SSOAuthMode.PASSWORD_ONLY
     sso_issuer_url: str | None = None
@@ -87,6 +88,17 @@ class GeneralConfig(BaseModel):
         if not normalized:
             return "en"
         return normalized
+
+    @field_validator("ui_language", mode="before")
+    @classmethod
+    def normalize_ui_language(cls, value: str | None) -> str:
+        if not value:
+            return "en"
+        normalized = value.strip().replace("_", "-").lower()
+        normalized = normalized.split(",", 1)[0].strip()
+        if ";" in normalized:
+            normalized = normalized.split(";", 1)[0].strip()
+        return normalized or "en"
 
     @field_validator("sso_scopes", mode="before")
     @classmethod

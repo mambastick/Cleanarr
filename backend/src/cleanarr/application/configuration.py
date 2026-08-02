@@ -277,6 +277,7 @@ class RuntimeConfigurationService:
                 webhook_shared_token=settings.webhook_shared_token,
                 http_timeout_seconds=settings.http_timeout_seconds,
                 jellyfin_language=settings.jellyfin_language,
+                ui_language=settings.ui_language,
                 sso_mode=settings.sso_mode,
                 sso_enabled=settings.sso_enabled,
                 sso_issuer_url=settings.sso_issuer_url,

@@ -439,17 +439,454 @@ const JELLYFIN_LANGUAGE_OPTIONS = [
   { value: "ja", label: "日本語" },
 ]
 
-const SSO_MODE_OPTIONS: Array<{ value: SsoAuthMode; label: string }> = [
-  { value: "password_only", label: "Local credentials only" },
-  { value: "sso_only", label: "SSO only" },
-  { value: "both", label: "Local + SSO" },
+const UI_LANGUAGE_OPTIONS = [
+  { value: "en", label: "English" },
+  { value: "ru", label: "Русский" },
+  { value: "de", label: "Deutsch" },
+  { value: "fr", label: "Français" },
+  { value: "es", label: "Español" },
+  { value: "it", label: "Italiano" },
+  { value: "pt", label: "Português" },
+  { value: "tr", label: "Türkçe" },
+  { value: "pl", label: "Polski" },
+  { value: "uk", label: "Українська" },
+  { value: "cs", label: "Čeština" },
+  { value: "zh", label: "中文" },
+  { value: "ja", label: "日本語" },
 ]
 
-const SSO_MODE_HINTS: Record<SsoAuthMode, string> = {
-  password_only: "Use only admin credentials in CleanArr.",
-  sso_only: "Use only SSO (OIDC) login.",
-  both: "Allow local credentials and SSO login.",
+type UiLanguage = string
+
+type UiTextKey =
+  | "dashboard"
+  | "settings"
+  | "activity"
+  | "library"
+  | "live"
+  | "dryRun"
+  | "liveMode"
+  | "liveModeDescription"
+  | "dryRunDescription"
+  | "logOut"
+  | "status"
+  | "setup"
+  | "setupWizard"
+  | "connectedServices"
+  | "webhookStatus"
+  | "latestEvent"
+  | "webhookStatusDescription"
+  | "latestEventDescription"
+  | "noWebhookReceived"
+  | "runtimeSettingsSaved"
+  | "save"
+  | "saveChanges"
+  | "saveSettings"
+  | "cancel"
+  | "delete"
+  | "deleteSeries"
+  | "deleteItem"
+  | "refresh"
+  | "filter"
+  | "clear"
+  | "activityTimeline"
+  | "activityTimelineDescription"
+  | "eventCount"
+  | "noActivityFiltered"
+  | "noActivity"
+  | "noActivityDescription"
+  | "noActivityWebhook"
+  | "sendWebhookToSeeActivity"
+  | "sendWebhookForStatus"
+  | "noWebhookAttempts"
+  | "webhookAttempts"
+  | "setupCount"
+  | "deletionsLogged"
+  | "noWebhookActivity"
+  | "library"
+  | "backgroundTasks"
+  | "searchMovies"
+  | "noMoviesFound"
+  | "noMoviesMatch"
+  | "searchSeries"
+  | "noSeriesFound"
+  | "noSeriesMatch"
+  | "noSeasonsFound"
+  | "season"
+  | "libraryDescription"
+  | "dryRunModeInfo"
+  | "noLiveChanges"
+  | "series"
+  | "movies"
+  | "searchPlaceholderSeries"
+  | "searchPlaceholderMovies"
+  | "confirmDelete"
+  | "simulate"
+  | "deleteButton"
+  | "confirmDeleteDescription"
+  | "titleDeleteConfirmation"
+  | "dryRunModeNotice"
+  | "titleNotConfigured"
+  | "general"
+  | "settingsUnavailable"
+  | "tryAgain"
+  | "runtimeSettings"
+  | "noItemsYet"
+  | "appBehaviour"
+  | "logLevel"
+  | "httpTimeoutSeconds"
+  | "activityRetention"
+  | "jellyfinMetadataLanguage"
+  | "uiLanguage"
+  | "webhookToken"
+  | "hideToken"
+  | "showToken"
+  | "regenerateToken"
+  | "copyToken"
+  | "tokenHint"
+  | "allSettingsSaved"
+  | "unsavedChanges"
+  | "firstLaunchCreateAdmin"
+  | "signInWithLocalOrSso"
+  | "signInWithLocalOnly"
+  | "signInWithSso"
+  | "authTitleSignIn"
+  | "authTitleCreateAdmin"
+  | "username"
+  | "password"
+  | "confirmPassword"
+  | "signInWithCredentials"
+  | "orDivider"
+  | "ssoSignInError"
+  | "continueWithSso"
+  | "ssoNotConfigured"
+  | "connecting"
+  | "configureSsoBefore"
+  | "noAuthConfigured"
+  | "requestFailed"
+  | "ssoAuthMode"
+  | "ssoIssuer"
+  | "ssoClientId"
+  | "ssoClientSecret"
+  | "ssoRedirectUri"
+  | "ssoScopes"
+  | "ssoModePasswordOnly"
+  | "ssoModeSsoOnly"
+  | "ssoModeBoth"
+  | "ssoModePasswordOnlyHint"
+  | "ssoModeSsoOnlyHint"
+  | "ssoModeBothHint"
+  | "ssoIssuerHint"
+  | "ssoClientIdHint"
+  | "ssoClientSecretHint"
+  | "ssoRedirectHint"
+  | "ssoScopesHint"
+  | "ssoFieldDisabledHint"
+  | "webhookMessageLabel"
+  | "webhookPayloadEventsLabel"
+  | "webhookNotificationLabel"
+  | "webhookResultStatusLabel"
+  | "reasonLabel"
+
+type UiTextMap = Record<UiTextKey, string>
+
+const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
+  en: {
+    dashboard: "Dashboard",
+    settings: "Settings",
+    activity: "Activity",
+    library: "Library",
+    live: "Live",
+    dryRun: "Dry run",
+    liveMode: "Live mode",
+    liveModeDescription: "Real deletions are active",
+    dryRunDescription: "No deletions will be made",
+    status: "Status",
+    setup: "Setup",
+    setupWizard: "Setup wizard",
+    connectedServices: "Connected services",
+    webhookStatus: "Webhook status",
+    latestEvent: "Latest event",
+    webhookStatusDescription: "Last Jellyfin delivery attempt.",
+    latestEventDescription: "Most recent processed item.",
+    noWebhookReceived: "No webhook received",
+    logOut: "Log out",
+    runtimeSettingsSaved: "Runtime settings saved.",
+    save: "Save",
+    saveChanges: "Save changes",
+    saveSettings: "Save settings",
+    cancel: "Cancel",
+    delete: "Delete",
+    deleteSeries: "Delete series",
+    deleteItem: "Delete",
+    refresh: "Refresh",
+    filter: "Filter",
+    clear: "Clear",
+    activityTimeline: "Runtime activity timeline",
+    activityTimelineDescription: "Incoming Jellyfin webhooks and processed deletion events in one stream.",
+    eventCount: "event",
+    noActivityFiltered: "No items match the current filter.",
+    noActivity: "No activity yet",
+    noActivityDescription: "No items found.",
+    noActivityWebhook: "No activity yet",
+    sendWebhookToSeeActivity: "Send a Jellyfin webhook or process a cleanup event to populate the timeline.",
+    sendWebhookForStatus: "Send a Jellyfin webhook to see current status.",
+    noWebhookAttempts: "No webhook attempts yet.",
+    webhookAttempts: "No webhook attempts yet.",
+    setupCount: "Setup progress",
+    deletionsLogged: "deletions logged",
+    noWebhookActivity: "No webhook activity yet.",
+    noItemsYet: "No items found.",
+    noSeriesFound: "No series found",
+    noSeriesMatch: "No series match your search",
+    noSeasonsFound: "No seasons with episodes found.",
+    season: "Season",
+    searchPlaceholderSeries: "Search series…",
+    searchPlaceholderMovies: "Search movies…",
+    libraryDescription:
+      "Browse your media library and delete items — cascades to Sonarr/Radarr, qBittorrent, Jellyseerr, and Jellyfin.",
+    dryRunModeInfo: "Dry run mode",
+    noLiveChanges: "No actual changes will be made. Enable Live mode in Runtime settings to execute real deletions.",
+    deleteButton: "Delete",
+    confirmDelete: "Delete",
+    simulate: "Simulate (dry run)",
+    confirmDeleteDescription:
+      "This will remove files from Sonarr, delete matching torrents from qBittorrent, and clean up requests in Jellyseerr. The task will continue in the background, so you can keep using CleanArr.",
+    titleDeleteConfirmation: "Delete \"{{title}}\"?",
+    dryRunModeNotice: "Dry run mode",
+    titleNotConfigured: "No authentication method is currently configured.",
+    backgroundTasks: "Background tasks",
+    searchMovies: "Search movies…",
+    noMoviesFound: "No movies found",
+    noMoviesMatch: "No movies match your search",
+    general: "General",
+    settingsUnavailable: "Settings unavailable",
+    tryAgain: "Refresh the configuration and try again.",
+    runtimeSettings: "Runtime settings",
+    appBehaviour: "Application behaviour and operational parameters.",
+    logLevel: "Log level",
+    httpTimeoutSeconds: "HTTP timeout (s)",
+    activityRetention: "Activity retention",
+    jellyfinMetadataLanguage: "Jellyfin metadata language",
+    uiLanguage: "UI language",
+    webhookToken: "Webhook token",
+    hideToken: "Hide token",
+    showToken: "Show token",
+    regenerateToken: "Regenerate token",
+    copyToken: "Copy token",
+    tokenHint:
+      "Auto-generated. Regenerate only if you need to rotate it — then re-run auto-configure in the Jellyfin step.",
+    allSettingsSaved: "All settings saved.",
+    unsavedChanges: "You have unsaved changes.",
+    firstLaunchCreateAdmin: "First launch — create the admin account.",
+    signInWithLocalOrSso: "Sign in with local credentials or SSO.",
+    signInWithLocalOnly: "Sign in with local credentials.",
+    signInWithSso: "Sign in with SSO.",
+    authTitleSignIn: "Sign in",
+    authTitleCreateAdmin: "Create administrator",
+    username: "Username",
+    password: "Password",
+    confirmPassword: "Confirm password",
+    signInWithCredentials: "Sign in with credentials",
+    orDivider: "or",
+    ssoSignInError: "SSO sign-in error",
+    continueWithSso: "Continue with SSO",
+    ssoNotConfigured: "SSO is not configured yet",
+    connecting: "Connecting...",
+    configureSsoBefore: "Enable and configure SSO in Runtime settings, then reload this screen.",
+    noAuthConfigured: "No authentication method is currently configured.",
+    requestFailed: "Request failed",
+    ssoAuthMode: "SSO auth mode",
+    ssoIssuer: "Issuer URL",
+    ssoClientId: "Client ID",
+    ssoClientSecret: "Client Secret",
+    ssoRedirectUri: "Redirect URI",
+    ssoScopes: "Scopes",
+    ssoModePasswordOnly: "Local credentials only",
+    ssoModeSsoOnly: "SSO only",
+    ssoModeBoth: "Local + SSO",
+    ssoIssuerHint: "Full OIDC issuer URL from your provider.",
+    ssoClientIdHint: "Public client ID for your OIDC application.",
+    ssoClientSecretHint: "Secret sent to your provider's token endpoint.",
+    ssoRedirectHint: "Usually your CleanArr public URL + /api/auth/sso/callback.",
+    ssoScopesHint: "Optional override for OIDC scope list.",
+    ssoFieldDisabledHint: "SSO fields are disabled while auth mode is Password-only.",
+    webhookMessageLabel: "Message:",
+    webhookPayloadEventsLabel: "Payload events:",
+    webhookNotificationLabel: "Notification:",
+    webhookResultStatusLabel: "Processing result:",
+    reasonLabel: "reason:",
+    ssoModePasswordOnlyHint: "Use only local credentials. SSO fields are disabled.",
+    ssoModeSsoOnlyHint: "Use only external identity provider authentication.",
+    ssoModeBothHint: "Allow both local credentials and external identity provider authentication.",
+  },
+  ru: {
+    dashboard: "Панель",
+    settings: "Настройки",
+    activity: "Активность",
+    library: "Библиотека",
+    live: "Включен",
+    dryRun: "Тестовый режим",
+    liveMode: "Live режим",
+    liveModeDescription: "Выполняются реальные удаления",
+    dryRunDescription: "Реальные удаления отключены",
+    status: "Статус",
+    setup: "Настройка",
+    setupWizard: "Мастер настройки",
+    connectedServices: "Подключённые сервисы",
+    webhookStatus: "Состояние webhook",
+    latestEvent: "Последнее событие",
+    webhookStatusDescription: "Последняя попытка доставки webhook от Jellyfin.",
+    latestEventDescription: "Последний обработанный элемент.",
+    noWebhookReceived: "Webhook пока не получен",
+    logOut: "Выйти",
+    runtimeSettingsSaved: "Настройки сохранены.",
+    save: "Сохранить",
+    saveChanges: "Сохранить изменения",
+    saveSettings: "Сохранить настройки",
+    cancel: "Отмена",
+    delete: "Удалить",
+    deleteSeries: "Удалить серию",
+    deleteItem: "Удалить",
+    refresh: "Обновить",
+    filter: "Фильтр",
+    clear: "Очистить",
+    activityTimeline: "Журнал активности",
+    activityTimelineDescription: "Входящие webhooks от Jellyfin и события удаления в едином потоке.",
+    eventCount: "событие",
+    noActivityFiltered: "По текущему фильтру ничего не найдено.",
+    noActivity: "Пока активности нет",
+    noActivityDescription: "События отсутствуют.",
+    noActivityWebhook: "Событий пока нет",
+    sendWebhookToSeeActivity: "Отправьте webhook из Jellyfin или обработайте событие очистки, чтобы видеть историю.",
+    sendWebhookForStatus: "Отправьте webhook из Jellyfin для получения статуса доставки.",
+    noWebhookAttempts: "Попыток webhook пока нет.",
+    webhookAttempts: "Попыток webhook пока нет.",
+    setupCount: "Прогресс настройки",
+    deletionsLogged: "удалений в журнале",
+    noWebhookActivity: "Пока событий от webhook не было.",
+    noItemsYet: "Записей пока нет.",
+    noSeriesFound: "Сериалы не найдены",
+    noSeriesMatch: "Нет совпадений по вашему запросу",
+    noSeasonsFound: "Сезоны с эпизодами не найдены.",
+    season: "Сезон",
+    searchPlaceholderSeries: "Поиск сериалов…",
+    searchPlaceholderMovies: "Поиск фильмов…",
+    libraryDescription:
+      "Просматривайте медиатеку и удаляйте элементы — очистка затем выполняется в Sonarr/Radarr, qBittorrent, Jellyseerr и Jellyfin.",
+    dryRunModeInfo: "Тестовый режим",
+    noLiveChanges: "Никакие реальные изменения не будут применены. Включите Live режим в Runtime settings для реальных удалений.",
+    deleteButton: "Удалить",
+    confirmDelete: "Удалить",
+    simulate: "Симулировать (тест)",
+    confirmDeleteDescription:
+      "Будут удалены файлы в Sonarr, сопутствующие торренты в qBittorrent и запросы в Jellyseerr. Задача продолжится в фоне.",
+    titleDeleteConfirmation: "Удалить {{title}}?",
+    dryRunModeNotice: "Тестовый режим",
+    titleNotConfigured: "Метод авторизации сейчас не настроен.",
+    backgroundTasks: "Фоновые задачи",
+    searchMovies: "Поиск фильмов…",
+    noMoviesFound: "Фильмы не найдены",
+    noMoviesMatch: "Нет совпадений по вашему поиску",
+    general: "Общее",
+    settingsUnavailable: "Настройки недоступны",
+    tryAgain: "Обновите конфигурацию и повторите.",
+    runtimeSettings: "Настройки runtime",
+    appBehaviour: "Параметры работы и поведения приложения.",
+    logLevel: "Уровень логирования",
+    httpTimeoutSeconds: "HTTP timeout (сек.)",
+    activityRetention: "Хранение активности",
+    jellyfinMetadataLanguage: "Язык метаданных Jellyfin",
+    uiLanguage: "Язык интерфейса",
+    webhookToken: "Токен webhook",
+    hideToken: "Скрыть токен",
+    showToken: "Показать токен",
+    regenerateToken: "Пересоздать токен",
+    copyToken: "Копировать токен",
+    tokenHint:
+      "Генерируется автоматически. Пересоздайте только если нужно обновить ключ; затем повторите автонастройку в шаге Jellyfin.",
+    allSettingsSaved: "Все настройки сохранены.",
+    unsavedChanges: "Есть несохранённые изменения.",
+    firstLaunchCreateAdmin: "Первый запуск — создайте учётную запись администратора.",
+    signInWithLocalOrSso: "Войти с локальными учётными данными или через SSO.",
+    signInWithLocalOnly: "Войти с локальными учётными данными.",
+    signInWithSso: "Войти через SSO.",
+    authTitleSignIn: "Вход",
+    authTitleCreateAdmin: "Создать администратора",
+    username: "Имя пользователя",
+    password: "Пароль",
+    confirmPassword: "Подтвердите пароль",
+    signInWithCredentials: "Войти через учётные данные",
+    orDivider: "или",
+    ssoSignInError: "Ошибка входа по SSO",
+    continueWithSso: "Продолжить через SSO",
+    ssoNotConfigured: "SSO ещё не настроен",
+    connecting: "Подключение...",
+    configureSsoBefore: "Настройте SSO в Runtime settings, затем перезагрузите экран.",
+    noAuthConfigured: "Метод авторизации не настроен.",
+    requestFailed: "Ошибка запроса",
+    ssoAuthMode: "Режим SSO",
+    ssoIssuer: "URL issuer",
+    ssoClientId: "Client ID",
+    ssoClientSecret: "Client Secret",
+    ssoRedirectUri: "Redirect URI",
+    ssoScopes: "Scopes",
+    ssoModePasswordOnly: "Только локальные учётные данные",
+    ssoModeSsoOnly: "Только SSO",
+    ssoModeBoth: "Локально + SSO",
+    ssoIssuerHint: "Полный URL OIDC issuer вашего провайдера.",
+    ssoClientIdHint: "Public client ID вашей OIDC интеграции.",
+    ssoClientSecretHint: "Секрет для токен endpoint провайдера.",
+    ssoRedirectHint: "Обычно это CleanArr public URL + /api/auth/sso/callback.",
+    ssoScopesHint: "Дополнительный список scope (необязательно).",
+    ssoFieldDisabledHint: "SSO поля отключены в режиме только локальной авторизации.",
+    webhookMessageLabel: "Сообщение:",
+    webhookPayloadEventsLabel: "Событий в payload:",
+    webhookNotificationLabel: "Уведомление:",
+    webhookResultStatusLabel: "Результат обработки:",
+    reasonLabel: "причина:",
+    ssoModePasswordOnlyHint: "Только локальные учётные данные. Поля SSO отключены.",
+    ssoModeSsoOnlyHint: "Только внешняя аутентификация через OIDC.",
+    ssoModeBothHint: "Локальная и SSO авторизация включены.",
+  },
 }
+
+const FALLBACK_UI_TEXTS: Record<string, Partial<UiTextMap>> = {
+  de: {},
+  fr: {},
+  es: {},
+  it: {},
+  pt: {},
+  tr: {},
+  pl: {},
+  uk: {},
+  cs: {},
+  zh: {},
+  ja: {},
+}
+
+const DEFAULT_UI_LANG = "en"
+
+function resolveUiLanguage(value: string | null | undefined): string {
+  if (!value) return DEFAULT_UI_LANG
+  return value.trim().replace("_", "-").toLowerCase().split("-", 1)[0]
+}
+
+function getUiText(value: string | null | undefined): UiTextMap {
+  const language = resolveUiLanguage(value)
+  const languageOverride = UI_TEXTS[language] ?? FALLBACK_UI_TEXTS[language] ?? {}
+  const translations = { ...UI_TEXTS[DEFAULT_UI_LANG], ...languageOverride }
+  return translations as UiTextMap
+}
+
+const SSO_MODE_OPTIONS: Array<{
+  value: SsoAuthMode
+  labelKey: "ssoModePasswordOnly" | "ssoModeSsoOnly" | "ssoModeBoth"
+  hintKey: "ssoModePasswordOnlyHint" | "ssoModeSsoOnlyHint" | "ssoModeBothHint"
+}> = [
+  { value: "password_only", labelKey: "ssoModePasswordOnly", hintKey: "ssoModePasswordOnlyHint" },
+  { value: "sso_only", labelKey: "ssoModeSsoOnly", hintKey: "ssoModeSsoOnlyHint" },
+  { value: "both", labelKey: "ssoModeBoth", hintKey: "ssoModeBothHint" },
+]
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
@@ -486,6 +923,11 @@ function CleanArrApp() {
   const deleteJobsPollFailed = useRef(false)
 
   const deferredFilter = useDeferredValue(activityFilter)
+  const uiLanguage = useMemo(
+    () => resolveUiLanguage(config?.general.ui_language),
+    [config?.general.ui_language],
+  )
+  const uiText = useMemo(() => getUiText(uiLanguage), [uiLanguage])
 
   const fetchJson = useCallback(
     async <T,>(url: string, init?: RequestInit): Promise<T> => {
@@ -724,6 +1166,11 @@ function CleanArrApp() {
     }
   }, [])
 
+  useEffect(() => {
+    if (typeof document === "undefined") return
+    document.documentElement.lang = uiLanguage
+  }, [uiLanguage])
+
   const hasActiveDeleteJobs = deleteJobs.some(
     (job) => job.status === "queued" || job.status === "running",
   )
@@ -888,7 +1335,7 @@ function CleanArrApp() {
       body: JSON.stringify(payload),
     })
     setConfig(next)
-    toast.success("Runtime settings saved.")
+    toast.success(uiText.runtimeSettingsSaved)
   }
 
   const saveServiceDraft = async (family: ServiceFamily, draft: ServiceDraft) => {
@@ -930,6 +1377,7 @@ function CleanArrApp() {
       <AuthScreen
         authMode={authMode}
         authForm={authForm}
+        text={uiText}
         isSubmitting={isAuthSubmitting}
         isSsoSubmitting={isSsoSubmitting}
         requiresRegistration={Boolean(authStatus?.requires_registration)}
@@ -970,19 +1418,19 @@ function CleanArrApp() {
           <TabsList>
             <TabsTrigger value="dashboard" className="gap-1.5">
               <LayoutDashboard className="size-3.5 text-blue-500" />
-              Dashboard
+              {uiText.dashboard}
             </TabsTrigger>
             <TabsTrigger value="settings" className="gap-1.5">
               <Settings2 className="size-3.5 text-orange-500" />
-              Settings
+              {uiText.settings}
             </TabsTrigger>
             <TabsTrigger value="activity" className="gap-1.5">
               <Activity className="size-3.5 text-emerald-500" />
-              Activity
+              {uiText.activity}
             </TabsTrigger>
             <TabsTrigger value="library" className="gap-1.5">
               <Library className="size-3.5 text-violet-500" />
-              Library
+              {uiText.library}
             </TabsTrigger>
           </TabsList>
 
@@ -992,9 +1440,9 @@ function CleanArrApp() {
               <div
                 className={cn(
                   "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
-                  isLive
-                    ? "border-green-200 bg-green-50 text-green-800 dark:border-green-900 dark:bg-green-950/40 dark:text-green-200"
-                    : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200",
+                isLive
+                  ? "border-green-200 bg-green-50 text-green-800 dark:border-green-900 dark:bg-green-950/40 dark:text-green-200"
+                  : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200",
                 )}
               >
                 <span
@@ -1003,7 +1451,7 @@ function CleanArrApp() {
                     isLive ? "bg-green-500" : "bg-amber-500",
                   )}
                 />
-                {isLive ? "Live" : "Dry run"}
+                {isLive ? uiText.live : uiText.dryRun}
               </div>
             )}
 
@@ -1019,7 +1467,7 @@ function CleanArrApp() {
               size="icon"
               className="size-8"
               onClick={() => void logout()}
-              title="Log out"
+              title={uiText.logOut}
             >
               <LogOut className="size-4 text-red-500 dark:text-red-400" />
             </Button>
@@ -1032,6 +1480,7 @@ function CleanArrApp() {
         {/* ── Dashboard ── */}
         <TabsContent value="dashboard" className="mt-0">
           <DashboardPanel
+            text={uiText}
             dashboard={dashboard}
             isDashboardLoading={isDashboardLoading}
             setupCompletionCount={setupCompletionCount}
@@ -1060,6 +1509,7 @@ function CleanArrApp() {
         {/* ── Settings ── */}
         <TabsContent value="settings" className="mt-0">
           <SettingsPanel
+            text={uiText}
             config={config}
             isConfigLoading={isConfigLoading}
             onSaveGeneral={saveGeneralSettings}
@@ -1069,6 +1519,7 @@ function CleanArrApp() {
         {/* ── Activity ── */}
         <TabsContent value="activity" className="mt-0">
           <ActivityPanel
+            text={uiText}
             filteredActivity={filteredActivity}
             webhookAttempts={filteredWebhookAttempts}
             activityFilter={activityFilter}
@@ -1079,6 +1530,7 @@ function CleanArrApp() {
         {/* ── Library ── */}
         <TabsContent value="library" className="mt-0">
           <LibraryPanel
+            text={uiText}
             library={library}
             isLibraryLoading={isLibraryLoading}
             libraryMovies={libraryMovies}
@@ -1097,6 +1549,7 @@ function CleanArrApp() {
       {/* ── Setup wizard overlay ── */}
       {showWizard && (
         <SetupWizard
+          text={uiText}
           config={config}
           dashboard={dashboard}
           origin={origin}
@@ -1112,6 +1565,7 @@ function CleanArrApp() {
       {/* Modals */}
       <GeneralSettingsModal
         open={generalModalOpen}
+        text={uiText}
         config={config?.general ?? null}
         onClose={() => setGeneralModalOpen(false)}
         onSave={async (payload) => {
@@ -1160,6 +1614,7 @@ function CleanArrApp() {
 function AuthScreen({
   authMode,
   authForm,
+  text,
   isSubmitting,
   isSsoSubmitting,
   requiresRegistration,
@@ -1174,6 +1629,7 @@ function AuthScreen({
 }: {
   authMode: AuthMode
   authForm: { username: string; password: string; confirmPassword: string }
+  text: UiTextMap
   isSubmitting: boolean
   isSsoSubmitting: boolean
   requiresRegistration: boolean
@@ -1189,12 +1645,12 @@ function AuthScreen({
   const showLocalAuth = requiresRegistration || localAuthEnabled
   const showSsoAuth = ssoMode !== "password_only"
   const authDescription = requiresRegistration
-    ? "First launch — create the admin account."
+    ? text.firstLaunchCreateAdmin
     : showLocalAuth && showSsoAuth
-      ? "Sign in with local credentials or SSO."
+      ? text.signInWithLocalOrSso
       : showLocalAuth
-        ? "Sign in with local credentials."
-        : "Sign in with SSO."
+        ? text.signInWithLocalOnly
+        : text.signInWithSso
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
@@ -1210,7 +1666,7 @@ function AuthScreen({
             ) : (
               <KeyRound className="size-5 text-blue-600 dark:text-blue-400" />
             )}
-            {requiresRegistration ? "Create administrator" : "Sign in"}
+            {requiresRegistration ? text.authTitleCreateAdmin : text.authTitleSignIn}
           </CardTitle>
           <CardDescription>
             {authDescription}
@@ -1221,13 +1677,14 @@ function AuthScreen({
             <Alert variant="destructive">
               <CircleAlert className="size-4" />
               <AlertTitle>SSO sign-in error</AlertTitle>
+              <AlertTitle>{text.ssoSignInError}</AlertTitle>
               <AlertDescription>{ssoError}</AlertDescription>
             </Alert>
           )}
 
           {showLocalAuth && (
             <>
-              <FormField label="Username" htmlFor="auth-username">
+              <FormField label={text.username} htmlFor="auth-username">
                 <Input
                   id="auth-username"
                   value={authForm.username}
@@ -1236,7 +1693,7 @@ function AuthScreen({
                 />
               </FormField>
 
-              <FormField label="Password" htmlFor="auth-password">
+              <FormField label={text.password} htmlFor="auth-password">
                 <Input
                   id="auth-password"
                   type="password"
@@ -1250,7 +1707,7 @@ function AuthScreen({
               </FormField>
 
               {requiresRegistration && (
-                <FormField label="Confirm password" htmlFor="auth-confirm">
+                <FormField label={text.confirmPassword} htmlFor="auth-confirm">
                   <Input
                     id="auth-confirm"
                     type="password"
@@ -1271,7 +1728,7 @@ function AuthScreen({
                 ) : (
                   <KeyRound className="size-4" />
                 )}
-                {authMode === "register" ? "Create administrator" : "Sign in with credentials"}
+                {authMode === "register" ? text.authTitleCreateAdmin : text.signInWithCredentials}
               </Button>
             </>
           )}
@@ -1281,7 +1738,7 @@ function AuthScreen({
               {showLocalAuth && (
                 <div className="flex items-center gap-3 text-xs text-muted-foreground">
                   <div className="h-px flex-1 bg-border" />
-                  <span>or</span>
+                  <span>{text.orDivider}</span>
                   <div className="h-px flex-1 bg-border" />
                 </div>
               )}
@@ -1290,25 +1747,25 @@ function AuthScreen({
                 variant="outline"
                 disabled={isSsoSubmitting || !ssoConfigured}
                 onClick={onSsoSubmit}
-                title={ssoConfigured ? "Continue with SSO" : "SSO is not configured yet"}
+                title={ssoConfigured ? text.continueWithSso : text.ssoNotConfigured}
               >
                 {isSsoSubmitting ? (
                   <LoaderCircle className="size-4 animate-spin" />
                 ) : (
                   <ShieldCheck className="size-4" />
                 )}
-                {isSsoSubmitting ? "Connecting..." : "Sign in with SSO"}
+                {isSsoSubmitting ? text.connecting : text.signInWithSso}
               </Button>
               {!ssoConfigured && (
                 <p className="text-xs text-muted-foreground">
-                  Enable and configure SSO in Runtime settings, then reload this screen.
+                  {text.configureSsoBefore}
                 </p>
               )}
             </div>
           )}
           {!showLocalAuth && !showSsoAuth ? (
             <p className="rounded-md border border-dashed p-2 text-xs text-muted-foreground">
-              No authentication method is currently configured.
+              {text.noAuthConfigured}
             </p>
           ) : null}
         </CardContent>
@@ -1395,6 +1852,7 @@ function ServiceHealthCard({
 }
 
 function DashboardPanel({
+  text,
   dashboard,
   isDashboardLoading,
   setupCompletionCount,
@@ -1406,6 +1864,7 @@ function DashboardPanel({
   onOpenWizard,
   onEditService,
 }: {
+  text: UiTextMap
   dashboard: DashboardPayload | null
   isDashboardLoading: boolean
   setupCompletionCount: number
@@ -1437,27 +1896,29 @@ function DashboardPanel({
             <ShieldAlert className="size-5 text-amber-600 dark:text-amber-400" />
           )}
           <div>
-            <p className="text-sm font-semibold leading-tight">{isLive ? "Live mode" : "Dry run"}</p>
+            <p className="text-sm font-semibold leading-tight">
+              {isLive ? text.liveMode : text.dryRun}
+            </p>
             <p className="text-xs text-muted-foreground">
-              {isLive ? "Real deletions are active" : "No deletions will be performed"}
+              {isLive ? text.liveModeDescription : text.dryRunDescription}
             </p>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 ml-auto">
-          <span className="text-sm text-muted-foreground">
-            Setup{" "}
+          <span className="text-sm text-muted-foreground" title={text.setupCount}>
+            {text.setup}{" "}
             <strong className="text-foreground">
               {setupCompletionCount}/{SETUP_STEPS.length}
             </strong>
           </span>
           <span className="text-sm text-muted-foreground">
-            <strong className="text-foreground">{deletedActions}</strong> deletions logged
+            <strong className="text-foreground">{deletedActions}</strong> {text.deletionsLogged}
           </span>
           {!allServicesConfigured && (
             <Button variant="outline" size="sm" onClick={onOpenWizard}>
               <Zap className="size-4 text-blue-600 dark:text-blue-400" />
-              Setup wizard
+              {text.setupWizard}
             </Button>
           )}
           {/* Mode toggle */}
@@ -1472,7 +1933,7 @@ function DashboardPanel({
               )}
             >
               <ShieldAlert className="size-3.5" />
-              Dry run
+              {text.dryRun}
             </button>
             <button
               onClick={() => !isLive ? void onToggleDryRun() : undefined}
@@ -1492,7 +1953,7 @@ function DashboardPanel({
 
       {/* Connected services */}
       <div>
-        <p className="mb-3 text-sm font-medium text-muted-foreground">Connected services</p>
+        <p className="mb-3 text-sm font-medium text-muted-foreground">{text.connectedServices}</p>
         {isDashboardLoading && !dashboard ? (
           <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
             {Array.from({ length: 5 }).map((_, i) => (
@@ -1518,9 +1979,9 @@ function DashboardPanel({
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <Webhook className="size-4 text-violet-500" />
-              Webhook status
+              {text.webhookStatus}
             </CardTitle>
-            <CardDescription>Last Jellyfin delivery attempt.</CardDescription>
+            <CardDescription>{text.webhookStatusDescription}</CardDescription>
           </CardHeader>
           <CardContent>
             {webhookStatus?.attempted_at ? (
@@ -1541,8 +2002,8 @@ function DashboardPanel({
               </div>
             ) : (
               <EmptyState
-                title="No webhook received"
-                description="Send a Jellyfin ItemDeleted webhook to see status here."
+                title={text.noWebhookReceived}
+                description={text.sendWebhookForStatus}
               />
             )}
           </CardContent>
@@ -1552,18 +2013,18 @@ function DashboardPanel({
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <Activity className="size-4 text-emerald-500" />
-              Latest event
+              {text.latestEvent}
             </CardTitle>
-            <CardDescription>Most recent processed item.</CardDescription>
+            <CardDescription>{text.latestEventDescription}</CardDescription>
           </CardHeader>
           <CardContent>
             {latestActivity ? (
               <div className="space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">
-                      {formatMediaTitle(latestActivity.result.item_type, latestActivity.result.name)}
-                    </p>
+                <p className="truncate text-sm font-medium">
+                  {formatMediaTitle(latestActivity.result.item_type, latestActivity.result.name)}
+                </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {new Date(latestActivity.processed_at).toLocaleString()}
                     </p>
@@ -1582,9 +2043,9 @@ function DashboardPanel({
                 </div>
               </div>
             ) : (
-              <EmptyState
-                title="No activity yet"
-                description="Send a Jellyfin webhook after setup to see runtime events here."
+            <EmptyState
+                title={text.noActivity}
+                description={text.noWebhookActivity}
               />
             )}
           </CardContent>
@@ -1597,11 +2058,13 @@ function DashboardPanel({
 // ─── Activity panel ───────────────────────────────────────────────────────────
 
 function ActivityPanel({
+  text,
   filteredActivity,
   webhookAttempts,
   activityFilter,
   onFilterChange,
 }: {
+  text: UiTextMap
   filteredActivity: DashboardActivity[]
   webhookAttempts: DashboardWebhookAttempt[]
   activityFilter: string
@@ -1634,16 +2097,16 @@ function ActivityPanel({
         <Input
           value={activityFilter}
           onChange={(e) => onFilterChange(e.target.value)}
-          placeholder="Filter by title, system, action, or status…"
+          placeholder={text.filter}
           className="max-w-sm"
         />
         {activityFilter && (
           <Button variant="ghost" size="sm" onClick={() => onFilterChange("")}>
-            Clear
+            {text.clear}
           </Button>
         )}
         <span className="ml-auto text-sm text-muted-foreground">
-          {activityCount} event{activityCount !== 1 ? "s" : ""}
+          {activityCount} {text.eventCount}
         </span>
       </div>
 
@@ -1651,30 +2114,36 @@ function ActivityPanel({
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
             <Activity className="size-4 text-emerald-500" />
-            Runtime activity timeline
+            {text.activityTimeline}
           </CardTitle>
-          <CardDescription>
-            Incoming Jellyfin webhooks and processed deletion events in one stream.
-          </CardDescription>
+          <CardDescription>{text.activityTimelineDescription}</CardDescription>
         </CardHeader>
         <CardContent>
           <ScrollArea className="h-[480px]">
             {activityItems.length === 0 ? (
               <EmptyState
-                title="No activity yet"
+                title={text.noActivity}
                 description={
                   activityFilter
-                    ? "No items match the current filter."
-                    : "Send a Jellyfin webhook or process a cleanup event to populate the timeline."
+                    ? text.noActivityFiltered
+                    : text.sendWebhookToSeeActivity
                 }
               />
             ) : (
               <div className="space-y-2 p-px">
                 {activityItems.map((item) =>
                   item.kind === "webhook_attempt" ? (
-                    <WebhookAttemptEntry key={`${item.kind}-${item.attempted_at}-${item.message}`} attempt={item} />
+                    <WebhookAttemptEntry
+                      key={`${item.kind}-${item.attempted_at}-${item.message}`}
+                      attempt={item}
+                      text={text}
+                    />
                   ) : (
-                    <ActivityEntry key={`${item.kind}-${item.processed_at}-${item.result.item_id}`} entry={item} />
+                    <ActivityEntry
+                      key={`${item.kind}-${item.processed_at}-${item.result.item_id}`}
+                      entry={item}
+                      text={text}
+                    />
                   ),
                 )}
               </div>
@@ -1694,12 +2163,14 @@ function SsoConfigSection({
   namespace,
   isSecretVisible,
   onToggleSecretVisibility,
+  text,
 }: {
   draft: GeneralConfig
   namespace: "settings" | "wizard" | "general"
   onDraftChange: (next: GeneralConfig) => void
   isSecretVisible: boolean
   onToggleSecretVisibility: () => void
+  text: UiTextMap
 }) {
   const ssoEnabled = draft.sso_mode !== "password_only"
 
@@ -1713,7 +2184,7 @@ function SsoConfigSection({
 
   return (
     <div className="space-y-3 border-t pt-4">
-      <FormField label="SSO auth mode" htmlFor={`${namespace}-sso-mode`}>
+      <FormField label={text.ssoAuthMode} htmlFor={`${namespace}-sso-mode`}>
         <select
           id={`${namespace}-sso-mode`}
           value={draft.sso_mode}
@@ -1722,15 +2193,15 @@ function SsoConfigSection({
         >
           {SSO_MODE_OPTIONS.map((mode) => (
             <option key={mode.value} value={mode.value}>
-              {mode.label}
+              {text[mode.labelKey]}
             </option>
           ))}
         </select>
-        <FieldHint text={SSO_MODE_HINTS[draft.sso_mode]} />
+        <FieldHint text={text[SSO_MODE_OPTIONS.find((mode) => mode.value === draft.sso_mode)?.hintKey ?? "ssoModeBothHint"]} />
       </FormField>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <FormField label="Issuer URL" htmlFor={`${namespace}-sso-issuer`}>
+        <FormField label={text.ssoIssuer} htmlFor={`${namespace}-sso-issuer`}>
           <Input
             id={`${namespace}-sso-issuer`}
             type="url"
@@ -1739,20 +2210,20 @@ function SsoConfigSection({
             onChange={(e) => onDraftChange({ ...draft, sso_issuer_url: e.target.value || null })}
             placeholder="https://id.example.com/realms/cleanarr"
           />
-          <FieldHint text="Full OIDC issuer URL from your provider." />
+          <FieldHint text={text.ssoIssuerHint} />
         </FormField>
 
-        <FormField label="Client ID" htmlFor={`${namespace}-sso-client-id`}>
+        <FormField label={text.ssoClientId} htmlFor={`${namespace}-sso-client-id`}>
           <Input
             id={`${namespace}-sso-client-id`}
             value={draft.sso_client_id ?? ""}
             disabled={!ssoEnabled}
             onChange={(e) => onDraftChange({ ...draft, sso_client_id: e.target.value || null })}
           />
-          <FieldHint text="Public client ID for your OIDC application." />
+          <FieldHint text={text.ssoClientIdHint} />
         </FormField>
 
-        <FormField label="Client Secret" htmlFor={`${namespace}-sso-client-secret`}>
+        <FormField label={text.ssoClientSecret} htmlFor={`${namespace}-sso-client-secret`}>
           <div className="flex items-center gap-2">
             <Input
               id={`${namespace}-sso-client-secret`}
@@ -1771,20 +2242,20 @@ function SsoConfigSection({
               {isSecretVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
             </Button>
           </div>
-          <FieldHint text="Secret sent to your provider's token endpoint." />
+          <FieldHint text={text.ssoClientSecretHint} />
         </FormField>
 
-        <FormField label="Redirect URI" htmlFor={`${namespace}-sso-redirect-uri`}>
+        <FormField label={text.ssoRedirectUri} htmlFor={`${namespace}-sso-redirect-uri`}>
           <Input
             id={`${namespace}-sso-redirect-uri`}
             value={draft.sso_redirect_uri ?? ""}
             disabled={!ssoEnabled}
             onChange={(e) => onDraftChange({ ...draft, sso_redirect_uri: e.target.value || null })}
           />
-          <FieldHint text="Usually your CleanArr public URL + /api/auth/sso/callback." />
+          <FieldHint text={text.ssoRedirectHint} />
         </FormField>
 
-        <FormField label="Scopes" htmlFor={`${namespace}-sso-scopes`}>
+        <FormField label={text.ssoScopes} htmlFor={`${namespace}-sso-scopes`}>
           <Input
             id={`${namespace}-sso-scopes`}
             value={draft.sso_scopes}
@@ -1792,13 +2263,13 @@ function SsoConfigSection({
             onChange={(e) => onDraftChange({ ...draft, sso_scopes: e.target.value })}
             placeholder="openid profile email"
           />
-          <FieldHint text="Optional override for OIDC scope list." />
+          <FieldHint text={text.ssoScopesHint} />
         </FormField>
       </div>
 
       {!ssoEnabled && (
         <p className="text-xs text-muted-foreground">
-          SSO fields are disabled while auth mode is Password-only.
+          {text.ssoFieldDisabledHint}
         </p>
       )}
     </div>
@@ -1809,10 +2280,12 @@ function SettingsPanel({
   config,
   isConfigLoading,
   onSaveGeneral,
+  text,
 }: {
   config: RuntimeConfigPayload | null
   isConfigLoading: boolean
   onSaveGeneral: (payload: GeneralConfig) => Promise<void>
+  text: UiTextMap
 }) {
   const general = config?.general ?? null
   const [draft, setDraft] = useState<GeneralConfig | null>(null)
@@ -1913,6 +2386,22 @@ function SettingsPanel({
                 <FieldHint text="Used when requesting series and movie titles from Jellyfin metadata." />
               </FormField>
 
+              <FormField label="UI language" htmlFor="settings-ui-language">
+                <select
+                  id="settings-ui-language"
+                  value={draft.ui_language}
+                  onChange={(e) => setDraft({ ...draft, ui_language: e.target.value })}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                >
+                  {UI_LANGUAGE_OPTIONS.map((language) => (
+                    <option key={language.value} value={language.value}>
+                      {language.label}
+                    </option>
+                  ))}
+                </select>
+                <FieldHint text="Changes the primary language preference stored in the CleanArr UI config." />
+              </FormField>
+
               <FormField label="Webhook token" htmlFor="settings-webhook-token">
                 <div className="flex items-center gap-2">
                   <code className="flex-1 rounded-md border border-input bg-muted px-3 py-2 font-mono text-xs break-all select-all">
@@ -1957,6 +2446,7 @@ function SettingsPanel({
               </FormField>
 
               <SsoConfigSection
+                text={text}
                 namespace="settings"
                 draft={draft}
                 onDraftChange={setDraft}
@@ -1994,9 +2484,11 @@ function SettingsPanel({
 function WizardGeneralStep({
   config,
   onSave,
+  text,
 }: {
   config: RuntimeConfigPayload | null
   onSave: (payload: GeneralConfig) => Promise<void>
+  text: UiTextMap
 }) {
   const general = config?.general ?? null
   const [draft, setDraft] = useState<GeneralConfig | null>(() =>
@@ -2094,6 +2586,22 @@ function WizardGeneralStep({
           </select>
           <FieldHint text="Used when requesting series/movie names from Jellyfin metadata." />
         </FormField>
+
+        <FormField label="UI language" htmlFor="wizard-ui-language">
+          <select
+            id="wizard-ui-language"
+            value={draft.ui_language}
+            onChange={(e) => setDraft({ ...draft, ui_language: e.target.value })}
+            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            {UI_LANGUAGE_OPTIONS.map((language) => (
+              <option key={language.value} value={language.value}>
+                {language.label}
+              </option>
+            ))}
+          </select>
+          <FieldHint text="Stored for UI preference and browser locale hints." />
+        </FormField>
       </div>
 
       <FormField label="Webhook token" htmlFor="wizard-webhook-token">
@@ -2140,6 +2648,7 @@ function WizardGeneralStep({
       </FormField>
 
         <SsoConfigSection
+          text={text}
           namespace="wizard"
           draft={draft}
           onDraftChange={setDraft}
@@ -2351,6 +2860,7 @@ function SetupWizard({
   dashboard,
   origin,
   curlPreview,
+  text,
   onSaveGeneral,
   onSaveService,
   onTestService,
@@ -2361,6 +2871,7 @@ function SetupWizard({
   dashboard: DashboardPayload | null
   origin: string
   curlPreview: string
+  text: UiTextMap
   onSaveGeneral: (payload: GeneralConfig) => Promise<void>
   onSaveService: (family: ServiceFamily, draft: ServiceDraft) => Promise<void>
   onTestService: (family: ServiceFamily, draft: ServiceDraft) => Promise<ConnectionTestResponse>
@@ -2391,7 +2902,7 @@ function SetupWizard({
         >
           {/* Step 1: General */}
           <Step>
-            <WizardGeneralStep config={config} onSave={onSaveGeneral} />
+            <WizardGeneralStep config={config} onSave={onSaveGeneral} text={text} />
           </Step>
 
           {/* Step 2: Jellyfin */}
@@ -2723,11 +3234,13 @@ function JellyfinSetupPanel({
 function GeneralSettingsModal({
   open,
   config,
+  text,
   onClose,
   onSave,
 }: {
   open: boolean
   config: GeneralConfig | null
+  text: UiTextMap
   onClose: () => void
   onSave: (payload: GeneralConfig) => Promise<void>
   }) {
@@ -2894,7 +3407,24 @@ function GeneralSettingsModal({
             <FieldHint text="Used when requesting metadata titles from Jellyfin." />
           </FormField>
 
+          <FormField label="UI language" htmlFor="general-ui-language">
+            <select
+              id="general-ui-language"
+              value={draft.ui_language}
+              onChange={(e) => setDraft({ ...draft, ui_language: e.target.value })}
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              {UI_LANGUAGE_OPTIONS.map((language) => (
+                <option key={language.value} value={language.value}>
+                  {language.label}
+                </option>
+              ))}
+            </select>
+            <FieldHint text="Stored UI language code used for interface localization." />
+          </FormField>
+
           <SsoConfigSection
+            text={text}
             draft={draft}
             onDraftChange={setDraft}
             namespace="general"
@@ -3281,8 +3811,8 @@ function ErrorBanner({ message }: { message: string }) {
   )
 }
 
-function WebhookAttemptEntry({ attempt }: { attempt: DashboardWebhookAttempt }) {
-  const [open, setOpen] = useState(false)
+function WebhookAttemptEntry({ attempt, text }: { attempt: DashboardWebhookAttempt; text: UiTextMap }) {
+  const [open, setOpen] = useState(true)
   const tone = getWebhookStatusTone(attempt.outcome)
 
   return (
@@ -3316,21 +3846,21 @@ function WebhookAttemptEntry({ attempt }: { attempt: DashboardWebhookAttempt }) 
         <CardContent className="border-t pb-3 pt-3 space-y-3">
           <div className="space-y-1 text-xs text-muted-foreground">
             <p>
-              <span className="text-foreground">Message:</span> {attempt.message}
+              <span className="text-foreground">{text.webhookMessageLabel}</span> {attempt.message}
             </p>
             {attempt.payload_event_count != null ? (
               <p>
-                <span className="text-foreground">Payload events:</span> {attempt.payload_event_count}
+                <span className="text-foreground">{text.webhookPayloadEventsLabel}</span> {attempt.payload_event_count}
               </p>
             ) : null}
             <p>
-              <span className="text-foreground">Notification:</span>{" "}
+              <span className="text-foreground">{text.webhookNotificationLabel}</span>{" "}
               {attempt.notification_type ?? "—"}
               {attempt.item_type ? ` / ${attempt.item_type}` : ""}
             </p>
             {attempt.result_status && (
               <p>
-                <span className="text-foreground">Processing result:</span> {attempt.result_status}
+                <span className="text-foreground">{text.webhookResultStatusLabel}</span> {attempt.result_status}
               </p>
             )}
           </div>
@@ -3340,9 +3870,10 @@ function WebhookAttemptEntry({ attempt }: { attempt: DashboardWebhookAttempt }) 
   )
 }
 
-function ActivityEntry({ entry }: { entry: DashboardActivity }) {
-  const [open, setOpen] = useState(false)
+function ActivityEntry({ entry, text }: { entry: DashboardActivity; text: UiTextMap }) {
+  const [open, setOpen] = useState(true)
   const Icon = entry.result.item_type === "Movie" ? Film : Tv
+  const hasActions = entry.result.actions.length > 0
   return (
     <Card>
       <button
@@ -3383,16 +3914,19 @@ function ActivityEntry({ entry }: { entry: DashboardActivity }) {
           </div>
           <div className="space-y-1.5">
             {entry.result.actions.map((action, i) => (
-              <ActionRow key={`${action.system}-${action.action}-${i}`} action={action} />
+              <ActionRow key={`${action.system}-${action.action}-${i}`} action={action} text={text} />
             ))}
           </div>
+          {!hasActions && (
+            <p className="text-xs text-muted-foreground">{text.noItemsYet}</p>
+          )}
         </CardContent>
       )}
     </Card>
   )
 }
 
-function ActionRow({ action }: { action: DashboardAction }) {
+function ActionRow({ action, text }: { action: DashboardAction; text: UiTextMap }) {
   return (
     <div className="rounded-lg border p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -3407,8 +3941,8 @@ function ActionRow({ action }: { action: DashboardAction }) {
       </div>
       <p className="mt-1.5 text-xs text-muted-foreground">{action.message}</p>
       {action.reason && (
-        <p className="mt-1 text-xs text-muted-foreground">
-          reason: <span className="font-mono">{action.reason}</span>
+      <p className="mt-1 text-xs text-muted-foreground">
+          {text.reasonLabel} <span className="font-mono">{action.reason}</span>
         </p>
       )}
     </div>
@@ -3942,6 +4476,14 @@ function formatBytes(bytes: number): string {
   const sizes = ["B", "KB", "MB", "GB", "TB"]
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
+}
+
+function normalizeUiLanguage(value: string | null | undefined): string {
+  if (!value) return "en"
+  const normalized = value.trim().replace("_", "-").toLowerCase()
+    .split(",", 1)[0]
+    .trim()
+  return normalized || "en"
 }
 
 function normalizeError(error: unknown): string {
