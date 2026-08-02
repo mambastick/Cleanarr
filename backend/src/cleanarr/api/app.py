@@ -415,7 +415,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
             if own_container:
                 await resolved_container.close()
 
-    app = FastAPI(title="CleanArr", version="0.2.6", lifespan=lifespan)
+    app = FastAPI(title="CleanArr", version="0.2.7", lifespan=lifespan)
     app.state.container = resolved_container
     app.state.activity_store = activity_store
     app.state.webhook_attempt_store = webhook_attempt_store
@@ -449,8 +449,12 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         cleanarr_session: str | None = Cookie(default=None, alias=_COOKIE_NAME),
     ) -> AuthStatusResponse:
         token = _extract_token(authorization, x_admin_token) or cleanarr_session
-        status_payload = request.app.state.container.auth_service.get_status(token)
-        return AuthStatusResponse.from_domain(status_payload)
+        container = request.app.state.container
+        status_payload = container.auth_service.get_status(token)
+        return AuthStatusResponse.from_domain(
+            status_payload,
+            ui_language=container.config.general.ui_language,
+        )
 
     @app.get("/api/auth/sso/start", response_model=SSOLoginResponse)
     async def sso_start(request: Request) -> SSOLoginResponse:
@@ -1047,6 +1051,45 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                     item.name,
                 )
 
+        try:
+            seerr_media_items = list(await container.jellyseerr.list_media())
+            seerr_requests = list(await container.jellyseerr.list_requests())
+        except Exception:  # noqa: BLE001
+            _logger.warning(
+                "Unable to load Jellyseerr requests for the series library",
+                exc_info=True,
+            )
+            seerr_media_items = []
+            seerr_requests = []
+
+        seerr_series_by_tvdb = {
+            item.tvdb_id: item.id
+            for item in seerr_media_items
+            if item.media_type.lower() in {"tv", "series"} and item.tvdb_id
+        }
+        seerr_series_by_tmdb = {
+            item.tmdb_id: item.id
+            for item in seerr_media_items
+            if item.media_type.lower() in {"tv", "series"} and item.tmdb_id
+        }
+        seerr_series_by_imdb = {
+            item.imdb_id: item.id
+            for item in seerr_media_items
+            if item.media_type.lower() in {"tv", "series"} and item.imdb_id
+        }
+        requested_media_ids: set[int] = set()
+        requested_seasons_by_media_id: dict[int, set[int]] = {}
+        whole_series_request_ids: set[int] = set()
+        for seerr_request in seerr_requests:
+            requested_media_ids.add(seerr_request.media_id)
+            if seerr_request.season_numbers:
+                requested_seasons_by_media_id.setdefault(
+                    seerr_request.media_id,
+                    set(),
+                ).update(seerr_request.season_numbers)
+            else:
+                whole_series_request_ids.add(seerr_request.media_id)
+
         def find_jf_series(series: object) -> tuple[str | None, str | None]:
             if getattr(series, "tvdb_id", None) and series.tvdb_id in jf_series_by_tvdb:  # type: ignore[union-attr]
                 return jf_series_by_tvdb[series.tvdb_id]  # type: ignore[union-attr]
@@ -1055,6 +1098,15 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
             if getattr(series, "imdb_id", None) and series.imdb_id in jf_series_by_imdb:  # type: ignore[union-attr]
                 return jf_series_by_imdb[series.imdb_id]  # type: ignore[union-attr]
             return None, None
+
+        def find_seerr_series_id(series: object) -> int | None:
+            if getattr(series, "tvdb_id", None) in seerr_series_by_tvdb:
+                return seerr_series_by_tvdb[series.tvdb_id]  # type: ignore[union-attr]
+            if getattr(series, "tmdb_id", None) in seerr_series_by_tmdb:
+                return seerr_series_by_tmdb[series.tmdb_id]  # type: ignore[union-attr]
+            if getattr(series, "imdb_id", None) in seerr_series_by_imdb:
+                return seerr_series_by_imdb[series.imdb_id]  # type: ignore[union-attr]
+            return None
 
         result: list[SeriesSummary] = []
         for series in sorted(series_list, key=lambda s: s.title.lower()):
@@ -1079,6 +1131,10 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
 
             jf_series_id, jf_series_title = find_jf_series(series)
             jf_season_map = jf_seasons_by_parent.get(jf_series_id, {}) if jf_series_id else {}
+            seerr_media_id = find_seerr_series_id(series)
+            has_series_request = (
+                seerr_media_id is not None and seerr_media_id in requested_media_ids
+            )
 
             seasons = [
                 SeasonSummary(
@@ -1088,6 +1144,18 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                     size_bytes=size_by_season.get(sn, 0),
                     jellyfin_season_id=jf_season_map.get(sn, (None, None))[0],
                     jellyfin_title=jf_season_map.get(sn, (None, None))[1],
+                    has_jellyseerr_request=(
+                        seerr_media_id is not None
+                        and has_series_request
+                        and (
+                            seerr_media_id in whole_series_request_ids
+                            or sn
+                            in requested_seasons_by_media_id.get(
+                                seerr_media_id,
+                                set(),
+                            )
+                        )
+                    ),
                 )
                 for sn in season_numbers
             ]
@@ -1098,6 +1166,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                     jellyfin_series_title=jf_series_title,
                     seasons=seasons,
                     jellyfin_series_id=jf_series_id,
+                    has_jellyseerr_request=has_series_request,
                 )
             )
         return LibrarySeriesResponse(series=result)
@@ -1127,6 +1196,29 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
             if item.imdb_id:
                 jf_movies_by_imdb[item.imdb_id] = (item.id, item.name)
 
+        try:
+            seerr_media_items = list(await container.jellyseerr.list_media())
+            seerr_requests = list(await container.jellyseerr.list_requests())
+        except Exception:  # noqa: BLE001
+            _logger.warning(
+                "Unable to load Jellyseerr requests for the movie library",
+                exc_info=True,
+            )
+            seerr_media_items = []
+            seerr_requests = []
+
+        seerr_movies_by_tmdb = {
+            item.tmdb_id: item.id
+            for item in seerr_media_items
+            if item.media_type.lower() == "movie" and item.tmdb_id
+        }
+        seerr_movies_by_imdb = {
+            item.imdb_id: item.id
+            for item in seerr_media_items
+            if item.media_type.lower() == "movie" and item.imdb_id
+        }
+        requested_movie_ids = {item.media_id for item in seerr_requests}
+
         result: list[MovieSummary] = []
         for movie in sorted(movies_list, key=lambda m: m.title.lower()):
             jf_movie_id: str | None = None
@@ -1135,6 +1227,11 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                 jf_movie_id, jellyfin_movie_title = jf_movies_by_tmdb[movie.tmdb_id]
             elif movie.imdb_id and movie.imdb_id in jf_movies_by_imdb:
                 jf_movie_id, jellyfin_movie_title = jf_movies_by_imdb[movie.imdb_id]
+            seerr_media_id: int | None = None
+            if movie.tmdb_id and movie.tmdb_id in seerr_movies_by_tmdb:
+                seerr_media_id = seerr_movies_by_tmdb[movie.tmdb_id]
+            elif movie.imdb_id and movie.imdb_id in seerr_movies_by_imdb:
+                seerr_media_id = seerr_movies_by_imdb[movie.imdb_id]
             result.append(
                 MovieSummary(
                     radarr_id=movie.id,
@@ -1143,6 +1240,10 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                     size_bytes=movie.size_on_disk or 0,
                     has_file=movie.has_file,
                     jellyfin_movie_id=jf_movie_id,
+                    has_jellyseerr_request=(
+                        seerr_media_id is not None
+                        and seerr_media_id in requested_movie_ids
+                    ),
                 )
             )
         return LibraryMoviesResponse(movies=result)

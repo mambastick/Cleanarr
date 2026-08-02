@@ -18,10 +18,16 @@ class AuthStatusResponse(BaseModel):
     sso_enabled: bool
     sso_mode: SSOAuthMode
     sso_configured: bool
+    ui_language: str
 
     @classmethod
-    def from_domain(cls, status: AuthStatus) -> AuthStatusResponse:
-        return cls.model_validate(status.__dict__)
+    def from_domain(
+        cls,
+        status: AuthStatus,
+        *,
+        ui_language: str,
+    ) -> AuthStatusResponse:
+        return cls.model_validate({**status.__dict__, "ui_language": ui_language})
 
 
 class SSOLoginResponse(BaseModel):

@@ -8,6 +8,7 @@ export interface AuthStatusPayload {
   sso_enabled: boolean
   sso_mode: SsoAuthMode
   sso_configured: boolean
+  ui_language: string
 }
 
 export interface AuthSessionPayload {

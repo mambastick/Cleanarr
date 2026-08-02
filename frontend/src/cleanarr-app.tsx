@@ -727,7 +727,9 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     cancel: "Cancel",
     delete: "Delete",
     deleteSeries: "Delete series",
-    deleteItem: "Delete",
+    deleteItem: "Delete movie",
+    series: "Series",
+    movies: "Movies",
     refresh: "Refresh",
     filter: "Filter",
     clear: "Clear",
@@ -978,8 +980,10 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     saveSettings: "Сохранить настройки",
     cancel: "Отмена",
     delete: "Удалить",
-    deleteSeries: "Удалить серию",
-    deleteItem: "Удалить",
+    deleteSeries: "Удалить сериал",
+    deleteItem: "Удалить фильм",
+    series: "Сериалы",
+    movies: "Фильмы",
     refresh: "Обновить",
     filter: "Фильтр",
     clear: "Очистить",
@@ -1207,17 +1211,17 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
 }
 
 const FALLBACK_UI_TEXTS: Record<string, Partial<UiTextMap>> = {
-  de: {},
-  fr: {},
-  es: {},
-  it: {},
-  pt: {},
-  tr: {},
-  pl: {},
-  uk: {},
-  cs: {},
-  zh: {},
-  ja: {},
+  de: { series: "Serien", movies: "Filme", deleteSeries: "Serie löschen", deleteItem: "Film löschen" },
+  fr: { series: "Séries", movies: "Films", deleteSeries: "Supprimer la série", deleteItem: "Supprimer le film" },
+  es: { series: "Series", movies: "Películas", deleteSeries: "Eliminar serie", deleteItem: "Eliminar película" },
+  it: { series: "Serie", movies: "Film", deleteSeries: "Elimina serie", deleteItem: "Elimina film" },
+  pt: { series: "Séries", movies: "Filmes", deleteSeries: "Eliminar série", deleteItem: "Eliminar filme" },
+  tr: { series: "Diziler", movies: "Filmler", deleteSeries: "Diziyi sil", deleteItem: "Filmi sil" },
+  pl: { series: "Seriale", movies: "Filmy", deleteSeries: "Usuń serial", deleteItem: "Usuń film" },
+  uk: { series: "Серіали", movies: "Фільми", deleteSeries: "Видалити серіал", deleteItem: "Видалити фільм" },
+  cs: { series: "Seriály", movies: "Filmy", deleteSeries: "Smazat seriál", deleteItem: "Smazat film" },
+  zh: { series: "剧集", movies: "电影", deleteSeries: "删除剧集", deleteItem: "删除电影" },
+  ja: { series: "シリーズ", movies: "映画", deleteSeries: "シリーズを削除", deleteItem: "映画を削除" },
 }
 
 const DEFAULT_UI_LANG = "en"
@@ -1345,8 +1349,8 @@ function CleanArrApp() {
 
   const deferredFilter = useDeferredValue(activityFilter)
   const uiLanguage = useMemo(
-    () => resolveUiLanguage(config?.general.ui_language),
-    [config?.general.ui_language],
+    () => resolveUiLanguage(config?.general.ui_language ?? authStatus?.ui_language),
+    [authStatus?.ui_language, config?.general.ui_language],
   )
   const uiText = useMemo(() => getUiText(uiLanguage), [uiLanguage])
 
@@ -4465,6 +4469,9 @@ function LibrarySeriesTab({
             const isOpen = expanded.has(series.sonarr_id)
             const totalBytes = series.seasons.reduce((sum, s) => sum + s.size_bytes, 0)
             const seriesTitle = series.jellyfin_series_title ?? series.title
+            const hasDownloadedEpisodes = series.seasons.some(
+              (season) => season.episode_file_count > 0,
+            )
             return (
               <Card key={series.sonarr_id}>
                 <div className="flex w-full items-center gap-3 px-4 py-3">
@@ -4485,7 +4492,7 @@ function LibrarySeriesTab({
                       {totalBytes > 0 && ` · ${formatBytes(totalBytes)}`}
                     </span>
                   </button>
-                  <Button
+                  {(hasDownloadedEpisodes || series.has_jellyseerr_request) && <Button
                     variant="ghost"
                     size="sm"
                     className="ml-2 shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
@@ -4501,7 +4508,7 @@ function LibrarySeriesTab({
                   >
                     <Trash2 className="size-3.5" />
                     {text.deleteSeries}
-                  </Button>
+                  </Button>}
                 </div>
 
                 {isOpen && series.seasons.length > 0 && (
@@ -4519,7 +4526,7 @@ function LibrarySeriesTab({
                             {season.episode_file_count}/{season.episode_count} {text.episodes}
                             {season.size_bytes > 0 && ` · ${formatBytes(season.size_bytes)}`}
                           </span>
-                          <Button
+                          {(season.episode_file_count > 0 || season.has_jellyseerr_request) && <Button
                             variant="outline"
                             size="sm"
                             className="shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
@@ -4536,7 +4543,7 @@ function LibrarySeriesTab({
                           >
                             <Trash2 className="size-3.5" />
                             {text.delete}
-                          </Button>
+                          </Button>}
                         </div>
                       ))}
                     </div>
@@ -4627,7 +4634,7 @@ function LibraryMoviesTab({
                       : text.onDisk
                     : text.noFile}
                 </span>
-                <Button
+                {(movie.has_file || movie.has_jellyseerr_request) && <Button
                   variant="ghost"
                   size="sm"
                   className="ml-2 shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
@@ -4641,8 +4648,8 @@ function LibraryMoviesTab({
                   }
                 >
                   <Trash2 className="size-3.5" />
-                  {text.delete}
-                </Button>
+                  {text.deleteItem}
+                </Button>}
               </div>
             </Card>
           ))}

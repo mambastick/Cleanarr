@@ -21,6 +21,7 @@ class SeasonSummary(BaseModel):
     size_bytes: int
     jellyfin_title: str | None = None
     jellyfin_season_id: str | None = None
+    has_jellyseerr_request: bool = False
 
 
 class SeriesSummary(BaseModel):
@@ -31,6 +32,7 @@ class SeriesSummary(BaseModel):
     jellyfin_series_title: str | None = None
     seasons: list[SeasonSummary]
     jellyfin_series_id: str | None = None
+    has_jellyseerr_request: bool = False
 
 
 class LibrarySeriesResponse(BaseModel):
@@ -48,6 +50,7 @@ class MovieSummary(BaseModel):
     size_bytes: int
     has_file: bool
     jellyfin_movie_id: str | None = None
+    has_jellyseerr_request: bool = False
 
 
 class LibraryMoviesResponse(BaseModel):
