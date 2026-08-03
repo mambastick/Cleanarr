@@ -415,7 +415,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
             if own_container:
                 await resolved_container.close()
 
-    app = FastAPI(title="CleanArr", version="0.2.8", lifespan=lifespan)
+    app = FastAPI(title="CleanArr", version="0.2.9", lifespan=lifespan)
     app.state.container = resolved_container
     app.state.activity_store = activity_store
     app.state.webhook_attempt_store = webhook_attempt_store
@@ -496,7 +496,6 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     @app.get("/api/auth/sso/callback", name="sso_callback")
     async def sso_callback(
         request: Request,
-        response: Response,
         code: str | None = Query(default=None),
         state: str | None = Query(default=None),
         error: str | None = Query(default=None),
@@ -556,8 +555,12 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
             return RedirectResponse(_sso_error_target("ID token does not include user identity."))
 
         session_token = container.auth_service.create_session_for_user(username)
-        _set_session_cookie(response, request, session_token)
-        return RedirectResponse(url="/")
+        redirect_response = RedirectResponse(
+            url="/",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+        _set_session_cookie(redirect_response, request, session_token)
+        return redirect_response
 
     @app.post("/api/auth/register", response_model=AuthSessionResponse)
     async def register_admin(

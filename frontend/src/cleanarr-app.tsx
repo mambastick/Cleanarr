@@ -1627,7 +1627,9 @@ function CleanArrApp() {
 
   // Persist session token to cookie
   useEffect(() => {
-    writeSessionCookie(sessionToken)
+    if (sessionToken) {
+      writeSessionCookie(sessionToken)
+    }
   }, [sessionToken])
 
   const setupCompletionCount = useMemo(
@@ -2224,6 +2226,17 @@ const DOWNSTREAM_META: Partial<Record<string, { icon: LucideIcon; color: string 
   Downloader: { icon: Download, color: "text-emerald-500" },
 }
 
+function getDashboardServiceRole(name: string, fallback: string, text: UiTextMap): string {
+  switch (name) {
+    case "Radarr": return text.serviceRadarrDescription
+    case "Sonarr": return text.serviceSonarrDescription
+    case "Jellyfin": return text.serviceJellyfinDescription
+    case "Jellyseerr": return text.serviceJellyseerrDescription
+    case "Downloader": return text.serviceDownloaderDescription
+    default: return fallback
+  }
+}
+
 function ServiceHealthCard({
   service,
   text,
@@ -2267,7 +2280,9 @@ function ServiceHealthCard({
       </div>
       <div>
         <p className="text-sm font-semibold">{service.name}</p>
-        <p className="text-xs text-muted-foreground">{service.role}</p>
+        <p className="text-xs text-muted-foreground">
+          {getDashboardServiceRole(service.name, service.role, text)}
+        </p>
       </div>
       {service.url ? (
         <code className="block truncate text-[11px] text-muted-foreground">{service.url}</code>
@@ -2372,7 +2387,7 @@ function DashboardPanel({
               )}
             >
               <Zap className="size-3.5" />
-              Live
+              {text.live}
             </button>
           </div>
         </div>

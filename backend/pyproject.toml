@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cleanarr"
-version = "0.2.8"
+version = "0.2.9"
 description = "Jellyfin deletion webhook that cascades cleanup to Arr apps and download clients."
 requires-python = ">=3.12"
 dependencies = [
