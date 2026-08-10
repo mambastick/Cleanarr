@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import secrets
-from threading import Lock
 import time
+from dataclasses import dataclass
+from threading import Lock
 
 from cleanarr.application.configuration import RuntimeConfigurationService
-from cleanarr.infrastructure.auth import InMemorySessionStore, PasswordHasher
 from cleanarr.domain.config import GeneralConfig, SSOAuthMode
+from cleanarr.infrastructure.auth import InMemorySessionStore, PasswordHasher
 
 
 @dataclass(frozen=True)
@@ -65,13 +65,12 @@ class AuthenticationService:
         username = self.resolve_session(session_token)
         configured = admin.configured
         sso_configured = self.is_sso_configured(config.general)
-        local_auth_enabled = self.is_password_auth_enabled(config.general)
         return AuthStatus(
             admin_configured=configured,
             requires_registration=not configured and not sso_configured,
             authenticated=username is not None,
             username=username,
-            sso_enabled=local_auth_enabled,
+            sso_enabled=self.is_sso_auth_enabled(config.general),
             sso_mode=config.general.sso_mode,
             sso_configured=sso_configured,
         )

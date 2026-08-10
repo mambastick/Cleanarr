@@ -1743,15 +1743,16 @@ function CleanArrApp() {
     try {
       await fetchJson<void>("/api/auth/logout", { method: "POST" })
     } catch {
-      // Session might already be invalid; local reset is enough.
+      // Refresh below will resolve whether the server-side session is still valid.
     }
     setSessionToken("")
-    setAuthStatus(null)
+    setAuthStatus((current) => current ? { ...current, authenticated: false, username: null } : current)
     setSsoError(null)
     setAuthForm({ username: "", password: "", confirmPassword: "" })
     setDeleteJobs([])
     knownDeleteJobStates.current.clear()
     hasLoadedDeleteJobs.current = false
+    await loadAuth()
   }
 
   const saveGeneralSettings = async (payload: GeneralConfig) => {
@@ -1760,6 +1761,7 @@ function CleanArrApp() {
       body: JSON.stringify(payload),
     })
     setConfig(next)
+    await loadAuth()
     toast.success(uiText.runtimeSettingsSaved)
   }
 
