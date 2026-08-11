@@ -165,9 +165,7 @@ class ManualDeletionJobStore:
             job.result = result
             job.item_name = result.name
             job.message = (
-                "Finished with some downstream errors."
-                if result.status == "partial_failure"
-                else "Deletion completed."
+                "Finished with some downstream errors." if result.status == "partial_failure" else "Deletion completed."
             )
             job.completed_at = datetime.now(UTC)
 

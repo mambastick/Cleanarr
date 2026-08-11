@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
 import respx
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from cleanarr.api.app import create_app
@@ -22,6 +25,15 @@ from cleanarr.domain.config import GeneralConfig, RuntimeConfig
 from cleanarr.infrastructure.container import ServiceContainer
 from cleanarr.infrastructure.settings import Settings
 from tests.fakes import FakeService
+
+
+@asynccontextmanager
+async def app_client(app: FastAPI) -> AsyncIterator[AsyncClient]:
+    """Run the application lifespan around an in-process HTTP client."""
+
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            yield client
 
 
 class FakeAuthService:
@@ -58,8 +70,9 @@ class FakeAuthService:
 class FakeContainer:
     """Minimal container for API tests."""
 
-    def __init__(self, service: FakeService) -> None:
+    def __init__(self, service: FakeService, *, db_path: Path) -> None:
         self.settings = Settings.model_construct(
+            db_path=str(db_path),
             log_level="INFO",
             dry_run=True,
             webhook_shared_token="secret-token",
@@ -96,7 +109,7 @@ class FakeContainer:
 
 
 @pytest.mark.asyncio
-async def test_webhook_endpoint_accepts_array_payloads() -> None:
+async def test_webhook_endpoint_accepts_array_payloads(tmp_path: Path) -> None:
     result = ProcessingResult(
         event=MediaDeletionEvent(
             notification_type="ItemDeleted",
@@ -109,9 +122,9 @@ async def test_webhook_endpoint_accepts_array_payloads() -> None:
         actions=(ActionResult(system="radarr", action="delete_movie", status=ActionStatus.DELETED, message="ok"),),
     )
     service = FakeService(results=[result, result])
-    app = create_app(container=FakeContainer(service))
+    app = create_app(container=FakeContainer(service, db_path=tmp_path / "cleanarr.db"))
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with app_client(app) as client:
         response = await client.post(
             "/webhook/jellyfin",
             headers={"X-Webhook-Token": "secret-token"},
@@ -139,11 +152,11 @@ async def test_webhook_endpoint_accepts_array_payloads() -> None:
 
 
 @pytest.mark.asyncio
-async def test_webhook_endpoint_rejects_bad_token() -> None:
+async def test_webhook_endpoint_rejects_bad_token(tmp_path: Path) -> None:
     service = FakeService(results=[])
-    app = create_app(container=FakeContainer(service))
+    app = create_app(container=FakeContainer(service, db_path=tmp_path / "cleanarr.db"))
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with app_client(app) as client:
         response = await client.post(
             "/webhook/jellyfin",
             headers={"X-Webhook-Token": "bad-token"},
@@ -164,7 +177,7 @@ async def test_webhook_endpoint_rejects_bad_token() -> None:
 
 
 @pytest.mark.asyncio
-async def test_dashboard_endpoint_exposes_recent_activity() -> None:
+async def test_dashboard_endpoint_exposes_recent_activity(tmp_path: Path) -> None:
     result = ProcessingResult(
         event=MediaDeletionEvent(
             notification_type="ItemDeleted",
@@ -187,9 +200,9 @@ async def test_dashboard_endpoint_exposes_recent_activity() -> None:
         ),
     )
     service = FakeService(results=[result])
-    app = create_app(container=FakeContainer(service))
+    app = create_app(container=FakeContainer(service, db_path=tmp_path / "cleanarr.db"))
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with app_client(app) as client:
         webhook_response = await client.post(
             "/webhook/jellyfin",
             headers={"X-Webhook-Token": "secret-token"},
@@ -224,7 +237,7 @@ async def test_dashboard_endpoint_exposes_recent_activity() -> None:
 
 
 @pytest.mark.asyncio
-async def test_webhook_endpoint_accepts_jellyfin_locale_datetime() -> None:
+async def test_webhook_endpoint_accepts_jellyfin_locale_datetime(tmp_path: Path) -> None:
     result = ProcessingResult(
         event=MediaDeletionEvent(
             notification_type="ItemDeleted",
@@ -244,9 +257,9 @@ async def test_webhook_endpoint_accepts_jellyfin_locale_datetime() -> None:
         ),
     )
     service = FakeService(results=[result])
-    app = create_app(container=FakeContainer(service))
+    app = create_app(container=FakeContainer(service, db_path=tmp_path / "cleanarr.db"))
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with app_client(app) as client:
         response = await client.post(
             "/webhook/jellyfin",
             headers={"X-Webhook-Token": "secret-token"},
@@ -267,11 +280,11 @@ async def test_webhook_endpoint_accepts_jellyfin_locale_datetime() -> None:
 
 
 @pytest.mark.asyncio
-async def test_dashboard_endpoint_exposes_invalid_payload_webhook_status() -> None:
+async def test_dashboard_endpoint_exposes_invalid_payload_webhook_status(tmp_path: Path) -> None:
     service = FakeService(results=[])
-    app = create_app(container=FakeContainer(service))
+    app = create_app(container=FakeContainer(service, db_path=tmp_path / "cleanarr.db"))
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with app_client(app) as client:
         webhook_response = await client.post(
             "/webhook/jellyfin",
             headers={"X-Webhook-Token": "secret-token"},
@@ -288,6 +301,7 @@ async def test_dashboard_endpoint_exposes_invalid_payload_webhook_status() -> No
 @pytest.mark.asyncio
 async def test_runtime_config_endpoints_persist_and_rebuild(tmp_path: Path) -> None:
     settings = Settings.model_construct(
+        db_path=str(tmp_path / "cleanarr.db"),
         config_state_path=str(tmp_path / "runtime-config.json"),
         admin_shared_token="admin-token",
         log_level="INFO",
@@ -308,7 +322,7 @@ async def test_runtime_config_endpoints_persist_and_rebuild(tmp_path: Path) -> N
     container = ServiceContainer.from_settings(settings)
     app = create_app(container=container)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with app_client(app) as client:
         initial = await client.get("/api/config", headers={"X-Admin-Token": "admin-token"})
         create_radarr = await client.post(
             "/api/config/radarr",
@@ -353,6 +367,7 @@ async def test_runtime_config_endpoints_persist_and_rebuild(tmp_path: Path) -> N
 @pytest.mark.asyncio
 async def test_first_run_config_does_not_seed_integrations_from_env(tmp_path: Path) -> None:
     settings = Settings.model_construct(
+        db_path=str(tmp_path / "cleanarr.db"),
         config_state_path=str(tmp_path / "runtime-config.json"),
         admin_shared_token="admin-token",
         log_level="INFO",
@@ -373,7 +388,7 @@ async def test_first_run_config_does_not_seed_integrations_from_env(tmp_path: Pa
     container = ServiceContainer.from_settings(settings)
     app = create_app(container=container)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with app_client(app) as client:
         response = await client.get("/api/config", headers={"X-Admin-Token": "admin-token"})
 
     assert response.status_code == 200
@@ -390,6 +405,7 @@ async def test_first_run_config_does_not_seed_integrations_from_env(tmp_path: Pa
 @respx.mock
 async def test_runtime_config_connection_test_returns_structured_failure(tmp_path: Path) -> None:
     settings = Settings.model_construct(
+        db_path=str(tmp_path / "cleanarr.db"),
         config_state_path=str(tmp_path / "runtime-config.json"),
         admin_shared_token="admin-token",
         log_level="INFO",
@@ -411,7 +427,7 @@ async def test_runtime_config_connection_test_returns_structured_failure(tmp_pat
     app = create_app(container=container)
     respx.post("http://qbt/api/v2/auth/login").respond(status_code=403, text="Fails.")
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with app_client(app) as client:
         response = await client.post(
             "/api/config/downloaders/qbittorrent/test",
             headers={"X-Admin-Token": "admin-token"},
@@ -436,6 +452,7 @@ async def test_runtime_config_connection_test_returns_structured_failure(tmp_pat
 @respx.mock
 async def test_sonarr_test_endpoint_normalizes_plain_base_url_to_api_v3(tmp_path: Path) -> None:
     settings = Settings.model_construct(
+        db_path=str(tmp_path / "cleanarr.db"),
         config_state_path=str(tmp_path / "runtime-config.json"),
         admin_shared_token="admin-token",
         log_level="INFO",
@@ -457,7 +474,7 @@ async def test_sonarr_test_endpoint_normalizes_plain_base_url_to_api_v3(tmp_path
     app = create_app(container=container)
     route = respx.get("https://sonarr.example.com/api/v3/series").respond(status_code=200, json=[])
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with app_client(app) as client:
         response = await client.post(
             "/api/config/sonarr/test",
             headers={"X-Admin-Token": "admin-token"},
@@ -481,6 +498,7 @@ async def test_sonarr_test_endpoint_normalizes_plain_base_url_to_api_v3(tmp_path
 @respx.mock
 async def test_jellyseerr_test_endpoint_normalizes_plain_base_url_to_api_v1(tmp_path: Path) -> None:
     settings = Settings.model_construct(
+        db_path=str(tmp_path / "cleanarr.db"),
         config_state_path=str(tmp_path / "runtime-config.json"),
         admin_shared_token="admin-token",
         log_level="INFO",
@@ -505,7 +523,7 @@ async def test_jellyseerr_test_endpoint_normalizes_plain_base_url_to_api_v1(tmp_
         json={"pageInfo": {"results": 0}, "results": []},
     )
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with app_client(app) as client:
         response = await client.post(
             "/api/config/jellyseerr/test",
             headers={"X-Admin-Token": "admin-token"},
@@ -528,6 +546,7 @@ async def test_jellyseerr_test_endpoint_normalizes_plain_base_url_to_api_v1(tmp_
 @pytest.mark.asyncio
 async def test_first_run_admin_registration_enables_session_auth(tmp_path: Path) -> None:
     settings = Settings.model_construct(
+        db_path=str(tmp_path / "cleanarr.db"),
         config_state_path=str(tmp_path / "runtime-config.json"),
         admin_shared_token=None,
         log_level="INFO",
@@ -548,7 +567,7 @@ async def test_first_run_admin_registration_enables_session_auth(tmp_path: Path)
     container = ServiceContainer.from_settings(settings)
     app = create_app(container=container)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with app_client(app) as client:
         status_before = await client.get("/api/auth/status")
         register = await client.post(
             "/api/auth/register",

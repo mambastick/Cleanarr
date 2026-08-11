@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections import deque
 import sqlite3
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -78,9 +77,7 @@ class ActivityStore:
                 "  result_json TEXT NOT NULL"
                 ")"
             )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_processed_at ON activity(processed_at)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_processed_at ON activity(processed_at)")
             conn.commit()
         self._purge_sync()
 
@@ -111,8 +108,7 @@ class ActivityStore:
     def _snapshot_sync(self, limit: int) -> list[ActivityRecord]:
         with sqlite3.connect(self._db_path) as conn:
             rows = conn.execute(
-                "SELECT processed_at, result_json FROM activity"
-                " ORDER BY processed_at DESC LIMIT ?",
+                "SELECT processed_at, result_json FROM activity ORDER BY processed_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
         records = []

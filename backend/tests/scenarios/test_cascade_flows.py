@@ -293,6 +293,7 @@ async def test_season_delete_updates_only_matching_season_request() -> None:
 
     assert result.status.value == "success"
     assert sonarr.unmonitored_episode_ids == [201, 202]
+    assert sonarr.unmonitored_seasons == [(8, 2)]
     assert sonarr.deleted_episode_file_ids == [402, 403]
     assert set(downloader.deleted_hashes) == {"S2HASH1", "S2HASH2"}
     assert jellyseerr.updated_requests == {71: [1]}

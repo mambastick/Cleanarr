@@ -207,17 +207,15 @@ interface SlideTransitionProps {
 
 function SlideTransition({ children, direction, onHeightReady, className = "" }: SlideTransitionProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
-  const onHeightReadyRef = useRef(onHeightReady)
-  onHeightReadyRef.current = onHeightReady
 
   useLayoutEffect(() => {
     const el = containerRef.current
     if (!el) return
-    onHeightReadyRef.current(el.offsetHeight)
-    const observer = new ResizeObserver(() => onHeightReadyRef.current(el.offsetHeight))
+    onHeightReady(el.offsetHeight)
+    const observer = new ResizeObserver(() => onHeightReady(el.offsetHeight))
     observer.observe(el)
     return () => observer.disconnect()
-  }, []) // empty — component remounts via key={currentStep} on step change
+  }, [onHeightReady])
 
   return (
     <motion.div

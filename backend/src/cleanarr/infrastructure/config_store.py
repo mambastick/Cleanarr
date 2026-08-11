@@ -66,9 +66,7 @@ class SqliteConfigStore:
 
         with self._lock:
             with sqlite3.connect(self._db_path) as conn:
-                row = conn.execute(
-                    "SELECT config_json FROM config WHERE id = 1"
-                ).fetchone()
+                row = conn.execute("SELECT config_json FROM config WHERE id = 1").fetchone()
             if row:
                 return RuntimeConfig.model_validate_json(row[0])
             # First run: migrate from legacy JSON file when present.

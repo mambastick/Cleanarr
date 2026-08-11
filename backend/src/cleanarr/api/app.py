@@ -2,27 +2,28 @@
 
 from __future__ import annotations
 
-import base64
-import json
 import asyncio
+import base64
 import contextlib
+import json
 import logging
+from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode, quote
+from urllib.parse import quote, urlencode
 from uuid import UUID
 
 import httpx
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, ValidationError
 
 from cleanarr.api.auth_schemas import (
     AdminCredentialsRequest,
-    SSOLoginResponse,
     AuthSessionResponse,
     AuthStatusResponse,
+    SSOLoginResponse,
 )
 from cleanarr.api.config_schemas import (
     ConnectionTestResponse,
@@ -61,8 +62,8 @@ from cleanarr.api.library_schemas import (
 )
 from cleanarr.api.schemas import JellyfinWebhookPayload, ProcessingResultResponse, WebhookBatchResponse
 from cleanarr.application.results import observe_actions
-from cleanarr.domain import ActionResult, ItemType, MediaDeletionEvent, MediaFingerprint
-from cleanarr.domain.config import ServiceKind
+from cleanarr.domain import ActionResult, ItemType, MediaDeletionEvent, MediaFingerprint, SonarrSeries
+from cleanarr.domain.config import BaseServiceConfig, GeneralConfig, ServiceKind
 from cleanarr.infrastructure.container import ServiceContainer
 from cleanarr.infrastructure.settings import Settings
 
@@ -81,7 +82,7 @@ def _ignore_deletion_progress(
     """No-op reporter used by the backwards-compatible synchronous endpoint."""
 
 
-def _has_active_service(services: list) -> bool:
+def _has_active_service(services: Sequence[BaseServiceConfig]) -> bool:
     return any(getattr(s, "enabled", False) for s in services)
 
 
@@ -138,7 +139,7 @@ def _set_session_cookie(response: Response, request: Request, token: str | None)
         response.delete_cookie(_COOKIE_NAME, path="/")
 
 
-def _sso_redirect_uri(request: Request, general) -> str:
+def _sso_redirect_uri(request: Request, general: GeneralConfig) -> str:
     if general.sso_redirect_uri:
         return general.sso_redirect_uri
     return str(request.url_for("sso_callback"))
@@ -165,9 +166,12 @@ def _decode_jwt_payload(raw: str | None) -> dict[str, Any]:
     payload = segments[1]
     pad = "=" * (-len(payload) % 4)
     try:
-        return json.loads(base64.urlsafe_b64decode(payload + pad).decode("utf-8"))
+        decoded = json.loads(base64.urlsafe_b64decode(payload + pad).decode("utf-8"))
     except Exception:
         return {}
+    if not isinstance(decoded, dict) or not all(isinstance(key, str) for key in decoded):
+        return {}
+    return decoded
 
 
 async def _fetch_oidc_metadata(issuer_url: str) -> dict[str, Any]:
@@ -269,7 +273,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         if payload.item_type is ItemType.MOVIE:
             if payload.radarr_movie_id is None:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="radarr_movie_id is required for movie deletion.",
                 )
             report(
@@ -301,7 +305,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         else:
             if payload.sonarr_series_id is None:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="sonarr_series_id is required for series/season deletion.",
                 )
             report(
@@ -319,7 +323,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                 )
             if payload.item_type is ItemType.SEASON and payload.season_number is None:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="season_number is required for season deletion.",
                 )
             item_name = series.title
@@ -460,7 +464,9 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     async def sso_start(request: Request) -> SSOLoginResponse:
         container = request.app.state.container
         general = container.config.general
-        if not container.auth_service.is_sso_auth_enabled(general) or not container.auth_service.is_sso_configured(general):
+        if not container.auth_service.is_sso_auth_enabled(
+            general,
+        ) or not container.auth_service.is_sso_configured(general):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="SSO is not configured yet.",
@@ -471,14 +477,14 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         except Exception as exc:
             _logger.exception("Failed to fetch OIDC discovery for %s", general.sso_issuer_url)
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Could not fetch OpenID discovery data.",
             ) from exc
 
         authorization_endpoint = metadata.get("authorization_endpoint")
         if not isinstance(authorization_endpoint, str) or not authorization_endpoint:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="OpenID provider does not expose authorization_endpoint.",
             )
 
@@ -507,7 +513,9 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
 
         container = request.app.state.container
         general = container.config.general
-        if not container.auth_service.is_sso_auth_enabled(general) or not container.auth_service.is_sso_configured(general):
+        if not container.auth_service.is_sso_auth_enabled(
+            general,
+        ) or not container.auth_service.is_sso_configured(general):
             return RedirectResponse(_sso_error_target("SSO is not configured."))
 
         if not container.auth_service.consume_sso_state(state):
@@ -519,7 +527,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         try:
             metadata = await _fetch_oidc_metadata(general.sso_issuer_url)
             token_endpoint = metadata.get("token_endpoint")
-        except Exception as exc:
+        except Exception:
             _logger.exception("Failed to fetch token endpoint from %s", general.sso_issuer_url)
             return RedirectResponse(_sso_error_target("Could not read token endpoint from identity provider."))
 
@@ -953,11 +961,11 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         except ValueError as exc:
             request.app.state.webhook_attempt_store.record(
                 outcome="invalid_payload",
-                http_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                http_status=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 message="Request body is not valid JSON.",
             )
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Invalid JSON payload",
             ) from exc
 
@@ -965,11 +973,11 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         if not payload_list:
             request.app.state.webhook_attempt_store.record(
                 outcome="invalid_payload",
-                http_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                http_status=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 message="Payload array is empty. Jellyfin must send at least one event.",
             )
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Empty Jellyfin webhook payload",
             )
 
@@ -977,23 +985,15 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
             webhook_payloads = [JellyfinWebhookPayload.model_validate(item) for item in payload_list]
         except ValidationError as exc:
             first_error = exc.errors()[0] if exc.errors() else None
-            error_location = (
-                " -> ".join(str(part) for part in first_error["loc"])
-                if first_error is not None
-                else ""
-            )
-            error_message = (
-                first_error["msg"]
-                if first_error is not None
-                else "Payload validation failed."
-            )
+            error_location = " -> ".join(str(part) for part in first_error["loc"]) if first_error is not None else ""
+            error_message = first_error["msg"] if first_error is not None else "Payload validation failed."
             request.app.state.webhook_attempt_store.record(
                 outcome="invalid_payload",
-                http_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                http_status=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 message=f"{error_location}: {error_message}" if error_location else error_message,
             )
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Invalid Jellyfin webhook payload",
             ) from exc
 
@@ -1038,7 +1038,8 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         jf_series_by_tvdb: dict[int, tuple[str, str]] = {}
         jf_series_by_tmdb: dict[int, tuple[str, str]] = {}
         jf_series_by_imdb: dict[str, tuple[str, str]] = {}
-        jf_seasons_by_parent: dict[str, dict[int, tuple[str, str]]] = {}  # parent_id -> {season_number -> (jellyfin_id, jellyfin_title)}
+        # parent_id -> season_number -> (jellyfin_id, jellyfin_title)
+        jf_seasons_by_parent: dict[str, dict[int, tuple[str, str]]] = {}
 
         for item in jf_series_items:
             if item.type == "Series":
@@ -1065,21 +1066,18 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
             seerr_media_items = []
             seerr_requests = []
 
-        seerr_series_by_tvdb = {
-            item.tvdb_id: item.id
-            for item in seerr_media_items
-            if item.media_type.lower() in {"tv", "series"} and item.tvdb_id
-        }
-        seerr_series_by_tmdb = {
-            item.tmdb_id: item.id
-            for item in seerr_media_items
-            if item.media_type.lower() in {"tv", "series"} and item.tmdb_id
-        }
-        seerr_series_by_imdb = {
-            item.imdb_id: item.id
-            for item in seerr_media_items
-            if item.media_type.lower() in {"tv", "series"} and item.imdb_id
-        }
+        seerr_series_by_tvdb: dict[int, int] = {}
+        seerr_series_by_tmdb: dict[int, int] = {}
+        seerr_series_by_imdb: dict[str, int] = {}
+        for item in seerr_media_items:
+            if item.media_type.lower() not in {"tv", "series"}:
+                continue
+            if item.tvdb_id is not None:
+                seerr_series_by_tvdb[item.tvdb_id] = item.id
+            if item.tmdb_id is not None:
+                seerr_series_by_tmdb[item.tmdb_id] = item.id
+            if item.imdb_id is not None:
+                seerr_series_by_imdb[item.imdb_id] = item.id
         requested_media_ids: set[int] = set()
         requested_seasons_by_media_id: dict[int, set[int]] = {}
         whole_series_request_ids: set[int] = set()
@@ -1093,22 +1091,28 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
             else:
                 whole_series_request_ids.add(seerr_request.media_id)
 
-        def find_jf_series(series: object) -> tuple[str | None, str | None]:
-            if getattr(series, "tvdb_id", None) and series.tvdb_id in jf_series_by_tvdb:  # type: ignore[union-attr]
-                return jf_series_by_tvdb[series.tvdb_id]  # type: ignore[union-attr]
-            if getattr(series, "tmdb_id", None) and series.tmdb_id in jf_series_by_tmdb:  # type: ignore[union-attr]
-                return jf_series_by_tmdb[series.tmdb_id]  # type: ignore[union-attr]
-            if getattr(series, "imdb_id", None) and series.imdb_id in jf_series_by_imdb:  # type: ignore[union-attr]
-                return jf_series_by_imdb[series.imdb_id]  # type: ignore[union-attr]
+        def find_jf_series(series: SonarrSeries) -> tuple[str | None, str | None]:
+            if series.tvdb_id and series.tvdb_id in jf_series_by_tvdb:
+                return jf_series_by_tvdb[series.tvdb_id]
+            if series.tmdb_id and series.tmdb_id in jf_series_by_tmdb:
+                return jf_series_by_tmdb[series.tmdb_id]
+            if series.imdb_id and series.imdb_id in jf_series_by_imdb:
+                return jf_series_by_imdb[series.imdb_id]
             return None, None
 
-        def find_seerr_series_id(series: object) -> int | None:
-            if getattr(series, "tvdb_id", None) in seerr_series_by_tvdb:
-                return seerr_series_by_tvdb[series.tvdb_id]  # type: ignore[union-attr]
-            if getattr(series, "tmdb_id", None) in seerr_series_by_tmdb:
-                return seerr_series_by_tmdb[series.tmdb_id]  # type: ignore[union-attr]
-            if getattr(series, "imdb_id", None) in seerr_series_by_imdb:
-                return seerr_series_by_imdb[series.imdb_id]  # type: ignore[union-attr]
+        def find_seerr_series_id(series: SonarrSeries) -> int | None:
+            if series.tvdb_id is not None:
+                match = seerr_series_by_tvdb.get(series.tvdb_id)
+                if match is not None:
+                    return match
+            if series.tmdb_id is not None:
+                match = seerr_series_by_tmdb.get(series.tmdb_id)
+                if match is not None:
+                    return match
+            if series.imdb_id is not None:
+                match = seerr_series_by_imdb.get(series.imdb_id)
+                if match is not None:
+                    return match
             return None
 
         result: list[SeriesSummary] = []
@@ -1128,16 +1132,12 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                 sn = ep.season_number
                 episode_count_by_season[sn] = episode_count_by_season.get(sn, 0) + 1
 
-            season_numbers = sorted(
-                {ep.season_number for ep in episodes if ep.season_number > 0}
-            )
+            season_numbers = sorted({ep.season_number for ep in episodes if ep.season_number > 0})
 
             jf_series_id, jf_series_title = find_jf_series(series)
             jf_season_map = jf_seasons_by_parent.get(jf_series_id, {}) if jf_series_id else {}
             seerr_media_id = find_seerr_series_id(series)
-            has_series_request = (
-                seerr_media_id is not None and seerr_media_id in requested_media_ids
-            )
+            has_series_request = seerr_media_id is not None and seerr_media_id in requested_media_ids
 
             seasons = [
                 SeasonSummary(
@@ -1211,14 +1211,10 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
             seerr_requests = []
 
         seerr_movies_by_tmdb = {
-            item.tmdb_id: item.id
-            for item in seerr_media_items
-            if item.media_type.lower() == "movie" and item.tmdb_id
+            item.tmdb_id: item.id for item in seerr_media_items if item.media_type.lower() == "movie" and item.tmdb_id
         }
         seerr_movies_by_imdb = {
-            item.imdb_id: item.id
-            for item in seerr_media_items
-            if item.media_type.lower() == "movie" and item.imdb_id
+            item.imdb_id: item.id for item in seerr_media_items if item.media_type.lower() == "movie" and item.imdb_id
         }
         requested_movie_ids = {item.media_id for item in seerr_requests}
 
@@ -1243,10 +1239,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                     size_bytes=movie.size_on_disk or 0,
                     has_file=movie.has_file,
                     jellyfin_movie_id=jf_movie_id,
-                    has_jellyseerr_request=(
-                        seerr_media_id is not None
-                        and seerr_media_id in requested_movie_ids
-                    ),
+                    has_jellyseerr_request=(seerr_media_id is not None and seerr_media_id in requested_movie_ids),
                 )
             )
         return LibraryMoviesResponse(movies=result)

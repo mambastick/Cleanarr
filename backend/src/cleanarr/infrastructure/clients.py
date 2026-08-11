@@ -71,9 +71,7 @@ class JsonServiceClient:
                 f"{self._system} request failed: {detail}",
             ) from exc
 
-        if response.status_code == 401 or (
-            response.status_code == 403 and treat_forbidden_as_authentication
-        ):
+        if response.status_code == 401 or (response.status_code == 403 and treat_forbidden_as_authentication):
             raise AuthenticationError(
                 self._system,
                 f"{self._system} rejected the configured credentials.",
@@ -828,8 +826,7 @@ class JellyfinServerClient(JsonServiceClient):
                 "found": False,
                 "configured": False,
                 "message": (
-                    "Webhook plugin not found. "
-                    "Install it via Jellyfin → Dashboard → Plugins → Catalog → Webhook."
+                    "Webhook plugin not found. Install it via Jellyfin → Dashboard → Plugins → Catalog → Webhook."
                 ),
             }
 
@@ -843,14 +840,10 @@ class JellyfinServerClient(JsonServiceClient):
         # Remove all previous CleanArr entries and leftover entries with no name
         # and no URI (artifacts of earlier incorrect configuration attempts).
         generics = [
-            g for g in generics
-            if g.get("WebhookName") != "CleanArr"
-            and (g.get("WebhookName") or g.get("WebhookUri"))
+            g for g in generics if g.get("WebhookName") != "CleanArr" and (g.get("WebhookName") or g.get("WebhookUri"))
         ]
 
-        headers: list[dict[str, str]] = (
-            [{"Key": "X-Webhook-Token", "Value": webhook_token}] if webhook_token else []
-        )
+        headers: list[dict[str, str]] = [{"Key": "X-Webhook-Token", "Value": webhook_token}] if webhook_token else []
         template_b64 = base64.b64encode(template.encode()).decode()
         our_entry: dict[str, Any] = {
             "WebhookName": "CleanArr",
@@ -937,7 +930,4 @@ class NullDownloaderClient:
         *,
         delete_files: bool,
     ) -> Sequence[DownloaderRemovalResult]:
-        return [
-            DownloaderRemovalResult(hash_value=hash_value.upper(), existed=False)
-            for hash_value in hashes
-        ]
+        return [DownloaderRemovalResult(hash_value=hash_value.upper(), existed=False) for hash_value in hashes]

@@ -1519,7 +1519,7 @@ function CleanArrApp() {
         deleteJobsPollFailed.current = true
       }
     }
-  }, [fetchJson, loadDashboard, loadLibrary, loadLibraryMovies])
+  }, [fetchJson, loadDashboard, loadLibrary, loadLibraryMovies, uiText.backgroundRefreshFailed])
 
   const executeDelete = useCallback(async () => {
     if (!deleteTarget) return
@@ -1556,7 +1556,7 @@ function CleanArrApp() {
     } finally {
       setIsStartingDelete(false)
     }
-  }, [deleteTarget, fetchJson])
+  }, [deleteTarget, fetchJson, uiText.deletionStarted])
 
   const dismissDeleteJob = useCallback(
     async (jobId: string) => {

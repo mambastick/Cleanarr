@@ -5,6 +5,8 @@ from __future__ import annotations
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from cleanarr.domain.config import SSOAuthMode
+
 
 class Settings(BaseSettings):
     """Runtime configuration."""
@@ -20,7 +22,7 @@ class Settings(BaseSettings):
     http_timeout_seconds: float = Field(default=15.0, alias="HTTP_TIMEOUT_SECONDS")
     jellyfin_language: str = Field(default="en", alias="JELLYFIN_LANGUAGE")
     ui_language: str = Field(default="en", alias="UI_LANGUAGE")
-    sso_mode: str = Field(default="password_only", alias="SSO_MODE")
+    sso_mode: SSOAuthMode = Field(default=SSOAuthMode.PASSWORD_ONLY, alias="SSO_MODE")
     sso_enabled: bool = Field(default=False, alias="SSO_ENABLED")
     sso_issuer_url: str | None = Field(default=None, alias="SSO_ISSUER_URL")
     sso_client_id: str | None = Field(default=None, alias="SSO_CLIENT_ID")

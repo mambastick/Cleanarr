@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass
-from typing import TypeVar
+from typing import Protocol, TypeVar
 
 from cleanarr.domain.config import (
     BaseServiceConfig,
@@ -25,13 +25,26 @@ from cleanarr.infrastructure.clients import (
     RadarrClient,
     SonarrClient,
 )
-from cleanarr.infrastructure.config_store import FileConfigStore
 from cleanarr.infrastructure.settings import Settings
 
 AnyServiceConfig = (
-    RadarrServiceConfig | SonarrServiceConfig | JellyseerrServiceConfig | QbittorrentServiceConfig | JellyfinServiceConfig
+    RadarrServiceConfig
+    | SonarrServiceConfig
+    | JellyseerrServiceConfig
+    | QbittorrentServiceConfig
+    | JellyfinServiceConfig
 )
 TService = TypeVar("TService", bound=BaseServiceConfig)
+
+
+class RuntimeConfigStore(Protocol):
+    """Persistence contract shared by file-backed and SQLite stores."""
+
+    def load(self) -> RuntimeConfig | None:
+        """Load the current runtime configuration when one exists."""
+
+    def save(self, config: RuntimeConfig) -> None:
+        """Persist the current runtime configuration."""
 
 
 @dataclass(frozen=True)
@@ -45,7 +58,7 @@ class ConnectionTestResult:
 class RuntimeConfigurationService:
     """Own persisted runtime settings and service definitions."""
 
-    def __init__(self, *, store: FileConfigStore, settings: Settings) -> None:
+    def __init__(self, *, store: RuntimeConfigStore, settings: Settings) -> None:
         self._store = store
         self._config = self._normalize(
             self._store.load() or self._bootstrap_general_from_settings(settings),
@@ -121,28 +134,17 @@ class RuntimeConfigurationService:
             raise KeyError(service_id)
         if kind is ServiceKind.RADARR and isinstance(payload, RadarrServiceConfig):
             self._config = self._config.model_copy(
-                update={
-                    "radarr": [
-                        payload if service.id == service_id else service
-                        for service in self._config.radarr
-                    ]
-                }
+                update={"radarr": [payload if service.id == service_id else service for service in self._config.radarr]}
             )
         elif kind is ServiceKind.SONARR and isinstance(payload, SonarrServiceConfig):
             self._config = self._config.model_copy(
-                update={
-                    "sonarr": [
-                        payload if service.id == service_id else service
-                        for service in self._config.sonarr
-                    ]
-                }
+                update={"sonarr": [payload if service.id == service_id else service for service in self._config.sonarr]}
             )
         elif kind is ServiceKind.JELLYSEERR and isinstance(payload, JellyseerrServiceConfig):
             self._config = self._config.model_copy(
                 update={
                     "jellyseerr": [
-                        payload if service.id == service_id else service
-                        for service in self._config.jellyseerr
+                        payload if service.id == service_id else service for service in self._config.jellyseerr
                     ]
                 }
             )
@@ -150,18 +152,14 @@ class RuntimeConfigurationService:
             self._config = self._config.model_copy(
                 update={
                     "downloaders": [
-                        payload if service.id == service_id else service
-                        for service in self._config.downloaders
+                        payload if service.id == service_id else service for service in self._config.downloaders
                     ]
                 }
             )
         elif kind is ServiceKind.JELLYFIN and isinstance(payload, JellyfinServiceConfig):
             self._config = self._config.model_copy(
                 update={
-                    "jellyfin": [
-                        payload if service.id == service_id else service
-                        for service in self._config.jellyfin
-                    ]
+                    "jellyfin": [payload if service.id == service_id else service for service in self._config.jellyfin]
                 }
             )
         else:

@@ -53,6 +53,7 @@ class FakeSonarrClient:
     episodes_by_series: dict[int, list[SonarrEpisode]]
     episode_files_by_series: dict[int, list[SonarrEpisodeFile]]
     unmonitored_episode_ids: list[int] = field(default_factory=list)
+    unmonitored_seasons: list[tuple[int, int]] = field(default_factory=list)
     deleted_episode_file_ids: list[int] = field(default_factory=list)
     deleted_series_ids: list[int] = field(default_factory=list)
 
@@ -83,6 +84,9 @@ class FakeSonarrClient:
                 )
                 for episode in episodes
             ]
+
+    async def unmonitor_season(self, series_id: int, season_number: int) -> None:
+        self.unmonitored_seasons.append((series_id, season_number))
 
     async def delete_episode_file(self, episode_file_id: int) -> None:
         self.deleted_episode_file_ids.append(episode_file_id)
