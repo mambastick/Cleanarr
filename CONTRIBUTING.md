@@ -1,11 +1,13 @@
 # Contributing to CleanArr
 
+[English](CONTRIBUTING.md) · [Русский](CONTRIBUTING_RU.md)
+
 Thank you for your interest in contributing! This document covers how to get started.
 
 ## Prerequisites
 
 - Python 3.12+
-- Node.js 20+ and pnpm
+- Node.js 24+ and pnpm 10
 - Docker (for building the image)
 - A running instance of at least one supported service (Jellyfin, Radarr, Sonarr, etc.) for integration testing
 
@@ -70,3 +72,7 @@ Open a [GitHub Issue](../../issues/new?template=feature_request.md) describing t
 - **TypeScript/TSX**: formatted with Prettier (if configured), type-checked with `tsc --noEmit`
 
 Please make sure `tsc --noEmit` passes before opening a PR.
+
+## Releases
+
+Every release must include Russian and English notes. Native `.deb` and `.rpm` packages are built for `amd64` and `arm64` from the same tag as the container image. Follow [the release guide](docs/RELEASING.md).

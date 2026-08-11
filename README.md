@@ -3,12 +3,17 @@
 </p>
 
 <p align="center">
+  <strong>English</strong> · <a href="README_RU.md">Русский</a>
+</p>
+
+<p align="center">
   <strong>Automatic cascade cleanup for your self-hosted media stack.</strong><br/>
   CleanArr listens for Jellyfin <code>ItemDeleted</code> webhooks and cascades deletion to Radarr, Sonarr, Jellyseerr, and qBittorrent — automatically, safely, and without touching files it doesn't own.
 </p>
 
 <p align="center">
   <a href="#quick-start"><strong>Quick start</strong></a> ·
+  <a href="#native-linux-packages"><strong>Linux packages</strong></a> ·
   <a href="#screenshots"><strong>Screenshots</strong></a> ·
   <a href="#how-it-works"><strong>How it works</strong></a> ·
   <a href="#configuration"><strong>Configuration</strong></a> ·
@@ -20,6 +25,7 @@
   <img alt="React 19" src="https://img.shields.io/badge/react-19-61DAFB?logo=react&logoColor=white"/>
   <img alt="License MIT" src="https://img.shields.io/github/license/mambastick/Cleanarr"/>
   <img alt="Docker" src="https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white"/>
+  <img alt="Linux packages" src="https://img.shields.io/badge/Linux-DEB%20%7C%20RPM-FCC624?logo=linux&logoColor=black"/>
 </p>
 
 ---
@@ -93,6 +99,7 @@ Pack torrents, shared files, and anything that can't be safely attributed are al
 - **Activity log** — every processed event is stored with full action breakdown; searchable by title, system, action, or status
 - **Guided setup wizard** — first-run wizard walks you through connecting each service step by step
 - **Multi-profile** — save multiple service definitions per type, pick one as the active runtime target
+- **Local and SSO authentication** — local password login, OpenID Connect SSO, or SSO-only mode
 - **Dark / light mode** — follows system preference
 
 ---
@@ -122,6 +129,22 @@ docker run -d \
   ghcr.io/mambastick/cleanarr:latest
 ```
 
+### Native Linux packages
+
+Every release provides `.deb` and `.rpm` packages for `amd64` and `arm64`. They install CleanArr under `/opt/cleanarr`, create a dedicated system user, and provide a hardened systemd service.
+
+```bash
+# Debian / Ubuntu
+sudo apt install ./cleanarr_<version>_amd64.deb
+
+# Fedora / RHEL-compatible distributions
+sudo dnf install ./cleanarr-<version>-1.x86_64.rpm
+
+sudo systemctl enable --now cleanarr
+```
+
+The default configuration is stored in `/etc/cleanarr/cleanarr.env`; application data is stored in `/var/lib/cleanarr`. Packages require systemd and Python 3.12. See the complete [native package guide](docs/LINUX_PACKAGES.md), including upgrade, removal, backup, and checksum instructions.
+
 ### Kubernetes
 
 ```bash
@@ -148,8 +171,18 @@ All settings can be changed at runtime from the **Settings** tab. Environment va
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `HTTP_TIMEOUT_SECONDS` | `15` | Timeout for calls to downstream services |
 | `DB_PATH` | `/config/cleanarr.db` | SQLite database path — must be on a persistent volume |
+| `CONFIG_STATE_PATH` | `/config/runtime-config.json` | Legacy runtime-config migration path |
 | `ADMIN_SHARED_TOKEN` | — | Optional static token that bypasses session auth (useful for automation) |
 | `WEBHOOK_SHARED_TOKEN` | auto-generated | Shared secret verified on every inbound webhook. Auto-generated on first start; rotate from Settings → General |
+| `UI_LANGUAGE` | `en` | Initial UI language: `en` or `ru` |
+| `JELLYFIN_LANGUAGE` | `en` | Preferred metadata language for Jellyfin integration |
+| `SSO_MODE` | `password_only` | Authentication mode: `password_only`, `both`, or `sso_only` |
+| `SSO_ENABLED` | `false` | Enables the OpenID Connect integration |
+| `SSO_ISSUER_URL` | — | OpenID Connect issuer URL |
+| `SSO_CLIENT_ID` | — | OpenID Connect client ID |
+| `SSO_CLIENT_SECRET` | — | OpenID Connect client secret |
+| `SSO_REDIRECT_URI` | — | Callback URL, usually `https://cleanarr.example/api/auth/sso/callback` |
+| `SSO_SCOPES` | `openid profile email` | OpenID Connect scopes |
 
 > **Important:** `DB_PATH` must point to a persistent volume. Without it, all service configurations and activity history are lost on restart.
 
@@ -233,6 +266,8 @@ The easiest way is to use **Auto-configure** in the Jellyfin service editor (cli
 | `POST` | `/api/config/general` | session | Update general settings |
 | `POST` | `/api/config/jellyfin/setup-webhook` | session | Auto-configure the Jellyfin Webhook plugin |
 | `POST` | `/api/auth/login` | — | Admin login |
+| `GET` | `/api/auth/status` | — | Current authentication capabilities and session state |
+| `GET` | `/api/auth/sso/login` | — | Start the OpenID Connect login flow |
 | `GET` | `/health/live` | none | Liveness probe |
 | `GET` | `/health/ready` | none | Readiness probe |
 
@@ -254,7 +289,10 @@ cleanarr/
 │   ├── Dockerfile              # Multi-stage build (node:24 → python:3.12-slim)
 │   ├── docker-compose.yml
 │   └── k8s/                    # Kubernetes manifests
+├── packaging/                  # DEB/RPM metadata, systemd unit, build scripts
 └── docs/
+    ├── LINUX_PACKAGES.md       # Native Linux package guide
+    ├── RELEASING.md            # Bilingual release policy
     └── screenshots/
 ```
 
@@ -302,6 +340,8 @@ pnpm dev
 cd backend && pytest
 cd frontend && pnpm build   # also runs tsc
 ```
+
+Release notes are maintained in both Russian and English. See [Release process](docs/RELEASING.md).
 
 ---
 
