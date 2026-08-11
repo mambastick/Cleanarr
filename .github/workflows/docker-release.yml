@@ -22,6 +22,12 @@ env:
   NFPM_VERSION: v2.47.0
 
 jobs:
+  quality-gate:
+    name: Required quality gates
+    uses: ./.github/workflows/quality.yml
+    permissions:
+      contents: read
+
   validate-release:
     name: Validate release metadata
     runs-on: ubuntu-24.04
@@ -66,7 +72,9 @@ jobs:
           echo "package-version=${version}" >> "${GITHUB_OUTPUT}"
 
   build-and-push:
-    needs: validate-release
+    needs:
+      - quality-gate
+      - validate-release
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     permissions:
@@ -114,7 +122,9 @@ jobs:
 
   native-packages:
     name: Native packages (${{ matrix.arch }})
-    needs: validate-release
+    needs:
+      - quality-gate
+      - validate-release
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read

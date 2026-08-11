@@ -1,0 +1,149 @@
+name: Quality gates
+
+on:
+  workflow_call:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: python -m pip install --disable-pip-version-check --editable '.[dev]'
+
+      - name: Check formatting
+        working-directory: backend
+        run: ruff format --check src tests
+
+      - name: Lint
+        working-directory: backend
+        run: ruff check src tests
+
+      - name: Type-check
+        working-directory: backend
+        run: mypy src
+
+      - name: Test
+        working-directory: backend
+        run: pytest -q
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        working-directory: frontend
+        run: pnpm lint
+
+      - name: Build
+        working-directory: frontend
+        run: pnpm build
+
+  container-smoke:
+    name: Container smoke
+    needs:
+      - backend
+      - frontend
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build --file deploy/Dockerfile --tag cleanarr:quality .
+
+      - name: Test installed image
+        run: sh scripts/ci/smoke-container.sh cleanarr:quality
+
+  package-smoke:
+    name: Package smoke
+    needs:
+      - backend
+      - frontend
+    runs-on: ubuntu-24.04
+    env:
+      NFPM_VERSION: v2.47.0
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.4"
+          cache: false
+
+      - name: Install nFPM
+        run: go install "github.com/goreleaser/nfpm/v2/cmd/nfpm@${NFPM_VERSION}"
+
+      - name: Build packages
+        shell: bash
+        run: |
+          version=$(python -c 'import pathlib,tomllib; print(tomllib.loads(pathlib.Path("backend/pyproject.toml").read_text())["project"]["version"])')
+          bash packaging/build-linux-packages.sh "$version" amd64 dist
+          echo "PACKAGE_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Test installed packages
+        run: sh scripts/ci/smoke-packages.sh "$PACKAGE_VERSION" amd64 dist
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: cleanarr-quality-packages-amd64
+          path: dist/*
+          if-no-files-found: error
