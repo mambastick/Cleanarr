@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+export PYTHONPATH="/opt/cleanarr/lib${PYTHONPATH:+:${PYTHONPATH}}"
+exec /usr/bin/python3.12 -m uvicorn cleanarr.main:app "$@"

@@ -1,0 +1,84 @@
+name: cleanarr
+arch: "${PACKAGE_ARCH}"
+platform: linux
+version: "${PACKAGE_VERSION}"
+version_schema: semver
+release: 1
+section: utils
+priority: optional
+maintainer: CleanArr maintainers <neelov-eo@mambastick.ru>
+description: |-
+  Safe cascade cleanup for Jellyfin, Radarr, Sonarr, Jellyseerr, and qBittorrent.
+  Безопасная каскадная очистка Jellyfin, Radarr, Sonarr, Jellyseerr и qBittorrent.
+vendor: mambastick
+homepage: https://github.com/mambastick/Cleanarr
+license: MIT
+umask: 0o022
+
+contents:
+  - src: "${PACKAGE_ROOT}/opt/cleanarr/lib"
+    dst: /opt/cleanarr/lib
+    type: tree
+    expand: true
+  - src: packaging/cleanarr
+    dst: /usr/bin/cleanarr
+    file_info:
+      mode: 0755
+  - src: packaging/cleanarr.service
+    dst: /usr/lib/systemd/system/cleanarr.service
+    file_info:
+      mode: 0644
+  - src: packaging/cleanarr.env
+    dst: /etc/cleanarr/cleanarr.env
+    type: config|noreplace
+    file_info:
+      mode: 0640
+      owner: root
+      group: cleanarr
+  - src: LICENSE
+    dst: /usr/share/doc/cleanarr/LICENSE
+    file_info:
+      mode: 0644
+  - src: README.md
+    dst: /usr/share/doc/cleanarr/README.md
+    file_info:
+      mode: 0644
+  - src: README_RU.md
+    dst: /usr/share/doc/cleanarr/README_RU.md
+    file_info:
+      mode: 0644
+  - dst: /var/lib/cleanarr
+    type: dir
+    file_info:
+      mode: 0750
+      owner: cleanarr
+      group: cleanarr
+
+scripts:
+  preinstall: packaging/scripts/preinstall.sh
+  postinstall: packaging/scripts/postinstall.sh
+  preremove: packaging/scripts/preremove.sh
+  postremove: packaging/scripts/postremove.sh
+
+overrides:
+  deb:
+    depends:
+      - python3.12
+      - ca-certificates
+      - passwd
+      - systemd
+  rpm:
+    depends:
+      - python3.12
+      - ca-certificates
+      - shadow-utils
+      - systemd
+      - util-linux-user
+
+deb:
+  compression: xz
+
+rpm:
+  compression: xz
+  group: Applications/System
+  summary: CleanArr media cleanup service
