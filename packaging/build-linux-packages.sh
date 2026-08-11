@@ -59,9 +59,12 @@ mkdir -p \
 "$python_bin" -m venv "$package_root/build-venv"
 build_python="$package_root/build-venv/bin/python"
 
-pnpm --dir frontend install --frozen-lockfile
-pnpm --dir frontend exec tsc -b
-pnpm --dir frontend exec vite build --outDir "$package_root/frontend-static" --emptyOutDir
+(
+  cd frontend
+  pnpm install --frozen-lockfile
+  pnpm exec tsc -b
+  pnpm exec vite build --outDir "$package_root/frontend-static" --emptyOutDir
+)
 
 cp backend/pyproject.toml README.md "$package_root/build-source/"
 cp -a backend/src/. "$package_root/build-source/src/"
