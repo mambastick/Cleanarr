@@ -1,0 +1,189 @@
+# Roadmap CleanArr 1.0
+
+[English](ROADMAP.md) · [Русский](ROADMAP_RU.md)
+
+Этот документ — источник истины по границам и критериям выпуска CleanArr 1.0.
+Он фиксирует продуктовые решения, но не означает, что перечисленные пункты уже
+реализованы.
+
+## Определение продукта
+
+CleanArr 1.0 — стабильный и безопасный оркестратор удаления для цепочки:
+
+`Jellyfin -> Radarr/Sonarr -> Seerr -> основные torrent-клиенты`
+
+Версия 1.0 означает документированный контракт совместимости, безопасные
+обновления, устойчивую обработку и обязательные quality gates. Она не означает
+поддержку всех медиасерверов, Arr-приложений и протоколов загрузки.
+
+## Зафиксированный baseline
+
+Последняя проверка: **2026-08-11**, тег **v0.2.11**, коммит **ff51e29**.
+
+Уже реализовано:
+
+- сценарии удаления фильма, сериала, сезона и эпизода;
+- строгое сопоставление по TMDB/TVDB/IMDB/пути и консервативные проверки
+  раздач-паков и общих файлов;
+- dry-run по умолчанию, журнал действий, ручные фоновые задания и мониторинг
+  сервисов;
+- профили сервисов с одной активной целью каждого типа;
+- интеграции qBittorrent, Radarr, Sonarr, Jellyfin и Jellyseerr;
+- локальная аутентификация, режимы OpenID Connect, интерфейс на русском и
+  английском;
+- multi-arch контейнеры и пакеты DEB/RPM.
+
+Известные блокеры на момент этой фиксации:
+
+- полный backend suite красный: 39 тестов прошли, 12 упали — главным образом
+  из-за изоляции `/config` и одного незавершённого fake Sonarr;
+- Ruff показывает 8 ошибок, mypy — 27 ошибок, ESLint — 1 ошибку и 2
+  предупреждения; production build frontend проходит;
+- tag workflow собирает и публикует артефакты без полного набора quality gates;
+- ручные задания хранятся в памяти и не восстанавливаются после рестарта;
+- у runtime-конфигурации нет явной версии схемы и последовательности миграций;
+- частичное обновление запросов Seerr при удалении эпизодов не завершено;
+- OIDC claims декодируются, но не проходят полную проверку JWKS/подписи,
+  issuer, audience, expiry и nonce;
+- профили можно сохранять, но runtime выбирает только по одному активному
+  Radarr, Sonarr, Seerr, Jellyfin и downloader.
+
+Это датированный снимок. Перед использованием этих чисел в новой задаче, PR
+или решении о релизе проверки нужно повторить.
+
+## Обязательный scope 1.0
+
+### 1. Torrent-клиенты и маршрутизация
+
+Tier 1:
+
+| Клиент | Требование 1.0 |
+| --- | --- |
+| qBittorrent | Сохранить текущую поддержку, добавить явную матрицу API/версий и современную аутентификацию там, где она доступна |
+| Transmission | Поддержать проверенное старое поколение RPC и новое поколение JSON-RPC 2.0 |
+| Deluge | Поддержать аутентифицированный remote API и оба режима удаления |
+| rTorrent | Поддержать XML-RPC; ruTorrent считается интерфейсом, а не отдельным движком |
+
+Каждый Tier 1 adapter обязан покрывать:
+
+- health/authentication и определение версии;
+- поиск и удаление по BitTorrent v1, v2 и hybrid identifiers, когда их отдают
+  Arr и клиент;
+- удаление только раздачи либо раздачи вместе с локальными данными;
+- идемпотентную обработку уже отсутствующей раздачи;
+- таймауты, ошибки аутентификации, partial failure и retry;
+- общие пути, паки, cross-seed данные и несколько клиентов;
+- необязательную политику сидирования: удалить сразу, оставить раздачу или
+  отложить удаление до заданного ratio/time.
+
+Несколько Radarr/Sonarr/download-client должны работать одновременно. CleanArr
+должен направлять удаление в экземпляр и клиент, которым принадлежит объект, а
+не полагаться на одну default-конфигурацию.
+
+### 2. Полные сценарии удаления и Seerr
+
+- Завершить movie, series, season и episode flows, включая частичное обновление
+  запросов для диапазона эпизодов.
+- Использовать актуальное имя **Seerr**, сохранив чтение и миграцию старой
+  Jellyseerr-конфигурации.
+- Сохранять строгое сопоставление и показывать причину каждого пропуска.
+- Показывать точный preflight/preview: media entity, Arr instance, download
+  client, hash/path, downstream mutations и safety decision.
+- Сделать webhook и ручное удаление идемпотентными.
+- Сохранять частичный прогресс и безопасно продолжать/retry после ошибки
+  downstream-сервиса или рестарта процесса.
+- Сериализовать параллельную работу с одним media entity, torrent или path.
+
+### 3. Жизненный цикл данных и обновления
+
+- Ввести явные версии схемы БД и runtime-конфигурации.
+- Поддерживать последовательные протестированные forward migrations.
+- Проверять обновление с последнего стабильного 0.x на каждый release candidate
+  1.0.
+- Создавать или требовать проверенный backup перед разрушительной миграцией.
+- Документировать и тестировать rollback/restore для контейнеров и нативных
+  пакетов.
+- Добавить безопасный экспорт/импорт конфигурации с удалением секретов.
+- Персистентно хранить ручные задания и данные для их безопасного продолжения
+  или сверки после рестарта.
+
+### 4. Security baseline
+
+- Проверять OIDC ID token через metadata и JWKS: signature, algorithm, issuer,
+  audience, expiry, state и nonce; использовать PKCE, если его поддерживает
+  провайдер.
+- Разрешать доступ только явно настроенным users/groups/claims, а не каждому
+  пользователю, принятому IdP.
+- Добавить throttling входа и CSRF/Origin-защиту cookie-auth mutations.
+- Сохранять безопасные cookie при документированных reverse-proxy схемах.
+- Удалять credentials и tokens из логов, activity data, export и support bundle.
+- Добавить dependency/container scanning, SBOM и подписанные/provenanced
+  release artifacts.
+
+### 5. Quality gates и совместимость
+
+Обязательные проверки pull request:
+
+- полный backend pytest suite;
+- Ruff format/lint и strict mypy;
+- frontend type-check, ESLint и production build;
+- сборка Docker image и startup smoke test;
+- сборка DEB/RPM и installation smoke tests;
+- contract tests каждого Tier 1 download client;
+- сценарии всех item types, pack/shared/cross-seed safety, duplicate events,
+  partial failures, restart recovery и multi-instance routing.
+
+Перед 1.0 release candidate должен пройти end-to-end проверки на реальных
+поддерживаемых версиях Jellyfin, Radarr, Sonarr, Seerr и каждого Tier 1 клиента.
+Результат публикуется в compatibility matrix.
+
+### 6. Эксплуатация и поддержка
+
+- Структурированные error/action codes и correlation IDs всей цепочки удаления.
+- Prometheus-compatible метрики без media names и credentials в labels.
+- Безопасный support bundle: версия CleanArr, версии downstream-сервисов,
+  health summary, форма конфигурации и последние error codes.
+- Полная русская и английская документация: установка, обновление,
+  backup/restore, reverse proxy и SSO, каждый download client, safety model,
+  troubleshooting и release rollback.
+- Опубликованная политика совместимости и deprecation для серии 1.x.
+
+## Явные non-goals для 1.0
+
+Эти возможности могут появиться позже, но не блокируют 1.0:
+
+- Plex и Emby как источники событий удаления;
+- Lidarr, Readarr, Whisparr и другие Arr-приложения;
+- SABnzbd, NZBGet и другие Usenet-клиенты;
+- PostgreSQL, горизонтальное масштабирование и HA;
+- мобильные приложения, plugin marketplace и дополнительные языки UI.
+
+Перенос non-goal в обязательный scope 1.0 является отдельным продуктовым
+решением и должен явно менять этот roadmap.
+
+## Последовательность релизов
+
+| Версия | Результат этапа |
+| --- | --- |
+| 0.2.12 | Зелёные backend/frontend проверки и CI, блокирующий некорректный релиз |
+| 0.3.0 | Tier 1 torrent adapters и одновременная multi-instance маршрутизация |
+| 0.4.0 | Полные deletion/Seerr сценарии, idempotency, durable retry и safety tests |
+| 0.5.0 | Версионированные миграции, backup/restore, security baseline, метрики и support tooling |
+| 0.9.0 | Feature freeze, compatibility matrix, репетиция миграции и публичные release candidates |
+| 1.0.0 | Стабильный контракт после выполнения всех критериев ниже |
+
+Границы промежуточных версий могут меняться, но критерии 1.0 нельзя молча
+ослаблять.
+
+## Критерии выпуска 1.0
+
+- Все обязательные CI checks проходят из чистого checkout.
+- Каждый Tier 1 клиент и каждая заявленная версия dependency проходят contract
+  и end-to-end сценарии.
+- Обновление с v0.2.11/latest 0.x и rollback с release candidate 1.0 доказаны на
+  реальном backup с восстановлением данных.
+- Нет незакрытых data-loss defects, security-critical defects и P0/P1 blockers.
+- Хотя бы один release candidate проверен независимыми установками, вместе
+  покрывающими все Tier 1 клиенты и распространённые multi-instance схемы.
+- Документация, compatibility matrix, checksums, SBOM и подписанные release
+  artifacts опубликованы одновременно.

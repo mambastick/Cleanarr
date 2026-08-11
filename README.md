@@ -17,6 +17,7 @@
   <a href="#screenshots"><strong>Screenshots</strong></a> ·
   <a href="#how-it-works"><strong>How it works</strong></a> ·
   <a href="#configuration"><strong>Configuration</strong></a> ·
+  <a href="docs/ROADMAP.md"><strong>Roadmap</strong></a> ·
   <a href="CONTRIBUTING.md"><strong>Contributing</strong></a>
 </p>
 

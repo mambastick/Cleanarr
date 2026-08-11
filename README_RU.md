@@ -17,6 +17,7 @@
   <a href="#скриншоты"><strong>Скриншоты</strong></a> ·
   <a href="#как-это-работает"><strong>Как это работает</strong></a> ·
   <a href="#настройка"><strong>Настройка</strong></a> ·
+  <a href="docs/ROADMAP_RU.md"><strong>Roadmap</strong></a> ·
   <a href="CONTRIBUTING_RU.md"><strong>Участие в разработке</strong></a>
 </p>
 
