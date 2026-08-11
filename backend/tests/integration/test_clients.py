@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 import respx
 
-from cleanarr.domain import AuthenticationError, ExternalServiceError
+from cleanarr.domain import AuthenticationError, ExternalServiceError, JellyseerrRequest
 from cleanarr.infrastructure.clients import JellyseerrClient, QbittorrentClient, RadarrClient, SonarrClient
 
 
@@ -139,6 +139,53 @@ async def test_jellyseerr_client_parses_media_requests_and_issues() -> None:
     assert issues[0].problem_episode == 2
     assert media_route.calls[0].request.url.params["skip"] == "0"
     assert "page" not in media_route.calls[0].request.url.params
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyseerr_client_tolerates_null_tags() -> None:
+    respx.get("http://jellyseerr/api/v1/request").respond(
+        json={
+            "pageInfo": {"results": 1},
+            "results": [
+                {
+                    "id": 2,
+                    "type": "movie",
+                    "is4k": False,
+                    "serverId": 0,
+                    "profileId": 1,
+                    "rootFolder": "/data",
+                    "languageProfileId": None,
+                    "requestedBy": {"id": 1},
+                    "tags": None,
+                    "media": {"id": 1},
+                    "seasons": None,
+                }
+            ],
+        }
+    )
+
+    client = JellyseerrClient(base_url="http://jellyseerr/api/v1", api_key="key", timeout_seconds=5)
+    try:
+        requests = await client.list_requests()
+    finally:
+        await client.close()
+
+    assert requests == [
+        JellyseerrRequest(
+            id=2,
+            media_id=1,
+            media_type="movie",
+            season_numbers=(),
+            is_4k=False,
+            server_id=0,
+            profile_id=1,
+            root_folder="/data",
+            language_profile_id=None,
+            requested_by_id=1,
+            tags=(),
+        )
+    ]
 
 
 @pytest.mark.asyncio

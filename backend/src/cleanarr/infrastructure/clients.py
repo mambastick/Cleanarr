@@ -502,7 +502,7 @@ class JellyseerrClient(JsonServiceClient):
             page_info = payload.get("pageInfo", {})
             total_results = page_info.get("results", 0)
             for item in payload.get("results", []):
-                seasons = tuple(season["seasonNumber"] for season in item.get("seasons", []))
+                seasons = tuple(season["seasonNumber"] for season in (item.get("seasons") or []))
                 requested_by = item.get("requestedBy") or {}
                 results.append(
                     JellyseerrRequest(
@@ -516,7 +516,7 @@ class JellyseerrClient(JsonServiceClient):
                         root_folder=item.get("rootFolder"),
                         language_profile_id=item.get("languageProfileId"),
                         requested_by_id=requested_by.get("id"),
-                        tags=tuple(item.get("tags", [])),
+                        tags=tuple(item.get("tags") or []),
                     )
                 )
             skip += 100
