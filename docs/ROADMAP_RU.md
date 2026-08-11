@@ -51,6 +51,24 @@ CleanArr 1.0 — стабильный и безопасный оркестрат
 Это датированный снимок. Перед использованием этих чисел в новой задаче, PR
 или решении о релизе проверки нужно повторить.
 
+## Прогресс по этапам
+
+### v0.2.12 — завершён 2026-08-11
+
+- Восстановлен зелёный baseline: проходят 51 backend-тест, Ruff format/lint,
+  strict mypy, ESLint и production build frontend.
+- Добавлены обязательные проверки PR и `main`: backend, frontend, startup smoke
+  контейнера и smoke-тесты установленных DEB/RPM.
+- Tag release workflow теперь ждёт полный quality gate и только после него
+  публикует пакеты, checksums и multi-architecture контейнер.
+- Проверенный [релиз v0.2.12](https://github.com/mambastick/Cleanarr/releases/tag/v0.2.12)
+  опубликован из коммита `9782504`; его [release workflow](https://github.com/mambastick/Cleanarr/actions/runs/31510458986)
+  успешно завершён для `linux/amd64` и `linux/arm64`.
+
+Следующий активный этап — **v0.3.0**: контракт Tier 1 torrent adapters,
+поддержка Transmission/Deluge/rTorrent и одновременная multi-instance
+маршрутизация.
+
 ## Обязательный scope 1.0
 
 ### 1. Torrent-клиенты и маршрутизация

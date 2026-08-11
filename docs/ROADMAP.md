@@ -50,6 +50,23 @@ Known release blockers at this snapshot:
 This is a dated snapshot. Re-run the checks before using these counts in a new
 issue, pull request, or release decision.
 
+## Milestone progress
+
+### v0.2.12 — completed 2026-08-11
+
+- Restored a green baseline: 51 backend tests, Ruff format/lint, strict mypy,
+  ESLint, and the frontend production build pass.
+- Added required pull-request and `main` checks for backend, frontend, the
+  container startup smoke test, and installed DEB/RPM smoke tests.
+- Made the tag release workflow wait for the complete quality gate before it
+  can publish packages, checksums, and the multi-architecture container.
+- Published the verified [v0.2.12 release](https://github.com/mambastick/Cleanarr/releases/tag/v0.2.12)
+  from commit `9782504`; its [release workflow](https://github.com/mambastick/Cleanarr/actions/runs/31510458986)
+  completed successfully for `linux/amd64` and `linux/arm64`.
+
+The next active milestone is **v0.3.0**: the Tier 1 torrent adapter contract,
+Transmission/Deluge/rTorrent support, and simultaneous multi-instance routing.
+
 ## Required 1.0 scope
 
 ### 1. Download clients and routing
