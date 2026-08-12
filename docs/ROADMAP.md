@@ -139,7 +139,7 @@ issue, pull request, or release decision.
   completed successfully with checksums, amd64/arm64 DEB and RPM assets, and a
   public GHCR manifest for `linux/amd64` and `linux/arm64`.
 
-### v0.5.0 — in progress
+### v0.5.0 — release candidate
 
 - Persisted runtime configuration now has an ordered schema chain from the
   unversioned v0.4 format through versions 1 and 2. Upgrade tests preserve the
@@ -161,10 +161,29 @@ issue, pull request, or release decision.
   registration/settings/logout walkthrough, container smoke, and installed
   DEB/RPM smoke tests. Its [quality run](https://github.com/mambastick/Cleanarr/actions/runs/31563074725)
   completed all required jobs successfully.
+- Added a versioned, credential-free configuration export and fail-safe merge
+  import. Import preserves local authentication and existing credentials,
+  disables every imported profile, keeps omitted profiles, strips URL-carried
+  credentials, and forces global dry-run.
+- Added authenticated Prometheus metrics with bounded non-identifying labels,
+  a redacted support bundle with validated dependency versions, and correlation
+  IDs shared by processing results and structured logs. Central redaction now
+  covers logs, serialized activity actions, nested diagnostic details, and
+  persisted manual-job errors.
+- Required CI now audits resolved Python runtime dependencies, scans source,
+  lockfiles, deployment configuration, committed secrets, and the installed
+  container, and blocks fixable high/critical findings. The release workflow
+  generates SPDX JSON SBOMs and signed GitHub build, SBOM, and artifact
+  attestations bound to image and file digests.
+- Implementation commit `1db8a46` is verified by 117 backend tests, Ruff
+  format/lint, strict mypy, frontend lint/build and dependency audit, Trivy
+  source/container scans, actionlint, container smoke, and installed DEB/RPM
+  smoke tests. Its [quality run](https://github.com/mambastick/Cleanarr/actions/runs/31565040954)
+  completed all required jobs successfully.
 
-The remaining v0.5 work is redacted configuration export/import and support
-bundles, privacy-safe metrics, credential-redaction coverage, dependency and
-container scanning, SBOM generation, and signed/provenanced release artifacts.
+The v0.5 implementation gates are complete. Publication and verification of the
+tagged multi-architecture artifacts, SBOMs, checksums, and attestations remain
+before this milestone can be marked completed.
 
 ## Required 1.0 scope
 

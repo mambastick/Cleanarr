@@ -137,7 +137,7 @@ CleanArr 1.0 — стабильный и безопасный оркестрат
   успешно завершён с checksums, DEB/RPM для amd64 и arm64 и публичным GHCR-
   манифестом для `linux/amd64` и `linux/arm64`.
 
-### v0.5.0 — в работе
+### v0.5.0 — release candidate
 
 - Persisted runtime config получил упорядоченную цепочку схем от
   неверсионированного формата v0.4 через версии 1 и 2. Upgrade-тесты сохраняют
@@ -160,10 +160,31 @@ CleanArr 1.0 — стабильный и безопасный оркестрат
   настроек и logout, container smoke и установочными smoke-тестами DEB/RPM. Его
   [quality run](https://github.com/mambastick/Cleanarr/actions/runs/31563074725)
   успешно завершил все обязательные jobs.
+- Добавлены версионированный export конфигурации без credentials и fail-safe
+  merge import. Import сохраняет локальную аутентификацию и существующие
+  credentials, отключает каждый импортированный профиль, не удаляет
+  отсутствующие в документе профили, вырезает credentials из URL и принудительно
+  включает глобальный dry-run.
+- Добавлены аутентифицированные Prometheus-метрики с ограниченными
+  неидентифицирующими labels, редактированный support bundle с проверенными
+  версиями dependencies и correlation ID для результатов обработки и
+  структурированных логов. Общий redaction теперь покрывает логи,
+  сериализованные activity actions, вложенные diagnostic details и сохранённые
+  ошибки ручных заданий.
+- Обязательный CI теперь проверяет resolved Python runtime dependencies,
+  исходники, lockfiles, deployment configuration, committed secrets и
+  установленный контейнер и блокирует исправимые high/critical findings.
+  Release workflow создаёт SPDX JSON SBOM и подписанные GitHub build, SBOM и
+  artifact attestations, привязанные к digest образа и файлов.
+- Коммит реализации `1db8a46` проверен 117 backend-тестами, Ruff format/lint,
+  strict mypy, frontend lint/build и dependency audit, Trivy-сканами исходников
+  и контейнера, actionlint, container smoke и установочными smoke-тестами
+  DEB/RPM. Его [quality run](https://github.com/mambastick/Cleanarr/actions/runs/31565040954)
+  успешно завершил все обязательные jobs.
 
-В v0.5 остаются редактированные export/import конфигурации и support bundle,
-privacy-safe metrics, покрытие редактирования credentials, dependency/container
-scanning, генерация SBOM и подписанные release artifacts с provenance.
+Implementation gates v0.5 завершены. До отметки milestone как completed остаётся
+опубликовать и проверить tagged multi-architecture artifacts, SBOM, checksums и
+attestations.
 
 ## Обязательный scope 1.0
 
