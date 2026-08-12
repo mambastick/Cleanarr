@@ -98,6 +98,11 @@ idempotent webhook handling, and durable retry scheduling.
   configuration. Existing `jellyseerr` SQLite/JSON profiles are rewritten
   without data loss; legacy environment variables and hidden configuration API
   routes remain accepted as compatibility aliases.
+- Commit `ff1bb1a` is verified by 78 backend tests, Ruff format/lint, strict
+  mypy, ESLint, the frontend production build, container/package smoke tests,
+  and a browser walkthrough of canonical Seerr profile creation. Its
+  [quality run](https://github.com/mambastick/Cleanarr/actions/runs/31556760557)
+  completed all required jobs successfully.
 - Remaining milestone work includes exact persisted preflight plans,
   duplicate-event suppression, serialized ownership locks, and durable
   retry/resume across process restarts.

@@ -97,6 +97,11 @@ CleanArr 1.0 — стабильный и безопасный оркестрат
   сохранённой конфигурации. Существующие SQLite/JSON-профили `jellyseerr`
   переписываются без потери данных; старые переменные окружения и скрытые
   маршруты configuration API остаются совместимыми псевдонимами.
+- Коммит `ff1bb1a` проверен 78 backend-тестами, Ruff format/lint, strict mypy,
+  ESLint, production build frontend, container/package smoke-тестами и
+  browser-проходом создания канонического профиля Seerr. Его
+  [quality run](https://github.com/mambastick/Cleanarr/actions/runs/31556760557)
+  успешно завершил все обязательные jobs.
 - В этапе остаются точные персистентные preflight plans, подавление duplicate
   events, ownership locks и durable retry/resume после рестарта процесса.
 
