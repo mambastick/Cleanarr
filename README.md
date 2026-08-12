@@ -8,7 +8,7 @@
 
 <p align="center">
   <strong>Automatic cascade cleanup for your self-hosted media stack.</strong><br/>
-  CleanArr listens for Jellyfin <code>ItemDeleted</code> webhooks and cascades deletion to Radarr, Sonarr, Jellyseerr, and qBittorrent — automatically, safely, and without touching files it doesn't own.
+  CleanArr listens for Jellyfin <code>ItemDeleted</code> webhooks and cascades deletion to Radarr, Sonarr, Seerr, and supported torrent clients — automatically, safely, and without touching files it doesn't own.
 </p>
 
 <p align="center">
@@ -17,6 +17,7 @@
   <a href="#screenshots"><strong>Screenshots</strong></a> ·
   <a href="#how-it-works"><strong>How it works</strong></a> ·
   <a href="#configuration"><strong>Configuration</strong></a> ·
+  <a href="docs/TORRENT_CLIENTS.md"><strong>Torrent clients</strong></a> ·
   <a href="docs/ROADMAP.md"><strong>Roadmap</strong></a> ·
   <a href="CONTRIBUTING.md"><strong>Contributing</strong></a>
 </p>
@@ -33,11 +34,11 @@
 
 ## What is CleanArr?
 
-When you delete something in Jellyfin, you usually have to manually clean up the same item in Radarr, Sonarr, Jellyseerr, and qBittorrent. CleanArr automates this entire chain:
+When you delete something in Jellyfin, you usually have to manually clean up the same item in Radarr, Sonarr, Seerr, and your torrent clients. CleanArr automates this entire chain:
 
 1. Jellyfin fires an `ItemDeleted` webhook
 2. CleanArr resolves the item in Radarr/Sonarr using strict ID matching (TMDB → IMDB → path)
-3. Torrent hashes are deleted from qBittorrent — only if they are exclusively owned by that item
+3. Torrent hashes are routed to qBittorrent, Transmission, Deluge, and rTorrent — only when Arr history proves ownership
 4. The entry is removed from Radarr/Sonarr
 5. Matching requests, issues, and media records are cleaned up in Jellyseerr
 
@@ -90,7 +91,8 @@ Pack torrents, shared files, and anything that can't be safely attributed are al
 
 ## Features
 
-- **Cascade deletion** — one webhook triggers a full cleanup chain: Jellyfin → Radarr/Sonarr → qBittorrent → Jellyseerr
+- **Cascade deletion** — one webhook triggers a full cleanup chain: Jellyfin → Radarr/Sonarr → torrent clients → Seerr
+- **Multi-instance routing** — every enabled Radarr, Sonarr, and torrent-client profile participates without numeric ID collisions
 - **Strict ID matching** — resolves items by TMDB/TVDB/IMDB ID and path; no fuzzy guessing
 - **Conservative guardrails** — pack torrents and files shared between items are never deleted; CleanArr logs the reason and skips
 - **Dry-run mode** — enabled by default; shows exactly what *would* happen without touching anything
@@ -228,7 +230,7 @@ The easiest way is to use **Auto-configure** in the Jellyfin service editor (cli
 
 1. Resolve in Radarr by `tmdb_id → imdb_id → path` (strict, no fuzzy matching)
 2. Collect torrent hashes from Radarr download history
-3. Delete safe hashes in qBittorrent (`deleteFiles=true`)
+3. Delete safe hashes in every owning torrent client, optionally together with local data
 4. Delete the Radarr entry
 5. Delete matching Jellyseerr requests, issues, and media records
 

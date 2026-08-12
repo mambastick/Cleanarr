@@ -7,16 +7,13 @@ import logging
 from dataclasses import dataclass
 
 from cleanarr.application.authentication import AuthenticationService
-from cleanarr.application.configuration import RuntimeConfigurationService
+from cleanarr.application.configuration import RuntimeConfigurationService, build_downloader_client
 from cleanarr.application.service import CascadeDeletionService
 from cleanarr.application.strategies import DeletionStrategyFactory
 from cleanarr.domain.config import (
     JellyfinServiceConfig,
     JellyseerrServiceConfig,
-    QbittorrentServiceConfig,
-    RadarrServiceConfig,
     RuntimeConfig,
-    SonarrServiceConfig,
 )
 from cleanarr.infrastructure.auth import InMemorySessionStore, PasswordHasher
 from cleanarr.infrastructure.clients import (
@@ -27,12 +24,16 @@ from cleanarr.infrastructure.clients import (
     NullJellyseerrClient,
     NullRadarrClient,
     NullSonarrClient,
-    QbittorrentClient,
     RadarrClient,
     SonarrClient,
 )
 from cleanarr.infrastructure.config_store import SqliteConfigStore
+from cleanarr.infrastructure.downloaders import (
+    DownloaderTarget,
+    MultiDownloaderClient,
+)
 from cleanarr.infrastructure.logging import configure_logging
+from cleanarr.infrastructure.routers import MultiRadarrClient, MultiSonarrClient, RadarrTarget, SonarrTarget
 from cleanarr.infrastructure.settings import Settings
 
 
@@ -43,10 +44,10 @@ class ServiceRuntime:
     config: RuntimeConfig
     service: CascadeDeletionService
     strategy_factory: DeletionStrategyFactory
-    radarr: RadarrClient | NullRadarrClient
-    sonarr: SonarrClient | NullSonarrClient
+    radarr: RoutedRadarrClient
+    sonarr: RoutedSonarrClient
     jellyseerr: JellyseerrClient | NullJellyseerrClient
-    downloader: QbittorrentClient | NullDownloaderClient
+    downloader: DownloaderClient
     jellyfin_server: JellyfinServerClient | NullJellyfinServerClient
 
     async def close(self) -> None:
@@ -111,11 +112,11 @@ class ServiceContainer:
         return self._runtime.service
 
     @property
-    def radarr(self) -> RadarrClient | NullRadarrClient:
+    def radarr(self) -> RoutedRadarrClient:
         return self._runtime.radarr
 
     @property
-    def sonarr(self) -> SonarrClient | NullSonarrClient:
+    def sonarr(self) -> RoutedSonarrClient:
         return self._runtime.sonarr
 
     @property
@@ -123,7 +124,7 @@ class ServiceContainer:
         return self._runtime.jellyseerr
 
     @property
-    def downloader(self) -> QbittorrentClient | NullDownloaderClient:
+    def downloader(self) -> DownloaderClient:
         return self._runtime.downloader
 
     @property
@@ -166,26 +167,44 @@ class ServiceContainer:
         general = config.general
         configure_logging(general.log_level)
 
-        active_radarr = ServiceContainer._pick_active_radarr(config.radarr)
-        active_sonarr = ServiceContainer._pick_active_sonarr(config.sonarr)
+        active_radarr = [service for service in config.radarr if service.enabled]
+        active_sonarr = [service for service in config.sonarr if service.enabled]
         active_jellyseerr = ServiceContainer._pick_active_jellyseerr(config.jellyseerr)
-        active_downloader = ServiceContainer._pick_active_downloader(config.downloaders)
+        active_downloaders = [service for service in config.downloaders if service.enabled]
         active_jellyfin = ServiceContainer._pick_active_jellyfin(config.jellyfin)
 
-        radarr = (
-            RadarrClient(
-                base_url=active_radarr.url,
-                api_key=active_radarr.api_key,
-                timeout_seconds=general.http_timeout_seconds,
+        radarr: RoutedRadarrClient = (
+            MultiRadarrClient(
+                [
+                    RadarrTarget(
+                        id=service.id,
+                        name=service.name,
+                        client=RadarrClient(
+                            base_url=service.url,
+                            api_key=service.api_key,
+                            timeout_seconds=general.http_timeout_seconds,
+                        ),
+                    )
+                    for service in active_radarr
+                ]
             )
             if active_radarr
             else NullRadarrClient()
         )
-        sonarr = (
-            SonarrClient(
-                base_url=active_sonarr.url,
-                api_key=active_sonarr.api_key,
-                timeout_seconds=general.http_timeout_seconds,
+        sonarr: RoutedSonarrClient = (
+            MultiSonarrClient(
+                [
+                    SonarrTarget(
+                        id=service.id,
+                        name=service.name,
+                        client=SonarrClient(
+                            base_url=service.url,
+                            api_key=service.api_key,
+                            timeout_seconds=general.http_timeout_seconds,
+                        ),
+                    )
+                    for service in active_sonarr
+                ]
             )
             if active_sonarr
             else NullSonarrClient()
@@ -199,14 +218,22 @@ class ServiceContainer:
             if active_jellyseerr
             else NullJellyseerrClient()
         )
-        downloader = (
-            QbittorrentClient(
-                base_url=active_downloader.url,
-                username=active_downloader.username,
-                password=active_downloader.password,
-                timeout_seconds=general.http_timeout_seconds,
+        downloader: DownloaderClient = (
+            MultiDownloaderClient(
+                [
+                    DownloaderTarget(
+                        id=service.id,
+                        name=service.name,
+                        kind=service.kind.value,
+                        client=build_downloader_client(
+                            service,
+                            timeout_seconds=general.http_timeout_seconds,
+                        ),
+                    )
+                    for service in active_downloaders
+                ]
             )
-            if active_downloader
+            if active_downloaders
             else NullDownloaderClient()
         )
         jellyfin_server = (
@@ -239,35 +266,9 @@ class ServiceContainer:
         )
 
     @staticmethod
-    def _pick_active_radarr(services: list[RadarrServiceConfig]) -> RadarrServiceConfig | None:
-        enabled = [service for service in services if service.enabled]
-        if not enabled:
-            return None
-        default = next((service for service in enabled if service.is_default), None)
-        return default or enabled[0]
-
-    @staticmethod
-    def _pick_active_sonarr(services: list[SonarrServiceConfig]) -> SonarrServiceConfig | None:
-        enabled = [service for service in services if service.enabled]
-        if not enabled:
-            return None
-        default = next((service for service in enabled if service.is_default), None)
-        return default or enabled[0]
-
-    @staticmethod
     def _pick_active_jellyseerr(
         services: list[JellyseerrServiceConfig],
     ) -> JellyseerrServiceConfig | None:
-        enabled = [service for service in services if service.enabled]
-        if not enabled:
-            return None
-        default = next((service for service in enabled if service.is_default), None)
-        return default or enabled[0]
-
-    @staticmethod
-    def _pick_active_downloader(
-        services: list[QbittorrentServiceConfig],
-    ) -> QbittorrentServiceConfig | None:
         enabled = [service for service in services if service.enabled]
         if not enabled:
             return None
@@ -283,3 +284,8 @@ class ServiceContainer:
             return None
         default = next((service for service in enabled if service.is_default), None)
         return default or enabled[0]
+
+
+DownloaderClient = MultiDownloaderClient | NullDownloaderClient
+RoutedRadarrClient = MultiRadarrClient | NullRadarrClient
+RoutedSonarrClient = MultiSonarrClient | NullSonarrClient

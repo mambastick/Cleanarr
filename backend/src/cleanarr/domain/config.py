@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Annotated, Literal
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
@@ -16,7 +17,18 @@ class ServiceKind(StrEnum):
     SONARR = "sonarr"
     JELLYSEERR = "jellyseerr"
     QBITTORRENT = "qbittorrent"
+    TRANSMISSION = "transmission"
+    DELUGE = "deluge"
+    RTORRENT = "rtorrent"
     JELLYFIN = "jellyfin"
+
+
+class TorrentRemovalPolicy(StrEnum):
+    """Policy applied before removing a torrent from a download client."""
+
+    IMMEDIATE = "immediate"
+    KEEP = "keep"
+    DEFER = "defer"
 
 
 class SSOAuthMode(StrEnum):
@@ -159,6 +171,24 @@ class BaseServiceConfig(BaseModel):
         return value.strip().rstrip("/")
 
 
+class BaseDownloaderServiceConfig(BaseServiceConfig):
+    """Shared torrent-removal policy for all supported download clients."""
+
+    seeding_policy: TorrentRemovalPolicy = TorrentRemovalPolicy.IMMEDIATE
+    min_seed_ratio: float | None = Field(default=None, ge=0)
+    min_seed_time_minutes: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_seeding_policy(self) -> BaseDownloaderServiceConfig:
+        if (
+            self.seeding_policy is TorrentRemovalPolicy.DEFER
+            and self.min_seed_ratio is None
+            and self.min_seed_time_minutes is None
+        ):
+            raise ValueError("Deferred torrent removal requires a minimum seed ratio or time.")
+        return self
+
+
 class RadarrServiceConfig(BaseServiceConfig):
     """Radarr integration settings."""
 
@@ -195,17 +225,62 @@ class JellyseerrServiceConfig(BaseServiceConfig):
         return _normalize_api_service_url(value, expected_suffix="/api/v1")
 
 
-class QbittorrentServiceConfig(BaseServiceConfig):
+class QbittorrentServiceConfig(BaseDownloaderServiceConfig):
     """qBittorrent integration settings."""
 
-    kind: ServiceKind = ServiceKind.QBITTORRENT
-    username: str
-    password: str
+    kind: Literal[ServiceKind.QBITTORRENT] = ServiceKind.QBITTORRENT
+    username: str = ""
+    password: str = ""
+    api_key: str | None = None
 
     @field_validator("url", mode="before")
     @classmethod
     def normalize_qbittorrent_url(cls, value: str) -> str:
         return _normalize_qbittorrent_url(value)
+
+
+class TransmissionServiceConfig(BaseDownloaderServiceConfig):
+    """Transmission RPC integration settings."""
+
+    kind: Literal[ServiceKind.TRANSMISSION] = ServiceKind.TRANSMISSION
+    username: str = ""
+    password: str = ""
+
+    @field_validator("url", mode="before")
+    @classmethod
+    def normalize_transmission_url(cls, value: str) -> str:
+        return _normalize_service_path(value, default_path="/transmission/rpc")
+
+
+class DelugeServiceConfig(BaseDownloaderServiceConfig):
+    """Deluge Web JSON-RPC integration settings."""
+
+    kind: Literal[ServiceKind.DELUGE] = ServiceKind.DELUGE
+    password: str
+
+    @field_validator("url", mode="before")
+    @classmethod
+    def normalize_deluge_url(cls, value: str) -> str:
+        return _normalize_service_path(value, default_path="/json")
+
+
+class RTorrentServiceConfig(BaseDownloaderServiceConfig):
+    """rTorrent HTTP XML-RPC integration settings."""
+
+    kind: Literal[ServiceKind.RTORRENT] = ServiceKind.RTORRENT
+    username: str = ""
+    password: str = ""
+
+    @field_validator("url", mode="before")
+    @classmethod
+    def normalize_rtorrent_url(cls, value: str) -> str:
+        return _normalize_service_path(value, default_path="/RPC2")
+
+
+DownloaderServiceConfig = Annotated[
+    QbittorrentServiceConfig | TransmissionServiceConfig | DelugeServiceConfig | RTorrentServiceConfig,
+    Field(discriminator="kind"),
+]
 
 
 class JellyfinServiceConfig(BaseServiceConfig):
@@ -223,7 +298,7 @@ class RuntimeConfig(BaseModel):
     radarr: list[RadarrServiceConfig] = Field(default_factory=list)
     sonarr: list[SonarrServiceConfig] = Field(default_factory=list)
     jellyseerr: list[JellyseerrServiceConfig] = Field(default_factory=list)
-    downloaders: list[QbittorrentServiceConfig] = Field(default_factory=list)
+    downloaders: list[DownloaderServiceConfig] = Field(default_factory=list)
     jellyfin: list[JellyfinServiceConfig] = Field(default_factory=list)
 
 
@@ -242,6 +317,13 @@ def _normalize_qbittorrent_url(value: str) -> str:
     path = parsed.path.rstrip("/")
     if path.endswith("/api/v2"):
         path = path[: -len("/api/v2")]
+    return urlunsplit((parsed.scheme, parsed.netloc, path, parsed.query, parsed.fragment)).rstrip("/")
+
+
+def _normalize_service_path(value: str, *, default_path: str) -> str:
+    candidate = value.strip()
+    parsed = urlsplit(candidate)
+    path = parsed.path.rstrip("/") or default_path
     return urlunsplit((parsed.scheme, parsed.netloc, path, parsed.query, parsed.fragment)).rstrip("/")
 
 

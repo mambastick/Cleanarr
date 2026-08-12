@@ -8,14 +8,18 @@ from typing import Protocol, TypeVar
 
 from cleanarr.domain.config import (
     BaseServiceConfig,
+    DelugeServiceConfig,
+    DownloaderServiceConfig,
     GeneralConfig,
     JellyfinServiceConfig,
     JellyseerrServiceConfig,
     QbittorrentServiceConfig,
     RadarrServiceConfig,
+    RTorrentServiceConfig,
     RuntimeConfig,
     ServiceKind,
     SonarrServiceConfig,
+    TransmissionServiceConfig,
 )
 from cleanarr.domain.errors import ExternalServiceError
 from cleanarr.infrastructure.clients import (
@@ -25,6 +29,7 @@ from cleanarr.infrastructure.clients import (
     RadarrClient,
     SonarrClient,
 )
+from cleanarr.infrastructure.downloaders import DelugeClient, RTorrentClient, TransmissionClient
 from cleanarr.infrastructure.settings import Settings
 
 AnyServiceConfig = (
@@ -32,6 +37,9 @@ AnyServiceConfig = (
     | SonarrServiceConfig
     | JellyseerrServiceConfig
     | QbittorrentServiceConfig
+    | TransmissionServiceConfig
+    | DelugeServiceConfig
+    | RTorrentServiceConfig
     | JellyfinServiceConfig
 )
 TService = TypeVar("TService", bound=BaseServiceConfig)
@@ -113,7 +121,7 @@ class RuntimeConfigurationService:
             self._config = self._config.model_copy(update={"sonarr": [*self._config.sonarr, payload]})
         elif kind is ServiceKind.JELLYSEERR and isinstance(payload, JellyseerrServiceConfig):
             self._config = self._config.model_copy(update={"jellyseerr": [*self._config.jellyseerr, payload]})
-        elif kind is ServiceKind.QBITTORRENT and isinstance(payload, QbittorrentServiceConfig):
+        elif _is_downloader_payload(kind, payload):
             self._config = self._config.model_copy(update={"downloaders": [*self._config.downloaders, payload]})
         elif kind is ServiceKind.JELLYFIN and isinstance(payload, JellyfinServiceConfig):
             self._config = self._config.model_copy(update={"jellyfin": [*self._config.jellyfin, payload]})
@@ -148,7 +156,7 @@ class RuntimeConfigurationService:
                     ]
                 }
             )
-        elif kind is ServiceKind.QBITTORRENT and isinstance(payload, QbittorrentServiceConfig):
+        elif _is_downloader_payload(kind, payload):
             self._config = self._config.model_copy(
                 update={
                     "downloaders": [
@@ -184,7 +192,7 @@ class RuntimeConfigurationService:
             self._config = self._config.model_copy(
                 update={"jellyseerr": [service for service in self._config.jellyseerr if service.id != service_id]}
             )
-        elif kind is ServiceKind.QBITTORRENT:
+        elif kind in DOWNLOADER_SERVICE_KINDS:
             self._config = self._config.model_copy(
                 update={"downloaders": [service for service in self._config.downloaders if service.id != service_id]}
             )
@@ -251,17 +259,15 @@ class RuntimeConfigurationService:
                     await jellyfin_client.close()
                 return ConnectionTestResult(ok=True, message="Jellyfin responded successfully.")
 
-            qbittorrent_client = QbittorrentClient(
-                base_url=payload.url,
-                username=payload.username,
-                password=payload.password,
-                timeout_seconds=timeout,
-            )
+            downloader_client = build_downloader_client(payload, timeout_seconds=timeout)
             try:
-                await qbittorrent_client.ping()
+                version = await downloader_client.get_version()
             finally:
-                await qbittorrent_client.close()
-            return ConnectionTestResult(ok=True, message="qBittorrent responded successfully.")
+                await downloader_client.close()
+            return ConnectionTestResult(
+                ok=True,
+                message=f"{payload.name} responded successfully (version {version}).",
+            )
         except ExternalServiceError as exc:
             return ConnectionTestResult(ok=False, message=exc.message)
         except Exception as exc:  # pragma: no cover
@@ -332,4 +338,79 @@ class RuntimeConfigurationService:
             return any(service.id == service_id for service in self._config.jellyseerr)
         if kind is ServiceKind.JELLYFIN:
             return any(service.id == service_id for service in self._config.jellyfin)
-        return any(service.id == service_id for service in self._config.downloaders)
+        if kind in DOWNLOADER_SERVICE_KINDS:
+            return any(service.id == service_id and service.kind is kind for service in self._config.downloaders)
+        return False
+
+
+DOWNLOADER_SERVICE_KINDS = {
+    ServiceKind.QBITTORRENT,
+    ServiceKind.TRANSMISSION,
+    ServiceKind.DELUGE,
+    ServiceKind.RTORRENT,
+}
+
+
+def _is_downloader_payload(kind: ServiceKind, payload: AnyServiceConfig) -> bool:
+    return (
+        kind in DOWNLOADER_SERVICE_KINDS
+        and isinstance(
+            payload,
+            (QbittorrentServiceConfig, TransmissionServiceConfig, DelugeServiceConfig, RTorrentServiceConfig),
+        )
+        and payload.kind is kind
+    )
+
+
+def build_downloader_client(
+    payload: DownloaderServiceConfig,
+    *,
+    timeout_seconds: float,
+) -> QbittorrentClient | TransmissionClient | DelugeClient | RTorrentClient:
+    if isinstance(payload, QbittorrentServiceConfig):
+        return QbittorrentClient(
+            base_url=payload.url,
+            timeout_seconds=timeout_seconds,
+            service_id=payload.id,
+            service_name=payload.name,
+            username=payload.username,
+            password=payload.password,
+            api_key=payload.api_key,
+            seeding_policy=payload.seeding_policy,
+            min_seed_ratio=payload.min_seed_ratio,
+            min_seed_time_minutes=payload.min_seed_time_minutes,
+        )
+    if isinstance(payload, TransmissionServiceConfig):
+        return TransmissionClient(
+            base_url=payload.url,
+            timeout_seconds=timeout_seconds,
+            service_id=payload.id,
+            service_name=payload.name,
+            username=payload.username,
+            password=payload.password,
+            seeding_policy=payload.seeding_policy,
+            min_seed_ratio=payload.min_seed_ratio,
+            min_seed_time_minutes=payload.min_seed_time_minutes,
+        )
+    if isinstance(payload, DelugeServiceConfig):
+        return DelugeClient(
+            base_url=payload.url,
+            timeout_seconds=timeout_seconds,
+            service_id=payload.id,
+            service_name=payload.name,
+            password=payload.password,
+            seeding_policy=payload.seeding_policy,
+            min_seed_ratio=payload.min_seed_ratio,
+            min_seed_time_minutes=payload.min_seed_time_minutes,
+        )
+    return RTorrentClient(
+        base_url=payload.url,
+        timeout_seconds=timeout_seconds,
+        service_id=payload.id,
+        service_name=payload.name,
+        username=payload.username,
+        password=payload.password,
+        seeding_policy=payload.seeding_policy,
+        min_seed_ratio=payload.min_seed_ratio,
+        min_seed_time_minutes=payload.min_seed_time_minutes,
+    )

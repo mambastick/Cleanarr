@@ -27,13 +27,16 @@ from cleanarr.api.auth_schemas import (
 )
 from cleanarr.api.config_schemas import (
     ConnectionTestResponse,
+    DelugeServiceRequest,
     GeneralConfigRequest,
     JellyfinServiceRequest,
     JellyseerrServiceRequest,
     QbittorrentServiceRequest,
     RadarrServiceRequest,
+    RTorrentServiceRequest,
     RuntimeConfigResponse,
     SonarrServiceRequest,
+    TransmissionServiceRequest,
 )
 from cleanarr.api.dashboard import (
     JELLYFIN_GENERIC_TEMPLATE,
@@ -71,6 +74,7 @@ _logger = logging.getLogger("cleanarr")
 _COOKIE_NAME = "cleanarr_session"
 _COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 _SSO_ERROR_PREFIX = "/?sso_error="
+_HTTP_UNPROCESSABLE_CONTENT = 422
 
 
 def _ignore_deletion_progress(
@@ -273,7 +277,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         if payload.item_type is ItemType.MOVIE:
             if payload.radarr_movie_id is None:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    status_code=_HTTP_UNPROCESSABLE_CONTENT,
                     detail="radarr_movie_id is required for movie deletion.",
                 )
             report(
@@ -305,7 +309,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         else:
             if payload.sonarr_series_id is None:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    status_code=_HTTP_UNPROCESSABLE_CONTENT,
                     detail="sonarr_series_id is required for series/season deletion.",
                 )
             report(
@@ -323,7 +327,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                 )
             if payload.item_type is ItemType.SEASON and payload.season_number is None:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    status_code=_HTTP_UNPROCESSABLE_CONTENT,
                     detail="season_number is required for season deletion.",
                 )
             item_name = series.title
@@ -477,14 +481,14 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         except Exception as exc:
             _logger.exception("Failed to fetch OIDC discovery for %s", general.sso_issuer_url)
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                status_code=_HTTP_UNPROCESSABLE_CONTENT,
                 detail="Could not fetch OpenID discovery data.",
             ) from exc
 
         authorization_endpoint = metadata.get("authorization_endpoint")
         if not isinstance(authorization_endpoint, str) or not authorization_endpoint:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                status_code=_HTTP_UNPROCESSABLE_CONTENT,
                 detail="OpenID provider does not expose authorization_endpoint.",
             )
 
@@ -831,7 +835,8 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         payload: QbittorrentServiceRequest,
     ) -> RuntimeConfigResponse:
         container = request.app.state.container
-        config = container.config_service.add_service(payload.to_domain().kind, payload.to_domain())
+        service = payload.to_domain()
+        config = container.config_service.add_service(service.kind, service)
         await container.refresh_runtime()
         return RuntimeConfigResponse.from_config(config, admin_token_configured=bool(container.admin_shared_token))
 
@@ -846,11 +851,8 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         payload: QbittorrentServiceRequest,
     ) -> RuntimeConfigResponse:
         container = request.app.state.container
-        config = container.config_service.update_service(
-            payload.to_domain(service_id=service_id).kind,
-            service_id,
-            payload.to_domain(service_id=service_id),
-        )
+        service = payload.to_domain(service_id=service_id)
+        config = container.config_service.update_service(service.kind, service_id, service)
         await container.refresh_runtime()
         return RuntimeConfigResponse.from_config(config, admin_token_configured=bool(container.admin_shared_token))
 
@@ -872,6 +874,168 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     )
     async def test_qbittorrent(
         payload: QbittorrentServiceRequest,
+        request: Request,
+    ) -> ConnectionTestResponse:
+        result = await request.app.state.container.config_service.test_service(payload.to_domain())
+        return ConnectionTestResponse.from_domain(result)
+
+    @app.post(
+        "/api/config/downloaders/transmission",
+        response_model=RuntimeConfigResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def create_transmission(
+        request: Request,
+        payload: TransmissionServiceRequest,
+    ) -> RuntimeConfigResponse:
+        container = request.app.state.container
+        service = payload.to_domain()
+        config = container.config_service.add_service(service.kind, service)
+        await container.refresh_runtime()
+        return RuntimeConfigResponse.from_config(config, admin_token_configured=bool(container.admin_shared_token))
+
+    @app.put(
+        "/api/config/downloaders/transmission/{service_id}",
+        response_model=RuntimeConfigResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def update_transmission(
+        request: Request,
+        service_id: str,
+        payload: TransmissionServiceRequest,
+    ) -> RuntimeConfigResponse:
+        container = request.app.state.container
+        service = payload.to_domain(service_id=service_id)
+        config = container.config_service.update_service(service.kind, service_id, service)
+        await container.refresh_runtime()
+        return RuntimeConfigResponse.from_config(config, admin_token_configured=bool(container.admin_shared_token))
+
+    @app.delete(
+        "/api/config/downloaders/transmission/{service_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def delete_transmission(request: Request, service_id: str) -> Response:
+        container = request.app.state.container
+        container.config_service.delete_service(ServiceKind.TRANSMISSION, service_id)
+        await container.refresh_runtime()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.post(
+        "/api/config/downloaders/transmission/test",
+        response_model=ConnectionTestResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def test_transmission(
+        payload: TransmissionServiceRequest,
+        request: Request,
+    ) -> ConnectionTestResponse:
+        result = await request.app.state.container.config_service.test_service(payload.to_domain())
+        return ConnectionTestResponse.from_domain(result)
+
+    @app.post(
+        "/api/config/downloaders/deluge",
+        response_model=RuntimeConfigResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def create_deluge(
+        request: Request,
+        payload: DelugeServiceRequest,
+    ) -> RuntimeConfigResponse:
+        container = request.app.state.container
+        service = payload.to_domain()
+        config = container.config_service.add_service(service.kind, service)
+        await container.refresh_runtime()
+        return RuntimeConfigResponse.from_config(config, admin_token_configured=bool(container.admin_shared_token))
+
+    @app.put(
+        "/api/config/downloaders/deluge/{service_id}",
+        response_model=RuntimeConfigResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def update_deluge(
+        request: Request,
+        service_id: str,
+        payload: DelugeServiceRequest,
+    ) -> RuntimeConfigResponse:
+        container = request.app.state.container
+        service = payload.to_domain(service_id=service_id)
+        config = container.config_service.update_service(service.kind, service_id, service)
+        await container.refresh_runtime()
+        return RuntimeConfigResponse.from_config(config, admin_token_configured=bool(container.admin_shared_token))
+
+    @app.delete(
+        "/api/config/downloaders/deluge/{service_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def delete_deluge(request: Request, service_id: str) -> Response:
+        container = request.app.state.container
+        container.config_service.delete_service(ServiceKind.DELUGE, service_id)
+        await container.refresh_runtime()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.post(
+        "/api/config/downloaders/deluge/test",
+        response_model=ConnectionTestResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def test_deluge(
+        payload: DelugeServiceRequest,
+        request: Request,
+    ) -> ConnectionTestResponse:
+        result = await request.app.state.container.config_service.test_service(payload.to_domain())
+        return ConnectionTestResponse.from_domain(result)
+
+    @app.post(
+        "/api/config/downloaders/rtorrent",
+        response_model=RuntimeConfigResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def create_rtorrent(
+        request: Request,
+        payload: RTorrentServiceRequest,
+    ) -> RuntimeConfigResponse:
+        container = request.app.state.container
+        service = payload.to_domain()
+        config = container.config_service.add_service(service.kind, service)
+        await container.refresh_runtime()
+        return RuntimeConfigResponse.from_config(config, admin_token_configured=bool(container.admin_shared_token))
+
+    @app.put(
+        "/api/config/downloaders/rtorrent/{service_id}",
+        response_model=RuntimeConfigResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def update_rtorrent(
+        request: Request,
+        service_id: str,
+        payload: RTorrentServiceRequest,
+    ) -> RuntimeConfigResponse:
+        container = request.app.state.container
+        service = payload.to_domain(service_id=service_id)
+        config = container.config_service.update_service(service.kind, service_id, service)
+        await container.refresh_runtime()
+        return RuntimeConfigResponse.from_config(config, admin_token_configured=bool(container.admin_shared_token))
+
+    @app.delete(
+        "/api/config/downloaders/rtorrent/{service_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def delete_rtorrent(request: Request, service_id: str) -> Response:
+        container = request.app.state.container
+        container.config_service.delete_service(ServiceKind.RTORRENT, service_id)
+        await container.refresh_runtime()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.post(
+        "/api/config/downloaders/rtorrent/test",
+        response_model=ConnectionTestResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def test_rtorrent(
+        payload: RTorrentServiceRequest,
         request: Request,
     ) -> ConnectionTestResponse:
         result = await request.app.state.container.config_service.test_service(payload.to_domain())
@@ -961,11 +1125,11 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         except ValueError as exc:
             request.app.state.webhook_attempt_store.record(
                 outcome="invalid_payload",
-                http_status=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                http_status=_HTTP_UNPROCESSABLE_CONTENT,
                 message="Request body is not valid JSON.",
             )
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                status_code=_HTTP_UNPROCESSABLE_CONTENT,
                 detail="Invalid JSON payload",
             ) from exc
 
@@ -973,11 +1137,11 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         if not payload_list:
             request.app.state.webhook_attempt_store.record(
                 outcome="invalid_payload",
-                http_status=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                http_status=_HTTP_UNPROCESSABLE_CONTENT,
                 message="Payload array is empty. Jellyfin must send at least one event.",
             )
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                status_code=_HTTP_UNPROCESSABLE_CONTENT,
                 detail="Empty Jellyfin webhook payload",
             )
 
@@ -989,11 +1153,11 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
             error_message = first_error["msg"] if first_error is not None else "Payload validation failed."
             request.app.state.webhook_attempt_store.record(
                 outcome="invalid_payload",
-                http_status=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                http_status=_HTTP_UNPROCESSABLE_CONTENT,
                 message=f"{error_location}: {error_message}" if error_location else error_message,
             )
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                status_code=_HTTP_UNPROCESSABLE_CONTENT,
                 detail="Invalid Jellyfin webhook payload",
             ) from exc
 

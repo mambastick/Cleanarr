@@ -24,6 +24,26 @@ from cleanarr.domain import (
     SonarrHistoryRecord,
     SonarrSeries,
 )
+from cleanarr.domain.config import TorrentRemovalPolicy
+from cleanarr.domain.seeding import TorrentSeedingStatus, seeding_policy_skip_reason
+
+
+def _optional_float(value: object) -> float | None:
+    if not isinstance(value, (str, int, float)):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_int(value: object) -> int | None:
+    if not isinstance(value, (str, int, float)):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 class JsonServiceClient:
@@ -625,16 +645,30 @@ class QbittorrentClient:
         self,
         *,
         base_url: str,
-        username: str,
-        password: str,
+        username: str = "",
+        password: str = "",
+        api_key: str | None = None,
         timeout_seconds: float,
+        service_id: str | None = None,
+        service_name: str | None = None,
+        seeding_policy: TorrentRemovalPolicy = TorrentRemovalPolicy.IMMEDIATE,
+        min_seed_ratio: float | None = None,
+        min_seed_time_minutes: int | None = None,
     ) -> None:
         self._system = "qbittorrent"
         self._username = username
         self._password = password
+        self._api_key = api_key
+        self._service_id = service_id
+        self._service_name = service_name
+        self._seeding_policy = seeding_policy
+        self._min_seed_ratio = min_seed_ratio
+        self._min_seed_time_minutes = min_seed_time_minutes
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else None
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=timeout_seconds,
+            headers=headers,
             transport=httpx.AsyncHTTPTransport(retries=1),
         )
 
@@ -644,6 +678,8 @@ class QbittorrentClient:
         await self._client.aclose()
 
     async def _login(self) -> None:
+        if self._api_key:
+            return
         try:
             response = await self._client.post(
                 "/api/v2/auth/login",
@@ -660,6 +696,11 @@ class QbittorrentClient:
     async def ping(self) -> None:
         """Validate qBittorrent credentials and session setup."""
 
+        await self.get_version()
+
+    async def get_version(self) -> str:
+        """Return the qBittorrent application version."""
+
         await self._login()
         try:
             response = await self._client.get("/api/v2/app/version")
@@ -673,27 +714,53 @@ class QbittorrentClient:
                 self._system,
                 f"qBittorrent returned unexpected status {response.status_code}: {response.text}",
             )
+        return response.text.strip() or "unknown"
 
     async def delete_hashes(
         self,
         hashes: Sequence[str],
         *,
         delete_files: bool,
+        dry_run: bool = False,
     ) -> Sequence[DownloaderRemovalResult]:
-        normalized = [hash_value.upper() for hash_value in hashes]
+        normalized = list(dict.fromkeys(hash_value.strip().upper() for hash_value in hashes if hash_value.strip()))
         if not normalized:
             return []
 
         await self._login()
-        existing_hashes = await self._existing_hashes(normalized)
-        if existing_hashes:
-            await self._delete_existing_hashes(existing_hashes, delete_files=delete_files)
-        return [
-            DownloaderRemovalResult(hash_value=hash_value, existed=hash_value in existing_hashes)
-            for hash_value in normalized
-        ]
+        matches = await self._matching_torrents(normalized)
+        deletion_hashes: set[str] = set()
+        results: list[DownloaderRemovalResult] = []
+        for hash_value in normalized:
+            match = matches.get(hash_value)
+            if match is None:
+                results.append(self._result(hash_value, existed=False))
+                continue
+            canonical_hash, status = match
+            skip_reason = seeding_policy_skip_reason(
+                self._seeding_policy,
+                min_seed_ratio=self._min_seed_ratio,
+                min_seed_time_minutes=self._min_seed_time_minutes,
+                status=status,
+            )
+            if skip_reason is None:
+                deletion_hashes.add(canonical_hash)
+            results.append(
+                self._result(
+                    hash_value,
+                    existed=True,
+                    skip_reason=skip_reason,
+                    status=status,
+                )
+            )
+        if deletion_hashes and not dry_run:
+            await self._delete_existing_hashes(deletion_hashes, delete_files=delete_files)
+        return results
 
-    async def _existing_hashes(self, hashes: Sequence[str]) -> set[str]:
+    async def _matching_torrents(
+        self,
+        hashes: Sequence[str],
+    ) -> dict[str, tuple[str, TorrentSeedingStatus]]:
         try:
             response = await self._client.get(
                 "/api/v2/torrents/info",
@@ -709,7 +776,30 @@ class QbittorrentClient:
                 self._system,
                 f"qBittorrent returned unexpected status {response.status_code}: {response.text}",
             )
-        return {item["hash"].upper() for item in response.json()}
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ExternalServiceError(self._system, "qBittorrent returned an invalid JSON response.") from exc
+        if not isinstance(payload, list):
+            raise ExternalServiceError(self._system, "qBittorrent returned an unexpected torrent list.")
+
+        requested = set(hashes)
+        matches: dict[str, tuple[str, TorrentSeedingStatus]] = {}
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            identifiers = {str(item[key]).upper() for key in ("hash", "infohash_v1", "infohash_v2") if item.get(key)}
+            matched = identifiers.intersection(requested)
+            if not matched:
+                continue
+            canonical_hash = str(item.get("hash") or sorted(identifiers)[0]).upper()
+            status = TorrentSeedingStatus(
+                ratio=_optional_float(item.get("ratio")),
+                seeding_time_seconds=_optional_int(item.get("seeding_time")),
+            )
+            for hash_value in matched:
+                matches[hash_value] = (canonical_hash, status)
+        return matches
 
     async def _delete_existing_hashes(self, hashes: set[str], *, delete_files: bool) -> None:
         try:
@@ -727,6 +817,26 @@ class QbittorrentClient:
                 self._system,
                 f"qBittorrent returned unexpected status {response.status_code}: {response.text}",
             )
+
+    def _result(
+        self,
+        hash_value: str,
+        *,
+        existed: bool,
+        skip_reason: str | None = None,
+        status: TorrentSeedingStatus | None = None,
+    ) -> DownloaderRemovalResult:
+        return DownloaderRemovalResult(
+            hash_value=hash_value,
+            existed=existed,
+            client_id=self._service_id,
+            client_name=self._service_name,
+            client_kind=self._system,
+            skip_reason=skip_reason,
+            seeding_policy=self._seeding_policy.value,
+            ratio=status.ratio if status is not None else None,
+            seeding_time_seconds=status.seeding_time_seconds if status is not None else None,
+        )
 
 
 class JellyfinServerClient(JsonServiceClient):
@@ -924,10 +1034,14 @@ class NullDownloaderClient:
     async def ping(self) -> None:
         return None
 
+    async def get_version(self) -> str:
+        return "not configured"
+
     async def delete_hashes(
         self,
         hashes: Sequence[str],
         *,
         delete_files: bool,
+        dry_run: bool = False,
     ) -> Sequence[DownloaderRemovalResult]:
         return [DownloaderRemovalResult(hash_value=hash_value.upper(), existed=False) for hash_value in hashes]

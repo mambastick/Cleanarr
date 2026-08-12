@@ -6,6 +6,7 @@ import pytest
 import respx
 
 from cleanarr.domain import AuthenticationError, ExternalServiceError, JellyseerrRequest
+from cleanarr.domain.config import TorrentRemovalPolicy
 from cleanarr.infrastructure.clients import JellyseerrClient, QbittorrentClient, RadarrClient, SonarrClient
 
 
@@ -371,3 +372,61 @@ async def test_qbittorrent_client_marks_absent_hashes() -> None:
 
     assert delete_route.called
     assert [(result.hash_value, result.existed) for result in results] == [("AA", True), ("BB", False)]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_qbittorrent_client_supports_stateless_api_key_authentication() -> None:
+    version_route = respx.get(
+        "http://qbt/api/v2/app/version",
+        headers={"Authorization": "Bearer qbt_test_key"},
+    ).respond(text="v5.2.1")
+    login_route = respx.post("http://qbt/api/v2/auth/login").respond(text="should not be called")
+
+    client = QbittorrentClient(base_url="http://qbt", api_key="qbt_test_key", timeout_seconds=5)
+    try:
+        version = await client.get_version()
+    finally:
+        await client.close()
+
+    assert version == "v5.2.1"
+    assert version_route.called
+    assert login_route.called is False
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_qbittorrent_client_maps_hybrid_hashes_to_one_policy_checked_removal() -> None:
+    respx.post("http://qbt/api/v2/auth/login").respond(text="Ok.")
+    respx.get("http://qbt/api/v2/torrents/info").respond(
+        json=[
+            {
+                "hash": "V1HASH",
+                "infohash_v1": "V1HASH",
+                "infohash_v2": "V2HASH",
+                "ratio": 2.0,
+                "seeding_time": 7_200,
+            }
+        ]
+    )
+    delete_route = respx.post("http://qbt/api/v2/torrents/delete").respond(status_code=200)
+
+    client = QbittorrentClient(
+        base_url="http://qbt",
+        username="user",
+        password="pass",
+        timeout_seconds=5,
+        seeding_policy=TorrentRemovalPolicy.DEFER,
+        min_seed_ratio=1.5,
+        min_seed_time_minutes=60,
+    )
+    try:
+        results = await client.delete_hashes(["v1hash", "v2hash"], delete_files=True)
+    finally:
+        await client.close()
+
+    assert delete_route.calls[0].request.content == b"hashes=V1HASH&deleteFiles=true"
+    assert [(result.hash_value, result.existed, result.skip_reason) for result in results] == [
+        ("V1HASH", True, None),
+        ("V2HASH", True, None),
+    ]

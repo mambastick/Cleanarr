@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 from cleanarr.application.configuration import ConnectionTestResult
 from cleanarr.domain.config import (
+    DelugeServiceConfig,
+    DownloaderServiceConfig,
     GeneralConfig,
     JellyfinServiceConfig,
     JellyseerrServiceConfig,
     QbittorrentServiceConfig,
     RadarrServiceConfig,
+    RTorrentServiceConfig,
     RuntimeConfig,
     ServiceKind,
     SonarrServiceConfig,
+    TorrentRemovalPolicy,
+    TransmissionServiceConfig,
 )
 
 
@@ -24,7 +29,7 @@ class RuntimeConfigResponse(BaseModel):
     radarr: list[RadarrServiceConfig]
     sonarr: list[SonarrServiceConfig]
     jellyseerr: list[JellyseerrServiceConfig]
-    downloaders: list[QbittorrentServiceConfig]
+    downloaders: list[DownloaderServiceConfig]
     jellyfin: list[JellyfinServiceConfig]
     admin_token_configured: bool
 
@@ -111,21 +116,78 @@ class JellyseerrServiceRequest(BaseModel):
         return JellyseerrServiceConfig.model_validate(payload)
 
 
-class QbittorrentServiceRequest(BaseModel):
-    """Create or update a qBittorrent integration."""
+class BaseDownloaderServiceRequest(BaseModel):
+    """Fields shared by all torrent-client requests."""
 
     name: str
     url: str
-    username: str
-    password: str
     enabled: bool = True
     is_default: bool = False
+    seeding_policy: TorrentRemovalPolicy = TorrentRemovalPolicy.IMMEDIATE
+    min_seed_ratio: float | None = Field(default=None, ge=0)
+    min_seed_time_minutes: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_seeding_policy(self) -> BaseDownloaderServiceRequest:
+        if (
+            self.seeding_policy is TorrentRemovalPolicy.DEFER
+            and self.min_seed_ratio is None
+            and self.min_seed_time_minutes is None
+        ):
+            raise ValueError("Deferred torrent removal requires a minimum seed ratio or time.")
+        return self
+
+
+class QbittorrentServiceRequest(BaseDownloaderServiceRequest):
+    """Create or update a qBittorrent integration."""
+
+    username: str = ""
+    password: str = ""
+    api_key: str | None = None
 
     def to_domain(self, *, service_id: str | None = None) -> QbittorrentServiceConfig:
         payload = self.model_dump()
         if service_id is not None:
             payload["id"] = service_id
         return QbittorrentServiceConfig.model_validate(payload)
+
+
+class TransmissionServiceRequest(BaseDownloaderServiceRequest):
+    """Create or update a Transmission integration."""
+
+    username: str = ""
+    password: str = ""
+
+    def to_domain(self, *, service_id: str | None = None) -> TransmissionServiceConfig:
+        payload = self.model_dump()
+        if service_id is not None:
+            payload["id"] = service_id
+        return TransmissionServiceConfig.model_validate(payload)
+
+
+class DelugeServiceRequest(BaseDownloaderServiceRequest):
+    """Create or update a Deluge integration."""
+
+    password: str
+
+    def to_domain(self, *, service_id: str | None = None) -> DelugeServiceConfig:
+        payload = self.model_dump()
+        if service_id is not None:
+            payload["id"] = service_id
+        return DelugeServiceConfig.model_validate(payload)
+
+
+class RTorrentServiceRequest(BaseDownloaderServiceRequest):
+    """Create or update an rTorrent integration."""
+
+    username: str = ""
+    password: str = ""
+
+    def to_domain(self, *, service_id: str | None = None) -> RTorrentServiceConfig:
+        payload = self.model_dump()
+        if service_id is not None:
+            payload["id"] = service_id
+        return RTorrentServiceConfig.model_validate(payload)
 
 
 class JellyfinServiceRequest(BaseModel):

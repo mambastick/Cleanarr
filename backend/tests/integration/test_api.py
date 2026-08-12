@@ -365,6 +365,92 @@ async def test_runtime_config_endpoints_persist_and_rebuild(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_runtime_config_crud_supports_all_tier_one_downloaders(tmp_path: Path) -> None:
+    settings = Settings.model_construct(
+        db_path=str(tmp_path / "cleanarr.db"),
+        config_state_path=str(tmp_path / "runtime-config.json"),
+        admin_shared_token="admin-token",
+        log_level="INFO",
+        dry_run=True,
+        webhook_shared_token="secret-token",
+        http_timeout_seconds=5.0,
+        radarr_url=None,
+        radarr_api_key=None,
+        sonarr_url=None,
+        sonarr_api_key=None,
+        jellyseerr_url=None,
+        jellyseerr_api_key=None,
+        downloader_kind="qbittorrent",
+        qbittorrent_url=None,
+        qbittorrent_username=None,
+        qbittorrent_password=None,
+    )
+    container = ServiceContainer.from_settings(settings)
+    app = create_app(container=container)
+    headers = {"X-Admin-Token": "admin-token"}
+
+    async with app_client(app) as client:
+        qbt = await client.post(
+            "/api/config/downloaders/qbittorrent",
+            headers=headers,
+            json={
+                "name": "qBittorrent",
+                "url": "http://qbt",
+                "api_key": "qbt_test_key",
+                "seeding_policy": "defer",
+                "min_seed_ratio": 1.5,
+            },
+        )
+        transmission = await client.post(
+            "/api/config/downloaders/transmission",
+            headers=headers,
+            json={"name": "Transmission", "url": "http://transmission"},
+        )
+        deluge = await client.post(
+            "/api/config/downloaders/deluge",
+            headers=headers,
+            json={"name": "Deluge", "url": "http://deluge", "password": "secret"},
+        )
+        rtorrent = await client.post(
+            "/api/config/downloaders/rtorrent",
+            headers=headers,
+            json={"name": "rTorrent", "url": "http://rtorrent"},
+        )
+        rtorrent_id = rtorrent.json()["downloaders"][-1]["id"]
+        deleted = await client.delete(
+            f"/api/config/downloaders/rtorrent/{rtorrent_id}",
+            headers=headers,
+        )
+        invalid_policy = await client.post(
+            "/api/config/downloaders/transmission",
+            headers=headers,
+            json={"name": "Invalid", "url": "http://invalid", "seeding_policy": "defer"},
+        )
+
+    assert qbt.status_code == 200
+    assert qbt.json()["downloaders"][0]["seeding_policy"] == "defer"
+    assert qbt.json()["downloaders"][0]["min_seed_ratio"] == 1.5
+    assert transmission.status_code == 200
+    assert deluge.status_code == 200
+    assert rtorrent.status_code == 200
+    assert [service["kind"] for service in rtorrent.json()["downloaders"]] == [
+        "qbittorrent",
+        "transmission",
+        "deluge",
+        "rtorrent",
+    ]
+    assert deleted.status_code == 204
+    assert invalid_policy.status_code == 422
+    assert [service.kind.value for service in container.config.downloaders] == [
+        "qbittorrent",
+        "transmission",
+        "deluge",
+    ]
+
+    await container.close()
+
+
+@pytest.mark.asyncio
 async def test_first_run_config_does_not_seed_integrations_from_env(tmp_path: Path) -> None:
     settings = Settings.model_construct(
         db_path=str(tmp_path / "cleanarr.db"),

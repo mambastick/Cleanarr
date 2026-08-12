@@ -69,6 +69,18 @@ CleanArr 1.0 — стабильный и безопасный оркестрат
 поддержка Transmission/Deluge/rTorrent и одновременная multi-instance
 маршрутизация.
 
+### v0.3.0 — реализация продолжается
+
+- Добавлены адаптеры qBittorrent, Transmission legacy/JSON-RPC 2.0, Deluge Web
+  JSON-RPC и rTorrent XML-RPC за единым контрактом удаления.
+- Включена одновременная маршрутизация нескольких Radarr, Sonarr и смешанных
+  torrent-клиентов с сохранением владельца при совпадающих integer ID Arr.
+- Добавлены индивидуальные политики immediate/keep/defer и сопоставление
+  qBittorrent v1/v2 hybrid identifiers. Durable automatic retry остаётся частью
+  этапа v0.4.0.
+- Добавлены полный UI настройки профилей и автоматизированные protocol contract
+  tests. Сертификация на реальных версиях сервисов остаётся gate этапа v0.9.
+
 ## Обязательный scope 1.0
 
 ### 1. Torrent-клиенты и маршрутизация

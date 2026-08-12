@@ -67,6 +67,19 @@ issue, pull request, or release decision.
 The next active milestone is **v0.3.0**: the Tier 1 torrent adapter contract,
 Transmission/Deluge/rTorrent support, and simultaneous multi-instance routing.
 
+### v0.3.0 — implementation in progress
+
+- Added qBittorrent, Transmission legacy/JSON-RPC 2.0, Deluge Web JSON-RPC, and
+  rTorrent XML-RPC adapters behind one removal contract.
+- Enabled simultaneous Radarr, Sonarr, and mixed torrent-client routing while
+  preserving instance ownership when integer Arr IDs collide.
+- Added per-client keep/immediate/deferred seeding-policy evaluation and
+  qBittorrent v1/v2 hybrid identifier mapping. Durable automatic retries remain
+  assigned to v0.4.0.
+- Added full service inventory/configuration UI and protocol-level automated
+  contract coverage. Real-service compatibility certification remains a v0.9
+  release-candidate gate.
+
 ## Required 1.0 scope
 
 ### 1. Download clients and routing

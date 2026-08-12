@@ -8,7 +8,7 @@
 
 <p align="center">
   <strong>Автоматическая каскадная очистка домашней медиасистемы.</strong><br/>
-  CleanArr принимает события Jellyfin <code>ItemDeleted</code> и безопасно удаляет связанные записи в Radarr, Sonarr, Jellyseerr и qBittorrent, не затрагивая файлы, принадлежность которых нельзя однозначно определить.
+  CleanArr принимает события Jellyfin <code>ItemDeleted</code> и безопасно удаляет связанные записи в Radarr, Sonarr, Seerr и поддерживаемых torrent-клиентах, не затрагивая файлы, принадлежность которых нельзя однозначно определить.
 </p>
 
 <p align="center">
@@ -17,6 +17,7 @@
   <a href="#скриншоты"><strong>Скриншоты</strong></a> ·
   <a href="#как-это-работает"><strong>Как это работает</strong></a> ·
   <a href="#настройка"><strong>Настройка</strong></a> ·
+  <a href="docs/TORRENT_CLIENTS_RU.md"><strong>Torrent-клиенты</strong></a> ·
   <a href="docs/ROADMAP_RU.md"><strong>Roadmap</strong></a> ·
   <a href="CONTRIBUTING_RU.md"><strong>Участие в разработке</strong></a>
 </p>
@@ -33,11 +34,11 @@
 
 ## Что такое CleanArr?
 
-После удаления фильма или сериала в Jellyfin обычно приходится вручную удалять ту же сущность из Radarr, Sonarr, Jellyseerr и qBittorrent. CleanArr автоматизирует всю цепочку:
+После удаления фильма или сериала в Jellyfin обычно приходится вручную удалять ту же сущность из Radarr, Sonarr, Seerr и torrent-клиентов. CleanArr автоматизирует всю цепочку:
 
 1. Jellyfin отправляет webhook `ItemDeleted`.
 2. CleanArr строго сопоставляет объект в Radarr или Sonarr по идентификаторам TMDB, TVDB, IMDB и пути.
-3. Торренты удаляются из qBittorrent только тогда, когда они принадлежат исключительно удаляемому объекту.
+3. Торренты направляются в qBittorrent, Transmission, Deluge и rTorrent только тогда, когда история Arr подтверждает владельца.
 4. Запись удаляется из Radarr или Sonarr.
 5. Связанные запросы, проблемы и медиазаписи очищаются в Jellyseerr.
 
@@ -90,7 +91,8 @@
 
 ## Возможности
 
-- **Каскадное удаление** — одно событие запускает очистку Jellyfin → Radarr/Sonarr → qBittorrent → Jellyseerr.
+- **Каскадное удаление** — одно событие запускает очистку Jellyfin → Radarr/Sonarr → torrent-клиенты → Seerr.
+- **Multi-instance маршрутизация** — все включённые профили Radarr, Sonarr и torrent-клиентов работают одновременно без коллизий числовых ID.
 - **Строгое сопоставление** — TMDB, TVDB, IMDB и путь без приблизительного поиска.
 - **Защитные ограничения** — общие файлы и торренты-паки не удаляются; причина пропуска записывается в журнал.
 - **Пробный режим** — включён по умолчанию и показывает будущие действия без удаления данных.
@@ -228,7 +230,7 @@ kubectl apply -f deploy/k8s/ingress.yaml
 
 1. Поиск в Radarr по `tmdb_id → imdb_id → path`.
 2. Получение torrent hash из истории загрузок Radarr.
-3. Удаление безопасно определённых раздач в qBittorrent с `deleteFiles=true`.
+3. Удаление безопасно определённых раздач во всех владеющих ими torrent-клиентах, при необходимости вместе с локальными данными.
 4. Удаление записи Radarr.
 5. Удаление связанных запросов, проблем и записей Jellyseerr.
 

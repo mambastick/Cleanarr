@@ -49,6 +49,7 @@ class FailureReason(StrEnum):
     AUTHENTICATION_FAILED = "authentication_failed"
     UNSUPPORTED_EVENT = "unsupported_event"
     SOURCE_STILL_PRESENT = "source_still_present"
+    SEEDING_POLICY = "seeding_policy"
 
 
 @dataclass(frozen=True)
@@ -149,6 +150,8 @@ class RadarrMovie:
     imdb_id: str | None
     size_on_disk: int | None = None
     has_file: bool = False
+    service_id: str | None = None
+    service_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -186,6 +189,8 @@ class SonarrSeries:
     tvdb_id: int | None
     tmdb_id: int | None
     imdb_id: str | None
+    service_id: str | None = None
+    service_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -266,7 +271,15 @@ class JellyseerrIssue:
 
 @dataclass(frozen=True)
 class DownloaderRemovalResult:
-    """qBittorrent removal outcome for a single hash."""
+    """Download-client removal outcome for a single hash."""
 
     hash_value: str
     existed: bool
+    client_id: str | None = None
+    client_name: str | None = None
+    client_kind: str | None = None
+    error: str | None = None
+    skip_reason: str | None = None
+    seeding_policy: str | None = None
+    ratio: float | None = None
+    seeding_time_seconds: int | None = None

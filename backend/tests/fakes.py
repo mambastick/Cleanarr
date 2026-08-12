@@ -172,12 +172,13 @@ class FakeDownloaderClient:
         hashes: list[str],
         *,
         delete_files: bool,
+        dry_run: bool = False,
     ) -> list[DownloaderRemovalResult]:
         results: list[DownloaderRemovalResult] = []
         for hash_value in hashes:
             normalized = hash_value.upper()
             existed = normalized in self.existing_hashes
-            if existed:
+            if existed and not dry_run:
                 self.existing_hashes.remove(normalized)
                 self.deleted_hashes.append(normalized)
             results.append(DownloaderRemovalResult(hash_value=normalized, existed=existed))

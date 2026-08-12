@@ -25,6 +25,14 @@ export interface BaseServiceConfig {
   is_default: boolean
 }
 
+export type TorrentRemovalPolicy = "immediate" | "keep" | "defer"
+
+export interface BaseDownloaderServiceConfig extends BaseServiceConfig {
+  seeding_policy: TorrentRemovalPolicy
+  min_seed_ratio: number | null
+  min_seed_time_minutes: number | null
+}
+
 export interface RadarrServiceConfig extends BaseServiceConfig {
   kind: "radarr"
   api_key: string
@@ -40,11 +48,35 @@ export interface JellyseerrServiceConfig extends BaseServiceConfig {
   api_key: string
 }
 
-export interface QbittorrentServiceConfig extends BaseServiceConfig {
+export interface QbittorrentServiceConfig extends BaseDownloaderServiceConfig {
   kind: "qbittorrent"
   username: string
   password: string
+  api_key: string | null
 }
+
+export interface TransmissionServiceConfig extends BaseDownloaderServiceConfig {
+  kind: "transmission"
+  username: string
+  password: string
+}
+
+export interface DelugeServiceConfig extends BaseDownloaderServiceConfig {
+  kind: "deluge"
+  password: string
+}
+
+export interface RTorrentServiceConfig extends BaseDownloaderServiceConfig {
+  kind: "rtorrent"
+  username: string
+  password: string
+}
+
+export type DownloaderServiceConfig =
+  | QbittorrentServiceConfig
+  | TransmissionServiceConfig
+  | DelugeServiceConfig
+  | RTorrentServiceConfig
 
 export interface JellyfinServiceConfig extends BaseServiceConfig {
   kind: "jellyfin"
@@ -56,7 +88,7 @@ export interface RuntimeConfigPayload {
   radarr: RadarrServiceConfig[]
   sonarr: SonarrServiceConfig[]
   jellyseerr: JellyseerrServiceConfig[]
-  downloaders: QbittorrentServiceConfig[]
+  downloaders: DownloaderServiceConfig[]
   jellyfin: JellyfinServiceConfig[]
   admin_token_configured: boolean
 }

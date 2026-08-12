@@ -139,19 +139,12 @@ class BaseDeletionStrategy(ABC):
             )
             return
 
-        if self._dry_run:
-            for hash_value in sorted(hashes):
-                collector.add(
-                    "downloader",
-                    "delete_hash",
-                    ActionStatus.DRY_RUN,
-                    f"DRY_RUN: would delete torrent hash {hash_value}.",
-                    hash=hash_value,
-                )
-            return
-
         try:
-            removal_results = await self._downloader.delete_hashes(sorted(hashes), delete_files=True)
+            removal_results = await self._downloader.delete_hashes(
+                sorted(hashes),
+                delete_files=True,
+                dry_run=self._dry_run,
+            )
         except Exception as exc:  # noqa: BLE001
             self._logger.exception("Downloader removal failed")
             collector.add(
@@ -164,13 +157,57 @@ class BaseDeletionStrategy(ABC):
             return
 
         for result in removal_results:
-            status = ActionStatus.DELETED if result.existed else ActionStatus.ALREADY_ABSENT
-            message = (
-                f"Deleted torrent hash {result.hash_value}."
-                if result.existed
-                else f"Torrent hash {result.hash_value} was already absent."
+            if result.error:
+                collector.add(
+                    result.client_kind or "downloader",
+                    "delete_hash",
+                    ActionStatus.FAILED,
+                    result.error,
+                    reason=FailureReason.DOWNSTREAM_ERROR,
+                    hash=result.hash_value,
+                    downloader_id=result.client_id,
+                    downloader_name=result.client_name,
+                    downloader_kind=result.client_kind,
+                )
+                continue
+            if result.existed and result.skip_reason:
+                collector.add(
+                    result.client_kind or "downloader",
+                    "delete_hash",
+                    ActionStatus.SKIPPED,
+                    result.skip_reason,
+                    reason=FailureReason.SEEDING_POLICY,
+                    hash=result.hash_value,
+                    downloader_id=result.client_id,
+                    downloader_name=result.client_name,
+                    downloader_kind=result.client_kind,
+                    seeding_policy=result.seeding_policy,
+                    ratio=result.ratio,
+                    seeding_time_seconds=result.seeding_time_seconds,
+                )
+                continue
+            if self._dry_run and result.existed:
+                status = ActionStatus.DRY_RUN
+                message = f"DRY_RUN: would delete torrent hash {result.hash_value}."
+            elif result.existed:
+                status = ActionStatus.DELETED
+                message = f"Deleted torrent hash {result.hash_value}."
+            else:
+                status = ActionStatus.ALREADY_ABSENT
+                message = f"Torrent hash {result.hash_value} was already absent."
+            collector.add(
+                result.client_kind or "downloader",
+                "delete_hash",
+                status,
+                message,
+                hash=result.hash_value,
+                downloader_id=result.client_id,
+                downloader_name=result.client_name,
+                downloader_kind=result.client_kind,
+                seeding_policy=result.seeding_policy,
+                ratio=result.ratio,
+                seeding_time_seconds=result.seeding_time_seconds,
             )
-            collector.add("downloader", "delete_hash", status, message, hash=result.hash_value)
 
     async def _list_requests_for_media(self, media_id: int) -> list[JellyseerrRequest]:
         requests = await self._jellyseerr.list_requests()
@@ -409,6 +446,8 @@ class MovieDeletionStrategy(BaseDeletionStrategy):
                 ),
                 movie_id=movie.id,
                 title=movie.title,
+                radarr_instance_id=movie.service_id,
+                radarr_instance_name=movie.service_name,
             )
 
         await self._cleanup_jellyseerr_movie(event, collector)
@@ -471,6 +510,8 @@ class SeriesDeletionStrategy(BaseDeletionStrategy):
                 ),
                 series_id=series.id,
                 title=series.title,
+                sonarr_instance_id=series.service_id,
+                sonarr_instance_name=series.service_name,
             )
 
         await self._cleanup_jellyseerr_series(event, collector)
@@ -561,6 +602,8 @@ class SeasonDeletionStrategy(BaseDeletionStrategy):
                 mutation=bind_async(self._sonarr.unmonitor_season, series.id, event.season_number),
                 series_id=series.id,
                 season_number=event.season_number,
+                sonarr_instance_id=series.service_id,
+                sonarr_instance_name=series.service_name,
             )
 
         await self._cleanup_jellyseerr_season(event, collector)

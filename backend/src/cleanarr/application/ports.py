@@ -118,10 +118,20 @@ class JellyseerrClientPort(Protocol):
 class DownloaderClientPort(Protocol):
     """Download client abstraction."""
 
+    async def close(self) -> None:
+        """Close resources owned by the adapter."""
+
+    async def ping(self) -> None:
+        """Validate connectivity and authentication."""
+
+    async def get_version(self) -> str:
+        """Return the downstream client version."""
+
     async def delete_hashes(
         self,
         hashes: Sequence[str],
         *,
         delete_files: bool,
+        dry_run: bool = False,
     ) -> Sequence[DownloaderRemovalResult]:
-        """Delete hashes from the underlying download client."""
+        """Resolve hashes and delete them unless this is a dry-run preview."""

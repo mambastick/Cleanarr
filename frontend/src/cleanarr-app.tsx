@@ -18,7 +18,7 @@ import {
   LogOut,
   PenSquare,
   Play,
-
+  Plus,
   RefreshCw,
   Server,
   Settings2,
@@ -69,10 +69,10 @@ import type {
 } from "@/lib/dashboard"
 import type {
   ConnectionTestResponse,
+  DownloaderServiceConfig,
   GeneralConfig,
   JellyfinServiceConfig,
   JellyseerrServiceConfig,
-  QbittorrentServiceConfig,
   RadarrServiceConfig,
   RuntimeConfigPayload,
   SonarrServiceConfig,
@@ -109,11 +109,13 @@ type MainTab = "dashboard" | "settings" | "activity" | "library"
 type ServiceFamily = "radarr" | "sonarr" | "jellyseerr" | "downloaders" | "jellyfin_server"
 type SetupStepId = "general" | ServiceFamily
 type AuthMode = "register" | "login"
+type DownloaderKind = DownloaderServiceConfig["kind"]
+type TorrentRemovalPolicy = DownloaderServiceConfig["seeding_policy"]
 type ServiceRecord =
   | RadarrServiceConfig
   | SonarrServiceConfig
   | JellyseerrServiceConfig
-  | QbittorrentServiceConfig
+  | DownloaderServiceConfig
   | JellyfinServiceConfig
 
 type LibraryDeleteTarget =
@@ -141,6 +143,10 @@ type ServiceDraft = {
   api_key: string
   username: string
   password: string
+  downloader_kind: DownloaderKind | null
+  seeding_policy: TorrentRemovalPolicy
+  min_seed_ratio: string
+  min_seed_time_minutes: string
 }
 
 type ServiceModalState = {
@@ -201,6 +207,19 @@ function writeSessionCookie(token: string): void {
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const LOG_LEVEL_OPTIONS = ["DEBUG", "INFO", "WARNING", "ERROR"] as const
+const DOWNLOADER_KIND_OPTIONS: Array<{ value: DownloaderKind; label: string }> = [
+  { value: "qbittorrent", label: "qBittorrent" },
+  { value: "transmission", label: "Transmission" },
+  { value: "deluge", label: "Deluge" },
+  { value: "rtorrent", label: "rTorrent" },
+]
+const TORRENT_REMOVAL_POLICIES: TorrentRemovalPolicy[] = ["immediate", "keep", "defer"]
+const DOWNLOADER_EXAMPLES: Record<DownloaderKind, string> = {
+  qbittorrent: "https://qbittorrent.example.com",
+  transmission: "https://transmission.example.com",
+  deluge: "https://deluge.example.com",
+  rtorrent: "https://rtorrent.example.com/RPC2",
+}
 const SERVICE_FAMILIES: ServiceFamily[] = [
   "radarr",
   "sonarr",
@@ -296,13 +315,19 @@ const SERVICE_META: Record<ServiceFamily, ServiceMeta> = {
   },
   downloaders: {
     family: "downloaders",
-    title: "qBittorrent",
+    title: "Torrent client",
     singular: "downloader",
-    description: "Downloader used for torrent hash deletion with files.",
+    description: "qBittorrent, Transmission, Deluge, or rTorrent used for safe hash deletion.",
     endpoint: "/api/config/downloaders/qbittorrent",
     accent: "green",
     icon: Download,
     fields: [
+      {
+        key: "api_key",
+        label: "API key",
+        type: "password",
+        hint: "qBittorrent 5.2+ supports stateless API-key authentication.",
+      },
       {
         key: "username",
         label: "Username",
@@ -389,19 +414,19 @@ const SETUP_STEPS: SetupStepMeta[] = [
   },
   {
     id: "downloaders",
-    title: "qBittorrent",
-    description: "Downloader used for safe hash deletion.",
+    title: "Torrent client",
+    description: "Connect qBittorrent, Transmission, Deluge, or rTorrent.",
     accent: "green",
     icon: Download,
   },
 ]
 
 const EMPTY_DRAFTS: Record<ServiceFamily, ServiceDraft> = {
-  radarr: { name: "Radarr", url: "", api_key: "", username: "", password: "", enabled: true, is_default: true },
-  sonarr: { name: "Sonarr", url: "", api_key: "", username: "", password: "", enabled: true, is_default: true },
-  jellyseerr: { name: "Jellyseerr", url: "", api_key: "", username: "", password: "", enabled: true, is_default: true },
-  downloaders: { name: "qBittorrent", url: "", api_key: "", username: "", password: "", enabled: true, is_default: true },
-  jellyfin_server: { name: "Jellyfin", url: "", api_key: "", username: "", password: "", enabled: true, is_default: true },
+  radarr: { name: "Radarr", url: "", api_key: "", username: "", password: "", downloader_kind: null, enabled: true, is_default: true, seeding_policy: "immediate", min_seed_ratio: "", min_seed_time_minutes: "" },
+  sonarr: { name: "Sonarr", url: "", api_key: "", username: "", password: "", downloader_kind: null, enabled: true, is_default: true, seeding_policy: "immediate", min_seed_ratio: "", min_seed_time_minutes: "" },
+  jellyseerr: { name: "Jellyseerr", url: "", api_key: "", username: "", password: "", downloader_kind: null, enabled: true, is_default: true, seeding_policy: "immediate", min_seed_ratio: "", min_seed_time_minutes: "" },
+  downloaders: { name: "qBittorrent", url: "", api_key: "", username: "", password: "", downloader_kind: "qbittorrent", enabled: true, is_default: true, seeding_policy: "immediate", min_seed_ratio: "", min_seed_time_minutes: "" },
+  jellyfin_server: { name: "Jellyfin", url: "", api_key: "", username: "", password: "", downloader_kind: null, enabled: true, is_default: true, seeding_policy: "immediate", min_seed_ratio: "", min_seed_time_minutes: "" },
 }
 
 const DASHBOARD_NAME_TO_FAMILY: Partial<Record<string, ServiceFamily>> = {
@@ -639,6 +664,20 @@ type UiTextKey =
   | "jellyseerrApiHint"
   | "downloaderUsernameHint"
   | "downloaderPasswordHint"
+  | "qbittorrentApiHint"
+  | "delugePasswordHint"
+  | "torrentClient"
+  | "allEnabledRouting"
+  | "disabled"
+  | "defaultLabel"
+  | "seedingPolicy"
+  | "seedingImmediate"
+  | "seedingKeep"
+  | "seedingDefer"
+  | "minSeedRatio"
+  | "minSeedTime"
+  | "seedingPolicyHint"
+  | "seedingThresholdHint"
   | "jellyfinApiHint"
   | "firstTimeSetup"
   | "autoConfigureWebhook"
@@ -838,7 +877,7 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     skipForNow: "Skip for now",
     done: "Done",
     enabled: "Enabled",
-    runtimeTarget: "Use as runtime target",
+    runtimeTarget: "Mark as preferred/default",
     displayName: "Display name",
     baseUrl: "Base URL",
     alreadyConfigured: "Already configured",
@@ -884,18 +923,32 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     serviceRadarrDescription: "Movie cleanup target used to resolve and delete movies.",
     serviceSonarrDescription: "Series, season, and episode cleanup target.",
     serviceJellyseerrDescription: "Request and issue cleanup target.",
-    serviceDownloaderDescription: "Downloader used for torrent hash deletion with files.",
+    serviceDownloaderDescription: "One or more torrent clients used for ownership lookup and safe hash deletion.",
     serviceJellyfinDescription: "Jellyfin media server used for library browsing and immediate item removal.",
     apiKey: "API key",
     exampleUrl: "Example URL",
     reverseProxyHint: "Reverse-proxy paths are supported.",
     serviceUrlHint: "Paste the service URL only. CleanArr appends the correct API path automatically.",
-    downloaderUrlHint: "Paste the qBittorrent Web UI URL only. CleanArr strips /api/v2 automatically.",
+    downloaderUrlHint: "Paste the client base URL. CleanArr adds the default RPC path when it is omitted.",
     radarrApiHint: "Radarr → Settings → General → Security → API Key.",
     sonarrApiHint: "Sonarr → Settings → General → Security → API Key.",
     jellyseerrApiHint: "Jellyseerr → Settings → General → API Key.",
-    downloaderUsernameHint: "Use the same username you use to sign in to the qBittorrent Web UI.",
-    downloaderPasswordHint: "Use the same password you use to sign in to the qBittorrent Web UI.",
+    downloaderUsernameHint: "Username for the selected client's Web or RPC interface, when authentication is enabled.",
+    downloaderPasswordHint: "Password for the selected client's Web or RPC interface, when authentication is enabled.",
+    qbittorrentApiHint: "qBittorrent 5.2+ API key; leave empty to use username and password.",
+    delugePasswordHint: "Password for the Deluge Web JSON-RPC interface.",
+    torrentClient: "Torrent client",
+    allEnabledRouting: "All enabled Radarr, Sonarr, and torrent-client instances participate in routing.",
+    disabled: "Disabled",
+    defaultLabel: "default",
+    seedingPolicy: "Torrent removal policy",
+    seedingImmediate: "Remove immediately",
+    seedingKeep: "Keep torrent",
+    seedingDefer: "Defer until seeded",
+    minSeedRatio: "Minimum seed ratio",
+    minSeedTime: "Minimum seed time (minutes)",
+    seedingPolicyHint: "Applied independently by each enabled torrent client before removal.",
+    seedingThresholdHint: "Set at least one threshold. If both are set, both must be reached.",
     jellyfinApiHint: "Jellyfin → Dashboard → API Keys → + → create a key for CleanArr.",
     firstTimeSetup: "First-time setup — configure each service to get started.",
     autoConfigureWebhook: "Auto-configure webhook",
@@ -1092,7 +1145,7 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     skipForNow: "Пропустить пока",
     done: "Готово",
     enabled: "Включено",
-    runtimeTarget: "Использовать как основной сервис",
+    runtimeTarget: "Отметить как предпочтительный/default",
     displayName: "Отображаемое имя",
     baseUrl: "Базовый URL",
     alreadyConfigured: "Уже настроено",
@@ -1138,18 +1191,32 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     serviceRadarrDescription: "Сервис поиска и удаления фильмов.",
     serviceSonarrDescription: "Сервис поиска и удаления сериалов, сезонов и эпизодов.",
     serviceJellyseerrDescription: "Сервис очистки запросов и обращений.",
-    serviceDownloaderDescription: "Загрузчик для удаления торрентов вместе с файлами.",
+    serviceDownloaderDescription: "Один или несколько torrent-клиентов для поиска владельца и безопасного удаления раздач.",
     serviceJellyfinDescription: "Медиасервер для просмотра библиотеки и немедленного удаления элементов.",
     apiKey: "API-ключ",
     exampleUrl: "Пример URL",
     reverseProxyHint: "Поддерживаются пути через обратный прокси.",
     serviceUrlHint: "Укажите только URL сервиса. CleanArr автоматически добавит правильный путь API.",
-    downloaderUrlHint: "Укажите только URL веб-интерфейса qBittorrent. CleanArr автоматически уберёт /api/v2.",
+    downloaderUrlHint: "Укажите базовый URL клиента. CleanArr добавит стандартный путь RPC, если он не указан.",
     radarrApiHint: "Radarr → Настройки → Общие → Безопасность → API Key.",
     sonarrApiHint: "Sonarr → Настройки → Общие → Безопасность → API Key.",
     jellyseerrApiHint: "Jellyseerr → Настройки → Общие → API Key.",
-    downloaderUsernameHint: "Используйте имя пользователя от веб-интерфейса qBittorrent.",
-    downloaderPasswordHint: "Используйте пароль от веб-интерфейса qBittorrent.",
+    downloaderUsernameHint: "Имя пользователя выбранного Web/RPC-интерфейса, если включена аутентификация.",
+    downloaderPasswordHint: "Пароль выбранного Web/RPC-интерфейса, если включена аутентификация.",
+    qbittorrentApiHint: "API key qBittorrent 5.2+; оставьте поле пустым для username/password.",
+    delugePasswordHint: "Пароль Web JSON-RPC интерфейса Deluge.",
+    torrentClient: "Torrent-клиент",
+    allEnabledRouting: "Все включённые экземпляры Radarr, Sonarr и torrent-клиентов участвуют в маршрутизации.",
+    disabled: "Отключено",
+    defaultLabel: "default",
+    seedingPolicy: "Политика удаления раздачи",
+    seedingImmediate: "Удалять сразу",
+    seedingKeep: "Оставлять раздачу",
+    seedingDefer: "Ждать выполнения условий",
+    minSeedRatio: "Минимальный ratio",
+    minSeedTime: "Минимальное время раздачи (минуты)",
+    seedingPolicyHint: "Применяется отдельно каждым включённым torrent-клиентом перед удалением.",
+    seedingThresholdHint: "Укажите хотя бы один порог. Если указаны оба, должны быть выполнены оба.",
     jellyfinApiHint: "Jellyfin → Панель управления → API Keys → + → создайте ключ для CleanArr.",
     firstTimeSetup: "Первичная настройка — подключите необходимые сервисы.",
     autoConfigureWebhook: "Настроить webhook автоматически",
@@ -1248,8 +1315,35 @@ function getServiceDescription(family: ServiceFamily, text: UiTextMap): string {
   }
 }
 
-function getServiceHelp(meta: ServiceMeta, text: UiTextMap): string[] {
-  return [`${text.exampleUrl}: ${meta.example}`, text.reverseProxyHint]
+function getDownloaderLabel(kind: DownloaderKind | null): string {
+  return DOWNLOADER_KIND_OPTIONS.find((option) => option.value === kind)?.label ?? "Torrent client"
+}
+
+function getServiceTitle(family: ServiceFamily, draft?: ServiceDraft | null): string {
+  return family === "downloaders" ? getDownloaderLabel(draft?.downloader_kind ?? null) : SERVICE_META[family].title
+}
+
+function getServiceEndpoint(family: ServiceFamily, kind: DownloaderKind | null): string {
+  return family === "downloaders"
+    ? `/api/config/downloaders/${kind ?? "qbittorrent"}`
+    : SERVICE_META[family].endpoint
+}
+
+function getServiceFields(meta: ServiceMeta, draft: ServiceDraft): ServiceMeta["fields"] {
+  if (meta.family !== "downloaders") return meta.fields
+  if (draft.downloader_kind === "deluge") return meta.fields.filter((field) => field.key === "password")
+  if (draft.downloader_kind === "qbittorrent") return meta.fields
+  return meta.fields.filter((field) => field.key === "username" || field.key === "password")
+}
+
+function getServiceExample(meta: ServiceMeta, draft: ServiceDraft): string {
+  return meta.family === "downloaders"
+    ? DOWNLOADER_EXAMPLES[draft.downloader_kind ?? "qbittorrent"]
+    : meta.example
+}
+
+function getServiceHelp(meta: ServiceMeta, text: UiTextMap, draft: ServiceDraft): string[] {
+  return [`${text.exampleUrl}: ${getServiceExample(meta, draft)}`, text.reverseProxyHint]
 }
 
 function getServiceFieldLabel(
@@ -1265,9 +1359,16 @@ function getServiceFieldHint(
   family: ServiceFamily,
   key: ServiceMeta["fields"][number]["key"],
   text: UiTextMap,
+  downloaderKind: DownloaderKind | null = null,
 ): string {
-  if (key === "username") return text.downloaderUsernameHint
-  if (key === "password") return text.downloaderPasswordHint
+  if (family === "downloaders") {
+    if (downloaderKind === "qbittorrent" && key === "api_key") {
+      return text.qbittorrentApiHint
+    }
+    if (downloaderKind === "deluge") return text.delugePasswordHint
+    if (key === "username") return text.downloaderUsernameHint
+    if (key === "password") return text.downloaderPasswordHint
+  }
   switch (family) {
     case "radarr": return text.radarrApiHint
     case "sonarr": return text.sonarrApiHint
@@ -1766,28 +1867,32 @@ function CleanArrApp() {
   }
 
   const saveServiceDraft = async (family: ServiceFamily, draft: ServiceDraft) => {
-    const meta = SERVICE_META[family]
+    const endpoint = getServiceEndpoint(family, draft.downloader_kind)
     const body = JSON.stringify(buildServicePayload(family, draft))
     const next = draft.id
-      ? await fetchJson<RuntimeConfigPayload>(`${meta.endpoint}/${draft.id}`, { method: "PUT", body })
-      : await fetchJson<RuntimeConfigPayload>(meta.endpoint, { method: "POST", body })
+      ? await fetchJson<RuntimeConfigPayload>(`${endpoint}/${draft.id}`, { method: "PUT", body })
+      : await fetchJson<RuntimeConfigPayload>(endpoint, { method: "POST", body })
     setConfig(next)
+    await loadDashboard(true)
     setServiceModal(null)
-    toast.success(`${meta.title} ${draft.id ? uiText.serviceUpdated : uiText.serviceAdded}.`)
+    toast.success(`${getServiceTitle(family, draft)} ${draft.id ? uiText.serviceUpdated : uiText.serviceAdded}.`)
   }
 
   const deleteServiceDraft = async (family: ServiceFamily, serviceId: string) => {
-    const meta = SERVICE_META[family]
-    await fetchJson<void>(`${meta.endpoint}/${serviceId}`, { method: "DELETE" })
+    const existing = getServices(config, family).find((service) => service.id === serviceId)
+    const kind = existing && "kind" in existing && family === "downloaders"
+      ? existing.kind as DownloaderKind
+      : null
+    await fetchJson<void>(`${getServiceEndpoint(family, kind)}/${serviceId}`, { method: "DELETE" })
     const next = await fetchJson<RuntimeConfigPayload>("/api/config")
     setConfig(next)
+    await loadDashboard(true)
     setServiceModal(null)
-    toast.success(`${meta.title} ${uiText.serviceRemoved}.`)
+    toast.success(`${family === "downloaders" ? getDownloaderLabel(kind) : SERVICE_META[family].title} ${uiText.serviceRemoved}.`)
   }
 
   const testServiceDraft = async (family: ServiceFamily, draft: ServiceDraft) => {
-    const meta = SERVICE_META[family]
-    return fetchJson<ConnectionTestResponse>(`${meta.endpoint}/test`, {
+    return fetchJson<ConnectionTestResponse>(`${getServiceEndpoint(family, draft.downloader_kind)}/test`, {
       method: "POST",
       body: JSON.stringify(buildServicePayload(family, draft)),
     })
@@ -1940,6 +2045,12 @@ function CleanArrApp() {
             config={config}
             isConfigLoading={isConfigLoading}
             onSaveGeneral={saveGeneralSettings}
+            onAddService={(family) => {
+              setServiceModal({ family, draft: structuredClone(EMPTY_DRAFTS[family]) })
+            }}
+            onEditService={(family, service) => {
+              setServiceModal({ family, draft: toDraft(service) })
+            }}
           />
         </TabsContent>
 
@@ -2725,11 +2836,15 @@ function SettingsPanel({
   config,
   isConfigLoading,
   onSaveGeneral,
+  onAddService,
+  onEditService,
   text,
 }: {
   config: RuntimeConfigPayload | null
   isConfigLoading: boolean
   onSaveGeneral: (payload: GeneralConfig) => Promise<void>
+  onAddService: (family: ServiceFamily) => void
+  onEditService: (family: ServiceFamily, service: ServiceRecord) => void
   text: UiTextMap
 }) {
   const general = config?.general ?? null
@@ -2917,6 +3032,64 @@ function SettingsPanel({
               description={text.tryAgain}
             />
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Server className="size-4 text-emerald-600 dark:text-emerald-400" />
+            {text.connectedServices}
+          </CardTitle>
+          <CardDescription>
+            {text.allEnabledRouting}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {SERVICE_FAMILIES.map((family) => {
+            const services = getServices(config, family)
+            return (
+              <div key={family} className="rounded-lg border p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">
+                      {family === "downloaders" ? text.torrentClient : SERVICE_META[family].title}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{getServiceDescription(family, text)}</p>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => onAddService(family)}>
+                    <Plus className="size-4" />
+                    {text.add}
+                  </Button>
+                </div>
+                {services.length > 0 ? (
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {services.map((service) => (
+                      <button
+                        key={service.id}
+                        type="button"
+                        onClick={() => onEditService(family, service)}
+                        className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-left transition-colors hover:bg-muted"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-medium">{service.name}</span>
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {family === "downloaders" ? getDownloaderLabel(service.kind as DownloaderKind) : service.url}
+                          </span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-1.5">
+                          {service.is_default && <Badge variant="outline">{text.defaultLabel}</Badge>}
+                          <StatusPill tone={service.enabled ? "green" : "blue"} label={service.enabled ? text.enabled : text.disabled} />
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-3 text-xs text-muted-foreground">{text.notConfigured}</p>
+                )}
+              </div>
+            )
+          })}
         </CardContent>
       </Card>
 
@@ -3182,7 +3355,7 @@ function WizardServiceStep({
     <div className="space-y-5 pb-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">{meta.title}</h2>
+          <h2 className="text-lg font-semibold">{getServiceTitle(family, draft)}</h2>
           <p className="text-sm text-muted-foreground">{getServiceDescription(family, text)}</p>
         </div>
         {alreadyConfigured && (
@@ -3195,8 +3368,27 @@ function WizardServiceStep({
         title={text.beforeYouSave}
         description={text.beforeSaveDescription}
       >
-        <InstructionList items={getServiceHelp(meta, text)} />
+        <InstructionList items={getServiceHelp(meta, text, draft)} />
       </GuideCard>
+
+      {family === "downloaders" && (
+        <FormField label={text.torrentClient} htmlFor="wizard-downloader-kind">
+          <select
+            id="wizard-downloader-kind"
+            value={draft.downloader_kind ?? "qbittorrent"}
+            disabled={Boolean(draft.id)}
+            onChange={(event) => {
+              const kind = event.target.value as DownloaderKind
+              setDraft({ ...draft, downloader_kind: kind, name: getDownloaderLabel(kind) })
+            }}
+            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            {DOWNLOADER_KIND_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </FormField>
+      )}
 
       <FormField label={text.displayName} htmlFor={`wizard-${family}-name`}>
         <Input
@@ -3212,7 +3404,7 @@ function WizardServiceStep({
           type="url"
           value={draft.url}
           onChange={(e) => setDraft({ ...draft, url: e.target.value })}
-          placeholder={meta.example}
+          placeholder={getServiceExample(meta, draft)}
         />
         <FieldHint
           text={
@@ -3221,7 +3413,7 @@ function WizardServiceStep({
         />
       </FormField>
 
-      {meta.fields.map((field) => (
+      {getServiceFields(meta, draft).map((field) => (
         <FormField
           key={field.key}
           label={getServiceFieldLabel(field.key, text)}
@@ -3233,9 +3425,18 @@ function WizardServiceStep({
             value={draft[field.key]}
             onChange={(e) => setDraft({ ...draft, [field.key]: e.target.value })}
           />
-          <FieldHint text={getServiceFieldHint(family, field.key, text)} />
+          <FieldHint text={getServiceFieldHint(family, field.key, text, draft.downloader_kind)} />
         </FormField>
       ))}
+
+      {family === "downloaders" && (
+        <DownloaderPolicyFields
+          idPrefix="wizard-downloader"
+          draft={draft}
+          setDraft={setDraft}
+          text={text}
+        />
+      )}
 
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="inline-flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm">
@@ -3402,7 +3603,7 @@ function SetupWizard({
             />
           </Step>
 
-          {/* Step 6: qBittorrent */}
+          {/* Step 6: torrent client */}
           <Step>
             <WizardServiceStep
               family="downloaders"
@@ -3952,7 +4153,7 @@ function ServiceModal({
     <Modal
       open={state !== null}
       onClose={onClose}
-      title={`${draft?.id ? text.edit : text.add} ${meta.title}`}
+      title={`${draft?.id ? text.edit : text.add} ${getServiceTitle(state.family, draft)}`}
       description={getServiceDescription(state.family, text)}
       footer={
         <div className="flex flex-wrap justify-between gap-3">
@@ -4039,8 +4240,27 @@ function ServiceModal({
             title={text.beforeYouSave}
             description={text.beforeSaveDescription}
           >
-            <InstructionList items={getServiceHelp(meta, text)} />
+            <InstructionList items={getServiceHelp(meta, text, draft)} />
           </GuideCard>
+
+          {state.family === "downloaders" && (
+            <FormField label={text.torrentClient} htmlFor="downloader-kind">
+              <select
+                id="downloader-kind"
+                value={draft.downloader_kind ?? "qbittorrent"}
+                disabled={Boolean(draft.id)}
+                onChange={(event) => {
+                  const kind = event.target.value as DownloaderKind
+                  setDraft({ ...draft, downloader_kind: kind, name: getDownloaderLabel(kind) })
+                }}
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
+                {DOWNLOADER_KIND_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </FormField>
+          )}
 
           <FormField label={text.displayName} htmlFor={`${state.family}-name`}>
             <Input
@@ -4056,7 +4276,7 @@ function ServiceModal({
               type="url"
               value={draft.url}
               onChange={(e) => setDraft({ ...draft, url: e.target.value })}
-              placeholder={meta.example}
+              placeholder={getServiceExample(meta, draft)}
             />
             <FieldHint
               text={
@@ -4065,7 +4285,7 @@ function ServiceModal({
             />
           </FormField>
 
-          {meta.fields.map((field) => (
+          {getServiceFields(meta, draft).map((field) => (
             <FormField
               key={field.key}
               label={getServiceFieldLabel(field.key, text)}
@@ -4077,9 +4297,18 @@ function ServiceModal({
                 value={draft[field.key]}
                 onChange={(e) => setDraft({ ...draft, [field.key]: e.target.value })}
               />
-              <FieldHint text={getServiceFieldHint(state.family, field.key, text)} />
+              <FieldHint text={getServiceFieldHint(state.family, field.key, text, draft.downloader_kind)} />
             </FormField>
           ))}
+
+          {state.family === "downloaders" && (
+            <DownloaderPolicyFields
+              idPrefix="downloader"
+              draft={draft}
+              setDraft={setDraft}
+              text={text}
+            />
+          )}
 
           <div className="grid gap-2 sm:grid-cols-2">
             <label className="inline-flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm">
@@ -4179,6 +4408,73 @@ function FieldHint({ text }: { text: string }) {
     <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
       <CircleHelp className="mt-0.5 size-3.5 shrink-0 text-blue-500" />
       <span>{text}</span>
+    </div>
+  )
+}
+
+function DownloaderPolicyFields({
+  idPrefix,
+  draft,
+  setDraft,
+  text,
+}: {
+  idPrefix: string
+  draft: ServiceDraft
+  setDraft: (draft: ServiceDraft) => void
+  text: UiTextMap
+}) {
+  const policyLabels: Record<TorrentRemovalPolicy, string> = {
+    immediate: text.seedingImmediate,
+    keep: text.seedingKeep,
+    defer: text.seedingDefer,
+  }
+
+  return (
+    <div className="space-y-4 rounded-lg border p-3">
+      <FormField label={text.seedingPolicy} htmlFor={`${idPrefix}-seeding-policy`}>
+        <select
+          id={`${idPrefix}-seeding-policy`}
+          value={draft.seeding_policy}
+          onChange={(event) => setDraft({
+            ...draft,
+            seeding_policy: event.target.value as TorrentRemovalPolicy,
+          })}
+          className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        >
+          {TORRENT_REMOVAL_POLICIES.map((policy) => (
+            <option key={policy} value={policy}>{policyLabels[policy]}</option>
+          ))}
+        </select>
+        <FieldHint text={text.seedingPolicyHint} />
+      </FormField>
+
+      {draft.seeding_policy === "defer" && (
+        <div className="space-y-2">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <FormField label={text.minSeedRatio} htmlFor={`${idPrefix}-min-seed-ratio`}>
+              <Input
+                id={`${idPrefix}-min-seed-ratio`}
+                type="number"
+                min={0}
+                step={0.1}
+                value={draft.min_seed_ratio}
+                onChange={(event) => setDraft({ ...draft, min_seed_ratio: event.target.value })}
+              />
+            </FormField>
+            <FormField label={text.minSeedTime} htmlFor={`${idPrefix}-min-seed-time`}>
+              <Input
+                id={`${idPrefix}-min-seed-time`}
+                type="number"
+                min={1}
+                step={1}
+                value={draft.min_seed_time_minutes}
+                onChange={(event) => setDraft({ ...draft, min_seed_time_minutes: event.target.value })}
+              />
+            </FormField>
+          </div>
+          <FieldHint text={text.seedingThresholdHint} />
+        </div>
+      )}
     </div>
   )
 }
@@ -5011,9 +5307,19 @@ function toDraft(service: ServiceRecord): ServiceDraft {
     url: service.url,
     enabled: service.enabled,
     is_default: service.is_default,
-    api_key: "api_key" in service ? service.api_key : "",
+    api_key: "api_key" in service ? service.api_key ?? "" : "",
     username: "username" in service ? service.username : "",
     password: "password" in service ? service.password : "",
+    downloader_kind: ["qbittorrent", "transmission", "deluge", "rtorrent"].includes(service.kind)
+      ? service.kind as DownloaderKind
+      : null,
+    seeding_policy: "seeding_policy" in service ? service.seeding_policy : "immediate",
+    min_seed_ratio: "min_seed_ratio" in service && service.min_seed_ratio != null
+      ? String(service.min_seed_ratio)
+      : "",
+    min_seed_time_minutes: "min_seed_time_minutes" in service && service.min_seed_time_minutes != null
+      ? String(service.min_seed_time_minutes)
+      : "",
   }
 }
 
@@ -5025,9 +5331,30 @@ function buildServicePayload(family: ServiceFamily, draft: ServiceDraft) {
     case "jellyseerr":
     case "jellyfin_server":
       return { ...base, api_key: draft.api_key }
-    case "downloaders":
-      return { ...base, username: draft.username, password: draft.password }
+    case "downloaders": {
+      const policy = {
+        seeding_policy: draft.seeding_policy,
+        min_seed_ratio: optionalNumber(draft.min_seed_ratio),
+        min_seed_time_minutes: optionalNumber(draft.min_seed_time_minutes),
+      }
+      switch (draft.downloader_kind) {
+        case "qbittorrent":
+          return { ...base, ...policy, username: draft.username, password: draft.password, api_key: draft.api_key || null }
+        case "deluge":
+          return { ...base, ...policy, password: draft.password }
+        case "transmission":
+        case "rtorrent":
+          return { ...base, ...policy, username: draft.username, password: draft.password }
+        default:
+          return { ...base, ...policy, username: draft.username, password: draft.password }
+      }
+    }
   }
+}
+
+function optionalNumber(value: string): number | null {
+  const normalized = value.trim()
+  return normalized ? Number(normalized) : null
 }
 
 function matchesActivity(entry: DashboardActivity, filter: string): boolean {
