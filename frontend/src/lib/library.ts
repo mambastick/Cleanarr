@@ -43,20 +43,29 @@ export interface ManualDeleteRequest {
   radarr_movie_id?: number | null
   season_number?: number | null
   jellyfin_item_id?: string | null
+  confirmed_plan_hash?: string | null
 }
 
 export type ManualDeleteResponse = DashboardProcessingResult
 
-export type ManualDeleteJobStatus = "queued" | "running" | "completed" | "failed"
+export type ManualDeleteJobStatus = "queued" | "running" | "retry_wait" | "completed" | "failed"
 
 export type ManualDeleteJobPhase =
   | "queued"
+  | "planning"
   | "locating"
   | "cleaning"
   | "recording"
   | "jellyfin"
+  | "retrying"
   | "completed"
   | "failed"
+
+export interface ManualDeletePreviewResponse {
+  generated_at: string
+  plan_hash: string
+  plan: ManualDeleteResponse
+}
 
 export interface ManualDeleteJob {
   id: string
@@ -69,6 +78,10 @@ export interface ManualDeleteJob {
   created_at: string
   started_at: string | null
   completed_at: string | null
+  next_retry_at: string | null
+  attempt_count: number
+  max_attempts: number
+  preflight: ManualDeleteResponse
   result: ManualDeleteResponse | null
   error: string | null
 }

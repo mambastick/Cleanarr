@@ -74,15 +74,17 @@ curl --fail http://127.0.0.1:8089/health/ready
 
 ## Backup
 
-Stop CleanArr briefly or use the SQLite backup API before copying the database.
+Stop CleanArr briefly and create a verified SQLite backup before an upgrade that
+changes persistent state.
 
 ```bash
 sudo systemctl stop cleanarr
-sudo cp -a /var/lib/cleanarr /var/lib/cleanarr.backup
+sudo -u cleanarr /usr/bin/python3.12 -c 'import sqlite3; source=sqlite3.connect("/var/lib/cleanarr/cleanarr.db"); backup=sqlite3.connect("/var/lib/cleanarr/cleanarr.pre-upgrade.db"); source.backup(backup); print(backup.execute("PRAGMA integrity_check").fetchone()[0]); backup.close(); source.close()'
 sudo systemctl start cleanarr
 ```
 
-Store the backup outside the server before an operating-system migration.
+The integrity check must print `ok`. Store the verified backup outside the
+server before an operating-system migration.
 
 ## Upgrade and rollback
 
@@ -96,7 +98,20 @@ sudo dnf install ./cleanarr_<new-version>_amd64.rpm
 sudo systemctl restart cleanarr
 ```
 
-To roll back, restore the database backup if a schema migration requires it, then install the previous package and restart the service.
+The v0.4 schema migration is additive: an older v0.3 build ignores the manual
+job table. For a complete rollback, stop CleanArr, restore the verified backup,
+install the previous package, and start the service:
+
+```bash
+sudo systemctl stop cleanarr
+sudo cp -a /var/lib/cleanarr/cleanarr.db /var/lib/cleanarr/cleanarr.failed-upgrade.db
+sudo cp -a /var/lib/cleanarr/cleanarr.pre-upgrade.db /var/lib/cleanarr/cleanarr.db
+sudo chown cleanarr:cleanarr /var/lib/cleanarr/cleanarr.db
+sudo apt install ./cleanarr_<previous-version>_amd64.deb
+# or: sudo dnf downgrade ./cleanarr_<previous-version>_amd64.rpm
+sudo systemctl start cleanarr
+sudo -u cleanarr /usr/bin/python3.12 -c 'import sqlite3; db=sqlite3.connect("/var/lib/cleanarr/cleanarr.db"); print(db.execute("PRAGMA integrity_check").fetchone()[0]); db.close()'
+```
 
 ## Remove
 

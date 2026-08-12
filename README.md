@@ -95,8 +95,8 @@ Pack torrents, shared files, and anything that can't be safely attributed are al
 - **Multi-instance routing** — every enabled Radarr, Sonarr, and torrent-client profile participates without numeric ID collisions
 - **Strict ID matching** — resolves items by TMDB/TVDB/IMDB ID and path; no fuzzy guessing
 - **Conservative guardrails** — pack torrents and files shared between items are never deleted; CleanArr logs the reason and skips
-- **Dry-run mode** — enabled by default; shows exactly what *would* happen without touching anything
-- **Background library cleanup** — manual deletions are queued immediately and report live step-by-step progress in a compact task panel
+- **Confirmed preflight** — enabled before every manual deletion; shows exact media IDs, Arr instance, torrent client/hash/path, downstream mutations, and safety skips
+- **Durable background cleanup** — manual jobs, partial results, and retry state survive process restarts and report live step-by-step progress
 - **Live health monitoring** — probes all connected services every 30 s; status visible on the dashboard
 - **Webhook auto-configure** — one-click setup of the Jellyfin Webhook plugin directly from the UI
 - **Activity log** — every processed event is stored with full action breakdown; searchable by title, system, action, or status
@@ -120,6 +120,19 @@ docker compose -f deploy/docker-compose.yml up -d
 ```
 
 Open **http://localhost:8089** — the setup wizard walks you through the rest.
+
+Before an image upgrade, create and export a verified SQLite backup:
+
+```bash
+docker compose -f deploy/docker-compose.yml exec -T cleanarr python3 -c 'import sqlite3; source=sqlite3.connect("/config/cleanarr.db"); backup=sqlite3.connect("/config/cleanarr.pre-upgrade.db"); source.backup(backup); print(backup.execute("PRAGMA integrity_check").fetchone()[0]); backup.close(); source.close()'
+docker compose -f deploy/docker-compose.yml cp \
+  cleanarr:/config/cleanarr.pre-upgrade.db ./cleanarr.pre-upgrade.db
+```
+
+The check must print `ok`. To roll back, pin the previous image, stop the
+service, copy the verified backup back to `/config/cleanarr.db`, and start it
+again. Keep the failed database under a different name until the restore is
+verified.
 
 ### Docker (manual)
 

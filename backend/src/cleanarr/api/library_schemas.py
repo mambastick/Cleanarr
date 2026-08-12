@@ -67,6 +67,7 @@ class ManualDeleteRequest(BaseModel):
     radarr_movie_id: int | None = None
     season_number: int | None = None
     jellyfin_item_id: str | None = None
+    confirmed_plan_hash: str | None = None
 
 
 class ManualDeleteJobStatus(StrEnum):
@@ -74,6 +75,7 @@ class ManualDeleteJobStatus(StrEnum):
 
     QUEUED = "queued"
     RUNNING = "running"
+    RETRY_WAIT = "retry_wait"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -82,12 +84,22 @@ class ManualDeleteJobPhase(StrEnum):
     """User-facing phase of a queued manual deletion."""
 
     QUEUED = "queued"
+    PLANNING = "planning"
     LOCATING = "locating"
     CLEANING = "cleaning"
     RECORDING = "recording"
     JELLYFIN = "jellyfin"
+    RETRYING = "retrying"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class ManualDeletePreviewResponse(BaseModel):
+    """Dry-run plan generated before a manual deletion is confirmed."""
+
+    generated_at: datetime
+    plan_hash: str
+    plan: ProcessingResultResponse
 
 
 class ManualDeleteJobResponse(BaseModel):
@@ -103,6 +115,10 @@ class ManualDeleteJobResponse(BaseModel):
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    next_retry_at: datetime | None = None
+    attempt_count: int
+    max_attempts: int
+    preflight: ProcessingResultResponse
     result: ProcessingResultResponse | None = None
     error: str | None = None
 

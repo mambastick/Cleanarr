@@ -50,7 +50,7 @@ export interface DashboardAction {
   status: ActionStatus
   message: string
   reason: string | null
-  details: Record<string, string | number | boolean | null>
+  details: Record<string, unknown>
 }
 
 export interface DashboardProcessingResult {
@@ -58,6 +58,15 @@ export interface DashboardProcessingResult {
   item_id: string
   name: string
   status: OverallStatus
+  fingerprint: {
+    tmdb_id: number | null
+    tvdb_id: number | null
+    imdb_id: string | null
+    path: string | null
+  }
+  season_number: number | null
+  episode_number: number | null
+  episode_end_number: number | null
   actions: DashboardAction[]
 }
 

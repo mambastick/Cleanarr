@@ -49,8 +49,10 @@ from cleanarr.api.dashboard import (
 from cleanarr.api.deletion_jobs import (
     DeletionJobActiveError,
     DeletionJobNotFoundError,
+    DeletionPreflightError,
     DeletionProgressReporter,
     ManualDeletionJobStore,
+    validate_plan_confirmation,
 )
 from cleanarr.api.library_schemas import (
     LibraryMoviesResponse,
@@ -58,6 +60,7 @@ from cleanarr.api.library_schemas import (
     ManualDeleteJobListResponse,
     ManualDeleteJobPhase,
     ManualDeleteJobResponse,
+    ManualDeletePreviewResponse,
     ManualDeleteRequest,
     MovieSummary,
     SeasonSummary,
@@ -65,7 +68,17 @@ from cleanarr.api.library_schemas import (
 )
 from cleanarr.api.schemas import JellyfinWebhookPayload, ProcessingResultResponse, WebhookBatchResponse
 from cleanarr.application.results import observe_actions
-from cleanarr.domain import ActionResult, ItemType, MediaDeletionEvent, MediaFingerprint, SonarrSeries
+from cleanarr.domain import (
+    ActionResult,
+    ActionStatus,
+    FailureReason,
+    ItemType,
+    MediaDeletionEvent,
+    MediaFingerprint,
+    OverallStatus,
+    ProcessingResult,
+    SonarrSeries,
+)
 from cleanarr.domain.config import BaseServiceConfig, GeneralConfig, ServiceKind
 from cleanarr.infrastructure.container import ServiceContainer
 from cleanarr.infrastructure.settings import Settings
@@ -264,15 +277,10 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     health_probe_store = HealthProbeStore()
     static_dir = Path(__file__).resolve().parents[1] / "ui" / "static"
 
-    async def execute_manual_delete(
-        payload: ManualDeleteRequest,
-        report_progress: DeletionProgressReporter | None = None,
-    ) -> ProcessingResultResponse:
-        """Resolve and execute one manual deletion, optionally reporting progress."""
+    async def resolve_manual_delete(payload: ManualDeleteRequest) -> MediaDeletionEvent:
+        """Resolve a manual library selection to a stable deletion event."""
 
-        report = report_progress or _ignore_deletion_progress
         container = resolved_container
-        item_name: str
 
         if payload.item_type is ItemType.MOVIE:
             if payload.radarr_movie_id is None:
@@ -280,12 +288,6 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                     status_code=_HTTP_UNPROCESSABLE_CONTENT,
                     detail="radarr_movie_id is required for movie deletion.",
                 )
-            report(
-                ManualDeleteJobPhase.LOCATING,
-                10,
-                "Looking up the movie in Radarr.",
-                None,
-            )
             movies_list = list(await container.radarr.list_movies())
             movie = next((movie for movie in movies_list if movie.id == payload.radarr_movie_id), None)
             if movie is None:
@@ -293,59 +295,92 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Radarr movie {payload.radarr_movie_id} not found.",
                 )
-            item_name = movie.title
-            fingerprint = MediaFingerprint(
-                tmdb_id=movie.tmdb_id,
-                imdb_id=movie.imdb_id,
-                path=movie.path,
-            )
-            event = MediaDeletionEvent(
+            return MediaDeletionEvent(
                 notification_type="ItemDeleted",
                 item_type=ItemType.MOVIE,
-                item_id="manual",
-                name=item_name,
-                fingerprint=fingerprint,
+                item_id=f"manual:radarr:{movie.id}",
+                name=movie.title,
+                fingerprint=MediaFingerprint(
+                    tmdb_id=movie.tmdb_id,
+                    imdb_id=movie.imdb_id,
+                    path=movie.path,
+                ),
             )
-        else:
-            if payload.sonarr_series_id is None:
-                raise HTTPException(
-                    status_code=_HTTP_UNPROCESSABLE_CONTENT,
-                    detail="sonarr_series_id is required for series/season deletion.",
-                )
-            report(
-                ManualDeleteJobPhase.LOCATING,
-                10,
-                "Looking up the series in Sonarr.",
-                None,
+
+        if payload.item_type not in {ItemType.SERIES, ItemType.SEASON}:
+            raise HTTPException(
+                status_code=_HTTP_UNPROCESSABLE_CONTENT,
+                detail="Manual deletion supports movies, series, and seasons.",
             )
-            series_list = list(await container.sonarr.list_series())
-            series = next((series for series in series_list if series.id == payload.sonarr_series_id), None)
-            if series is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Sonarr series {payload.sonarr_series_id} not found.",
-                )
-            if payload.item_type is ItemType.SEASON and payload.season_number is None:
-                raise HTTPException(
-                    status_code=_HTTP_UNPROCESSABLE_CONTENT,
-                    detail="season_number is required for season deletion.",
-                )
-            item_name = series.title
-            fingerprint = MediaFingerprint(
+        if payload.sonarr_series_id is None:
+            raise HTTPException(
+                status_code=_HTTP_UNPROCESSABLE_CONTENT,
+                detail="sonarr_series_id is required for series/season deletion.",
+            )
+        series_list = list(await container.sonarr.list_series())
+        series = next((series for series in series_list if series.id == payload.sonarr_series_id), None)
+        if series is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Sonarr series {payload.sonarr_series_id} not found.",
+            )
+        if payload.item_type is ItemType.SEASON and payload.season_number is None:
+            raise HTTPException(
+                status_code=_HTTP_UNPROCESSABLE_CONTENT,
+                detail="season_number is required for season deletion.",
+            )
+        scope = "series" if payload.item_type is ItemType.SERIES else f"season:{payload.season_number}"
+        return MediaDeletionEvent(
+            notification_type="ItemDeleted",
+            item_type=payload.item_type,
+            item_id=f"manual:sonarr:{series.id}:{scope}",
+            name=series.title,
+            fingerprint=MediaFingerprint(
                 tvdb_id=series.tvdb_id,
                 tmdb_id=series.tmdb_id,
                 imdb_id=series.imdb_id,
                 path=series.path,
+            ),
+            series_name=series.title,
+            season_number=payload.season_number,
+        )
+
+    def with_jellyfin_action(result: ProcessingResult, action: ActionResult) -> ProcessingResult:
+        actions = (*result.actions, action)
+        overall = OverallStatus.PARTIAL_FAILURE if action.status is ActionStatus.FAILED else result.status
+        return ProcessingResult(event=result.event, status=overall, actions=actions)
+
+    async def preview_manual_delete(
+        payload: ManualDeleteRequest,
+        event: MediaDeletionEvent,
+    ) -> ProcessingResultResponse:
+        """Build a mutation-free plan containing every intended target."""
+
+        strategy = resolved_container.strategy_factory.for_item_type(event.item_type, dry_run=True)
+        result = await strategy.handle(event)
+        if payload.jellyfin_item_id:
+            result = with_jellyfin_action(
+                result,
+                ActionResult(
+                    system="jellyfin",
+                    action="delete_item",
+                    status=ActionStatus.DRY_RUN,
+                    message="Would remove the selected item from Jellyfin after downstream cleanup succeeds.",
+                    details={"jellyfin_item_id": payload.jellyfin_item_id},
+                ),
             )
-            event = MediaDeletionEvent(
-                notification_type="ItemDeleted",
-                item_type=payload.item_type,
-                item_id="manual",
-                name=item_name,
-                fingerprint=fingerprint,
-                series_name=item_name,
-                season_number=payload.season_number,
-            )
+        return ProcessingResultResponse.from_domain(result)
+
+    async def execute_manual_delete(
+        payload: ManualDeleteRequest,
+        event: MediaDeletionEvent,
+        report_progress: DeletionProgressReporter | None = None,
+    ) -> ProcessingResultResponse:
+        """Execute a previously resolved manual deletion and record its outcome."""
+
+        report = report_progress or _ignore_deletion_progress
+        container = resolved_container
+        item_name = event.name
 
         report(
             ManualDeleteJobPhase.CLEANING,
@@ -353,7 +388,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
             "Cleaning up Arr services, torrent clients, and Seerr.",
             item_name,
         )
-        strategy = container.strategy_factory.for_item_type(payload.item_type)
+        strategy = container.strategy_factory.for_item_type(event.item_type)
         completed_actions = 0
 
         def report_action(action: ActionResult) -> None:
@@ -369,15 +404,30 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         with observe_actions(report_action):
             result = await strategy.handle(event)
 
-        report(
-            ManualDeleteJobPhase.RECORDING,
-            82,
-            "Saving the cleanup result to activity history.",
-            item_name,
-        )
-        await activity_store.record(result)
-
-        if payload.jellyfin_item_id and not container.config.general.dry_run:
+        if payload.jellyfin_item_id and container.config.general.dry_run:
+            result = with_jellyfin_action(
+                result,
+                ActionResult(
+                    system="jellyfin",
+                    action="delete_item",
+                    status=ActionStatus.DRY_RUN,
+                    message="Would remove the selected item from Jellyfin after downstream cleanup succeeds.",
+                    details={"jellyfin_item_id": payload.jellyfin_item_id},
+                ),
+            )
+        elif payload.jellyfin_item_id and result.status is OverallStatus.PARTIAL_FAILURE:
+            result = with_jellyfin_action(
+                result,
+                ActionResult(
+                    system="jellyfin",
+                    action="delete_item",
+                    status=ActionStatus.SKIPPED,
+                    message="Kept the Jellyfin item because downstream cleanup did not finish safely.",
+                    reason=FailureReason.DOWNSTREAM_ERROR,
+                    details={"jellyfin_item_id": payload.jellyfin_item_id},
+                ),
+            )
+        elif payload.jellyfin_item_id:
             report(
                 ManualDeleteJobPhase.JELLYFIN,
                 92,
@@ -386,10 +436,32 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
             )
             try:
                 await container.jellyfin_server.delete_item(payload.jellyfin_item_id)
-            except Exception:
+            except Exception as exc:  # noqa: BLE001
                 _logger.warning(
                     "Failed to delete Jellyfin item %s after cascade deletion",
                     payload.jellyfin_item_id,
+                )
+                result = with_jellyfin_action(
+                    result,
+                    ActionResult(
+                        system="jellyfin",
+                        action="delete_item",
+                        status=ActionStatus.FAILED,
+                        message="Could not remove the selected item from Jellyfin.",
+                        reason=FailureReason.DOWNSTREAM_ERROR,
+                        details={"jellyfin_item_id": payload.jellyfin_item_id, "error": str(exc)},
+                    ),
+                )
+            else:
+                result = with_jellyfin_action(
+                    result,
+                    ActionResult(
+                        system="jellyfin",
+                        action="delete_item",
+                        status=ActionStatus.DELETED,
+                        message="Removed the selected item from Jellyfin.",
+                        details={"jellyfin_item_id": payload.jellyfin_item_id},
+                    ),
                 )
         else:
             report(
@@ -399,9 +471,21 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                 item_name,
             )
 
+        report(
+            ManualDeleteJobPhase.RECORDING,
+            97,
+            "Saving the cleanup result to activity history.",
+            item_name,
+        )
+        await activity_store.record(result)
         return ProcessingResultResponse.from_domain(result)
 
-    deletion_jobs = ManualDeletionJobStore(execute_manual_delete)
+    deletion_jobs = ManualDeletionJobStore(
+        resolve_manual_delete,
+        preview_manual_delete,
+        execute_manual_delete,
+        db_path=Path(settings.db_path),
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> Any:
@@ -1433,6 +1517,16 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         return LibraryMoviesResponse(movies=result)
 
     @app.post(
+        "/api/actions/delete/preview",
+        response_model=ManualDeletePreviewResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def preview_manual_deletion(
+        payload: ManualDeleteRequest,
+    ) -> ManualDeletePreviewResponse:
+        return await deletion_jobs.preview(payload)
+
+    @app.post(
         "/api/actions/delete/jobs",
         response_model=ManualDeleteJobResponse,
         status_code=status.HTTP_202_ACCEPTED,
@@ -1441,7 +1535,13 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     async def queue_manual_delete(
         payload: ManualDeleteRequest,
     ) -> ManualDeleteJobResponse:
-        return await deletion_jobs.submit(payload)
+        try:
+            return await deletion_jobs.submit(payload)
+        except DeletionPreflightError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
 
     @app.get(
         "/api/actions/delete/jobs",
@@ -1481,7 +1581,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         except DeletionJobActiveError as exc:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="A running deletion job cannot be dismissed.",
+                detail="An active deletion job cannot be dismissed.",
             ) from exc
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -1489,9 +1589,19 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         "/api/actions/delete",
         response_model=ProcessingResultResponse,
         dependencies=[Depends(require_admin_token)],
+        include_in_schema=False,
     )
     async def manual_delete(payload: ManualDeleteRequest) -> ProcessingResultResponse:
-        return await execute_manual_delete(payload)
+        event = await resolve_manual_delete(payload)
+        plan = await preview_manual_delete(payload, event)
+        try:
+            validate_plan_confirmation(payload, plan)
+        except DeletionPreflightError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
+        return await execute_manual_delete(payload, event)
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa(full_path: str) -> FileResponse:

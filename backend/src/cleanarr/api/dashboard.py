@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from cleanarr.api.schemas import ProcessingResultResponse
 from cleanarr.domain import ItemType, ProcessingResult
 from cleanarr.domain.config import RuntimeConfig
+from cleanarr.infrastructure.database import migrate_database
 
 JELLYFIN_GENERIC_TEMPLATE = """{
   "notification_type": "{{json_encode NotificationType}}",
@@ -69,16 +70,7 @@ class ActivityStore:
         self._retention_days = retention_days
 
     def initialize_sync(self) -> None:
-        with sqlite3.connect(self._db_path) as conn:
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS activity ("
-                "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
-                "  processed_at TEXT NOT NULL,"
-                "  result_json TEXT NOT NULL"
-                ")"
-            )
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_processed_at ON activity(processed_at)")
-            conn.commit()
+        migrate_database(self._db_path)
         self._purge_sync()
 
     async def initialize(self) -> None:

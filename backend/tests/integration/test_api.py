@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,6 +14,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from cleanarr.api.app import create_app
+from cleanarr.application.strategies import DeletionStrategyFactory
 from cleanarr.domain import (
     ActionResult,
     ActionStatus,
@@ -20,11 +23,19 @@ from cleanarr.domain import (
     MediaFingerprint,
     OverallStatus,
     ProcessingResult,
+    RadarrHistoryRecord,
+    RadarrMovie,
 )
 from cleanarr.domain.config import GeneralConfig, RuntimeConfig
 from cleanarr.infrastructure.container import ServiceContainer
 from cleanarr.infrastructure.settings import Settings
-from tests.fakes import FakeService
+from tests.fakes import (
+    FakeDownloaderClient,
+    FakeRadarrClient,
+    FakeSeerrClient,
+    FakeService,
+    FakeSonarrClient,
+)
 
 
 @asynccontextmanager
@@ -106,6 +117,102 @@ class FakeContainer:
 
     async def close(self) -> None:
         return None
+
+
+@pytest.mark.asyncio
+async def test_manual_delete_requires_and_persists_exact_preflight(tmp_path: Path) -> None:
+    service = FakeService(results=[])
+    container = FakeContainer(service, db_path=tmp_path / "cleanarr.db")
+    radarr = FakeRadarrClient(
+        movies=[
+            RadarrMovie(
+                id=7,
+                title="Preflight Movie",
+                path="/media/preflight-movie",
+                tmdb_id=700,
+                imdb_id="tt700",
+            )
+        ],
+        history_by_movie={
+            7: [
+                RadarrHistoryRecord(
+                    id=70,
+                    movie_id=7,
+                    event_type="grabbed",
+                    download_id="HASH700",
+                    imported_path=None,
+                )
+            ]
+        },
+    )
+    sonarr = FakeSonarrClient(
+        series=[],
+        history_by_series={},
+        episodes_by_series={},
+        episode_files_by_series={},
+    )
+    seerr = FakeSeerrClient(media=[], requests=[], issues=[])
+    downloader = FakeDownloaderClient(existing_hashes={"HASH700"})
+    container.radarr = radarr  # type: ignore[attr-defined]
+    container.sonarr = sonarr  # type: ignore[attr-defined]
+    container.seerr = seerr  # type: ignore[attr-defined]
+    container.downloader = downloader  # type: ignore[attr-defined]
+    container.strategy_factory = DeletionStrategyFactory(  # type: ignore[attr-defined]
+        dry_run=True,
+        logger=logging.getLogger("tests.integration.manual-delete"),
+        radarr=radarr,
+        sonarr=sonarr,
+        seerr=seerr,
+        downloader=downloader,
+    )
+    app = create_app(container=container)
+    request = {"item_type": "Movie", "radarr_movie_id": 7}
+    headers = {"X-Admin-Token": "admin-token"}
+
+    async with app_client(app) as client:
+        preview = await client.post(
+            "/api/actions/delete/preview",
+            headers=headers,
+            json=request,
+        )
+        unconfirmed = await client.post(
+            "/api/actions/delete/jobs",
+            headers=headers,
+            json=request,
+        )
+        unconfirmed_legacy = await client.post(
+            "/api/actions/delete",
+            headers=headers,
+            json=request,
+        )
+        queued = await client.post(
+            "/api/actions/delete/jobs",
+            headers=headers,
+            json={**request, "confirmed_plan_hash": preview.json()["plan_hash"]},
+        )
+
+        for _ in range(100):
+            job = await client.get(
+                f"/api/actions/delete/jobs/{queued.json()['id']}",
+                headers=headers,
+            )
+            if job.json()["status"] == "completed":
+                break
+            await asyncio.sleep(0.01)
+        else:
+            raise AssertionError("manual deletion job did not complete")
+
+    assert preview.status_code == 200
+    assert preview.json()["plan"]["item_id"] == "manual:radarr:7"
+    assert preview.json()["plan"]["fingerprint"]["path"] == "/media/preflight-movie"
+    assert any(action["details"].get("hash") == "HASH700" for action in preview.json()["plan"]["actions"])
+    assert unconfirmed.status_code == 409
+    assert unconfirmed_legacy.status_code == 409
+    assert queued.status_code == 202
+    assert job.json()["attempt_count"] == 1
+    assert job.json()["preflight"] == preview.json()["plan"]
+    assert radarr.deleted_movie_ids == []
+    assert downloader.deleted_hashes == []
 
 
 @pytest.mark.asyncio

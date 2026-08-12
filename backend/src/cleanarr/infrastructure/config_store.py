@@ -8,6 +8,7 @@ from pathlib import Path
 from threading import Lock
 
 from cleanarr.domain.config import RuntimeConfig
+from cleanarr.infrastructure.database import migrate_database
 
 
 class FileConfigStore:
@@ -51,15 +52,7 @@ class SqliteConfigStore:
         self._db_path = Path(db_path)
         self._migrate_from = Path(migrate_from) if migrate_from else None
         self._lock = Lock()
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self._db_path) as conn:
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS config ("
-                "  id INTEGER PRIMARY KEY CHECK (id = 1),"
-                "  config_json TEXT NOT NULL"
-                ")"
-            )
-            conn.commit()
+        migrate_database(self._db_path)
 
     def load(self) -> RuntimeConfig | None:
         """Return the persisted config, auto-migrating from a JSON file if needed."""

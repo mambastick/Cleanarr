@@ -10,6 +10,7 @@ from cleanarr.application.service import CascadeDeletionService
 from cleanarr.application.strategies import DeletionStrategyFactory
 from cleanarr.domain import (
     ActionStatus,
+    DownloaderRemovalResult,
     ItemType,
     MediaDeletionEvent,
     MediaFingerprint,
@@ -93,6 +94,101 @@ async def test_movie_delete_cleans_radarr_seerr_and_downloader() -> None:
     assert downloader.deleted_hashes == ["HASH100"]
     assert seerr.deleted_request_ids == [21]
     assert seerr.deleted_issue_ids == [31]
+    assert seerr.deleted_media_ids == [11]
+
+
+@pytest.mark.asyncio
+async def test_downloader_failure_keeps_ownership_records_for_safe_retry() -> None:
+    class FlakyDownloader:
+        attempts = 0
+
+        async def delete_hashes(
+            self,
+            hashes: list[str],
+            *,
+            delete_files: bool,
+            dry_run: bool = False,
+        ) -> list[DownloaderRemovalResult]:
+            self.attempts += 1
+            if self.attempts == 1:
+                return [
+                    DownloaderRemovalResult(
+                        hash_value=hashes[0],
+                        existed=True,
+                        client_id="qbt-main",
+                        client_kind="qbittorrent",
+                        error="qBittorrent temporarily unavailable",
+                    )
+                ]
+            return [
+                DownloaderRemovalResult(
+                    hash_value=hashes[0],
+                    existed=True,
+                    client_id="qbt-main",
+                    client_kind="qbittorrent",
+                )
+            ]
+
+    radarr = FakeRadarrClient(
+        movies=[RadarrMovie(id=1, title="Movie", path="/data/movie", tmdb_id=100, imdb_id="tt100")],
+        history_by_movie={
+            1: [
+                RadarrHistoryRecord(
+                    id=1,
+                    movie_id=1,
+                    event_type="grabbed",
+                    download_id="HASH100",
+                    imported_path=None,
+                )
+            ]
+        },
+    )
+    seerr = FakeSeerrClient(
+        media=[
+            SeerrMedia(
+                id=11,
+                media_type="movie",
+                tmdb_id=100,
+                tvdb_id=None,
+                imdb_id="tt100",
+                jellyfin_media_id=None,
+            )
+        ],
+        requests=[],
+        issues=[],
+    )
+    downloader = FlakyDownloader()
+    factory = DeletionStrategyFactory(
+        dry_run=False,
+        logger=logging.getLogger("tests.scenarios.retry"),
+        radarr=radarr,
+        sonarr=FakeSonarrClient(
+            series=[],
+            history_by_series={},
+            episodes_by_series={},
+            episode_files_by_series={},
+        ),
+        seerr=seerr,
+        downloader=downloader,
+    )
+    strategy = factory.for_item_type(ItemType.MOVIE)
+    event = MediaDeletionEvent(
+        notification_type="ItemDeleted",
+        item_type=ItemType.MOVIE,
+        item_id="movie-1",
+        name="Movie",
+        fingerprint=MediaFingerprint(tmdb_id=100, imdb_id="tt100"),
+    )
+
+    first = await strategy.handle(event)
+    assert first.status.value == "partial_failure"
+    assert radarr.deleted_movie_ids == []
+    assert seerr.deleted_media_ids == []
+    assert any(action.action == "delete_movie" and action.status is ActionStatus.SKIPPED for action in first.actions)
+
+    second = await strategy.handle(event)
+    assert second.status.value == "success"
+    assert radarr.deleted_movie_ids == [1]
     assert seerr.deleted_media_ids == [11]
 
 

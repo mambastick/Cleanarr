@@ -102,8 +102,27 @@ CleanArr 1.0 — стабильный и безопасный оркестрат
   browser-проходом создания канонического профиля Seerr. Его
   [quality run](https://github.com/mambastick/Cleanarr/actions/runs/31556760557)
   успешно завершил все обязательные jobs.
-- В этапе остаются точные персистентные preflight plans, подавление duplicate
-  events, ownership locks и durable retry/resume после рестарта процесса.
+- Ручное удаление теперь требует точного dry-run preflight с устойчивыми media
+  identifiers/path, Arr instance, download client/hash, изменениями
+  Seerr/Jellyfin и всеми структурированными safety-пропусками. Сервер связывает
+  подтверждение с SHA-256 канонического плана, отклоняет ошибочный или
+  изменившийся план и повторно проверяет его перед первой мутацией.
+- Ручные задания, resolved event, подтверждённый preflight, частичный результат,
+  номер попытки и время retry сохраняются в SQLite. После частичной ошибки план
+  пересчитывается и повторяется; после рестарта процесс продолжает работу из
+  сохранённого event и не зависит от уже удалённой записи Arr. Ошибка удаления
+  torrent блокирует зависимые удаления Arr, Seerr и Jellyfin, чтобы ownership
+  evidence сохранился для следующей безопасной попытки.
+- Версия 1 схемы SQLite — последовательная аддитивная миграция с неверсионированной
+  БД v0.3. Автотесты проверяют обновление, повторный запуск, отклонение более
+  новой схемы, проверенный backup и restore без потери config/activity; команды
+  rollback для контейнера и нативных пакетов документированы на двух языках.
+- Срез preflight/durable jobs локально проверен 87 backend-тестами, Ruff
+  format/lint, strict mypy, ESLint, production build frontend, container и
+  установленными DEB/RPM smoke-тестами, а также browser-проходом просмотра
+  плана и отправки с его hash.
+- В этапе остаются подавление duplicate events и сериализованные ownership locks
+  для media entities, torrent hashes и paths.
 
 ## Обязательный scope 1.0
 

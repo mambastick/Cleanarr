@@ -122,6 +122,15 @@ class ActionResultResponse(BaseModel):
         )
 
 
+class MediaFingerprintResponse(BaseModel):
+    """Stable identifiers and path used to resolve a deletion target."""
+
+    tmdb_id: int | None = None
+    tvdb_id: int | None = None
+    imdb_id: str | None = None
+    path: str | None = None
+
+
 class ProcessingResultResponse(BaseModel):
     """Serialized per-event result."""
 
@@ -129,6 +138,10 @@ class ProcessingResultResponse(BaseModel):
     item_id: str
     name: str
     status: OverallStatus
+    fingerprint: MediaFingerprintResponse = Field(default_factory=MediaFingerprintResponse)
+    season_number: int | None = None
+    episode_number: int | None = None
+    episode_end_number: int | None = None
     actions: list[ActionResultResponse]
 
     @classmethod
@@ -138,6 +151,15 @@ class ProcessingResultResponse(BaseModel):
             item_id=result.event.item_id,
             name=result.event.name,
             status=result.status,
+            fingerprint=MediaFingerprintResponse(
+                tmdb_id=result.event.fingerprint.tmdb_id,
+                tvdb_id=result.event.fingerprint.tvdb_id,
+                imdb_id=result.event.fingerprint.imdb_id,
+                path=result.event.fingerprint.path,
+            ),
+            season_number=result.event.season_number,
+            episode_number=result.event.episode_number,
+            episode_end_number=result.event.episode_end_number,
             actions=[ActionResultResponse.from_domain(action) for action in result.actions],
         )
 

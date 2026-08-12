@@ -103,9 +103,27 @@ idempotent webhook handling, and durable retry scheduling.
   and a browser walkthrough of canonical Seerr profile creation. Its
   [quality run](https://github.com/mambastick/Cleanarr/actions/runs/31556760557)
   completed all required jobs successfully.
-- Remaining milestone work includes exact persisted preflight plans,
-  duplicate-event suppression, serialized ownership locks, and durable
-  retry/resume across process restarts.
+- Manual deletion now requires an exact dry-run preflight showing stable media
+  identifiers/path, Arr instance, download client/hash, Seerr/Jellyfin changes,
+  and every structured safety skip. The server binds confirmation to a SHA-256
+  hash of the canonical plan, rejects failed or changed plans, and rechecks it
+  before the first mutation.
+- Manual jobs, the resolved event, confirmed preflight, partial result, attempt
+  count, and retry deadline are persisted in SQLite. Partial downstream
+  failures are replanned and retried; an interrupted process resumes from the
+  persisted event rather than depending on an Arr record that may already be
+  absent. Failed torrent cleanup blocks dependent Arr, Seerr, and Jellyfin
+  removal so ownership evidence remains available for the next safe attempt.
+- SQLite schema version 1 is an ordered additive migration from the unversioned
+  v0.3 database. Automated upgrade, idempotent re-run, newer-schema rejection,
+  verified backup, and restore tests protect existing config/activity data;
+  container and native rollback commands are documented in both languages.
+- The preflight/durable-job slice is locally verified by 87 backend tests,
+  Ruff format/lint, strict mypy, ESLint, the frontend production build,
+  container and installed DEB/RPM smoke tests, plus a browser walkthrough of
+  plan review and hash-bound submission.
+- Remaining milestone work is duplicate-event suppression and serialized
+  ownership locks for media entities, torrent hashes, and paths.
 
 ## Required 1.0 scope
 

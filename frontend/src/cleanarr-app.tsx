@@ -83,6 +83,8 @@ import type {
   LibrarySeriesResponse,
   ManualDeleteJob,
   ManualDeleteJobListResponse,
+  ManualDeletePreviewResponse,
+  ManualDeleteRequest,
 } from "@/lib/library"
 
 // ─── Brand ───────────────────────────────────────────────────────────────────
@@ -133,6 +135,22 @@ type LibraryDeleteTarget =
       movie_title: string
       jellyfin_movie_id?: string | null
     }
+
+function buildManualDeleteRequest(target: LibraryDeleteTarget): ManualDeleteRequest {
+  if (target.kind === "movie") {
+    return {
+      item_type: "Movie",
+      radarr_movie_id: target.radarr_movie_id,
+      jellyfin_item_id: target.jellyfin_movie_id ?? null,
+    }
+  }
+  return {
+    item_type: target.item_type,
+    sonarr_series_id: target.sonarr_series_id,
+    season_number: target.season_number ?? null,
+    jellyfin_item_id: target.jellyfin_item_id ?? null,
+  }
+}
 
 type ServiceDraft = {
   id?: string
@@ -516,6 +534,14 @@ type UiTextKey =
   | "noWebhookActivity"
   | "library"
   | "backgroundTasks"
+  | "preflightPlan"
+  | "preflightPlanHint"
+  | "preflightLoading"
+  | "preflightUnavailable"
+  | "noPlannedActions"
+  | "attempt"
+  | "planning"
+  | "retrying"
   | "searchMovies"
   | "noMoviesFound"
   | "noMoviesMatch"
@@ -806,6 +832,14 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     dryRunModeNotice: "Dry run mode",
     titleNotConfigured: "No authentication method is currently configured.",
     backgroundTasks: "Background tasks",
+    preflightPlan: "Exact preflight plan",
+    preflightPlanHint: "Confirm only after reviewing the resolved targets and safety skips below.",
+    preflightLoading: "Resolving targets and safety checks…",
+    preflightUnavailable: "The plan must load successfully before deletion can be confirmed.",
+    noPlannedActions: "No downstream actions were resolved.",
+    attempt: "attempt",
+    planning: "Checking plan",
+    retrying: "Waiting to retry",
     searchMovies: "Search movies…",
     noMoviesFound: "No movies found",
     noMoviesMatch: "No movies match your search",
@@ -1074,6 +1108,14 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     dryRunModeNotice: "Тестовый режим",
     titleNotConfigured: "Метод авторизации сейчас не настроен.",
     backgroundTasks: "Фоновые задачи",
+    preflightPlan: "Точный план удаления",
+    preflightPlanHint: "Подтверждайте удаление только после проверки целей и защитных пропусков ниже.",
+    preflightLoading: "Определяем цели и выполняем проверки безопасности…",
+    preflightUnavailable: "Подтверждение недоступно, пока план не загружен без ошибок.",
+    noPlannedActions: "Действия во внешних сервисах не найдены.",
+    attempt: "попытка",
+    planning: "Проверка плана",
+    retrying: "Ожидание повтора",
     searchMovies: "Поиск фильмов…",
     noMoviesFound: "Фильмы не найдены",
     noMoviesMatch: "Нет совпадений по вашему поиску",
@@ -1386,6 +1428,9 @@ function getStatusLabel(status: string, text: UiTextMap): string {
     case "deleted": return text.deleted
     case "queued": return text.queued
     case "running": return text.running
+    case "planning": return text.planning
+    case "retry_wait":
+    case "retrying": return text.retrying
     case "completed": return text.completed
     case "skipped": return text.skipped
     case "healthy": return text.healthy
@@ -1442,6 +1487,9 @@ function CleanArrApp() {
   const [isLibraryMoviesLoading, setIsLibraryMoviesLoading] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<LibraryDeleteTarget | null>(null)
   const [isStartingDelete, setIsStartingDelete] = useState(false)
+  const [isDeletePreviewLoading, setIsDeletePreviewLoading] = useState(false)
+  const [deletePreview, setDeletePreview] = useState<ManualDeletePreviewResponse | null>(null)
+  const [deletePreviewRevision, setDeletePreviewRevision] = useState(0)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [deleteJobs, setDeleteJobs] = useState<ManualDeleteJob[]>([])
   const knownDeleteJobStates = useRef(new Map<string, ManualDeleteJob["status"]>())
@@ -1622,26 +1670,43 @@ function CleanArrApp() {
     }
   }, [fetchJson, loadDashboard, loadLibrary, loadLibraryMovies, uiText.backgroundRefreshFailed])
 
+  useEffect(() => {
+    if (!deleteTarget) {
+      setDeletePreview(null)
+      setIsDeletePreviewLoading(false)
+      return
+    }
+
+    const controller = new AbortController()
+    setDeletePreview(null)
+    setDeleteError(null)
+    setIsDeletePreviewLoading(true)
+    void fetchJson<ManualDeletePreviewResponse>("/api/actions/delete/preview", {
+      method: "POST",
+      body: JSON.stringify(buildManualDeleteRequest(deleteTarget)),
+      signal: controller.signal,
+    })
+      .then((preview) => setDeletePreview(preview))
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return
+        setDeleteError(normalizeError(error))
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsDeletePreviewLoading(false)
+      })
+
+    return () => controller.abort()
+  }, [deletePreviewRevision, deleteTarget, fetchJson])
+
   const executeDelete = useCallback(async () => {
-    if (!deleteTarget) return
+    if (!deleteTarget || !deletePreview) return
     const target = deleteTarget
     setIsStartingDelete(true)
     setDeleteError(null)
     try {
-      let body: Record<string, unknown>
-      if (target.kind === "movie") {
-        body = {
-          item_type: "Movie",
-          radarr_movie_id: target.radarr_movie_id,
-          jellyfin_item_id: target.jellyfin_movie_id ?? null,
-        }
-      } else {
-        body = {
-          item_type: target.item_type,
-          sonarr_series_id: target.sonarr_series_id,
-          season_number: target.season_number ?? null,
-          jellyfin_item_id: target.jellyfin_item_id ?? null,
-        }
+      const body: ManualDeleteRequest = {
+        ...buildManualDeleteRequest(target),
+        confirmed_plan_hash: deletePreview.plan_hash,
       }
       const job = await fetchJson<ManualDeleteJob>("/api/actions/delete/jobs", {
         method: "POST",
@@ -1654,10 +1719,12 @@ function CleanArrApp() {
       toast.success(uiText.deletionStarted)
     } catch (error) {
       setDeleteError(normalizeError(error))
+      setDeletePreview(null)
+      setDeletePreviewRevision((current) => current + 1)
     } finally {
       setIsStartingDelete(false)
     }
-  }, [deleteTarget, fetchJson, uiText.deletionStarted])
+  }, [deletePreview, deleteTarget, fetchJson, uiText.deletionStarted])
 
   const dismissDeleteJob = useCallback(
     async (jobId: string) => {
@@ -1698,7 +1765,7 @@ function CleanArrApp() {
   }, [uiLanguage])
 
   const hasActiveDeleteJobs = deleteJobs.some(
-    (job) => job.status === "queued" || job.status === "running",
+    (job) => job.status === "queued" || job.status === "running" || job.status === "retry_wait",
   )
 
   useEffect(() => {
@@ -2132,11 +2199,14 @@ function CleanArrApp() {
         target={deleteTarget}
         text={uiText}
         isStarting={isStartingDelete}
+        isPreviewLoading={isDeletePreviewLoading}
+        preview={deletePreview}
         error={deleteError}
         isDryRun={!isLive}
         onConfirm={() => void executeDelete()}
         onClose={() => {
           setDeleteTarget(null)
+          setDeletePreview(null)
           setDeleteError(null)
         }}
       />
@@ -5052,6 +5122,8 @@ function DeleteConfirmModal({
   target,
   text,
   isStarting,
+  isPreviewLoading,
+  preview,
   error,
   isDryRun,
   onConfirm,
@@ -5060,6 +5132,8 @@ function DeleteConfirmModal({
   target: LibraryDeleteTarget | null
   text: UiTextMap
   isStarting: boolean
+  isPreviewLoading: boolean
+  preview: ManualDeletePreviewResponse | null
   error: string | null
   isDryRun: boolean
   onConfirm: () => void
@@ -5069,12 +5143,12 @@ function DeleteConfirmModal({
 
   const label =
     target.kind === "movie"
-      ? `"${target.movie_title}"`
+      ? target.movie_title
       : target.item_type === "Season"
         ? text.seasonOfSeries
             .replace("{{season}}", String(target.season_number))
-            .replace("{{series}}", `"${target.series_title}"`)
-        : `"${target.series_title}"`
+            .replace("{{series}}", target.series_title)
+        : target.series_title
 
   return (
     <Modal
@@ -5086,8 +5160,17 @@ function DeleteConfirmModal({
           <Button variant="outline" onClick={onClose} disabled={isStarting}>
             {text.cancel}
           </Button>
-          <Button variant="destructive" onClick={onConfirm} disabled={isStarting}>
-            {isStarting ? (
+          <Button
+            variant="destructive"
+            onClick={onConfirm}
+            disabled={
+              isStarting ||
+              isPreviewLoading ||
+              preview == null ||
+              preview.plan.status === "partial_failure"
+            }
+          >
+            {isStarting || isPreviewLoading ? (
               <LoaderCircle className="mr-1 size-3.5 animate-spin" />
             ) : (
               <Trash2 className="mr-1 size-3.5" />
@@ -5109,6 +5192,66 @@ function DeleteConfirmModal({
           {text.confirmDeleteDescription}
         </p>
 
+        <div className="rounded-lg border bg-muted/20 p-3">
+          <div className="flex items-start gap-2">
+            {isPreviewLoading ? (
+              <LoaderCircle className="mt-0.5 size-4 shrink-0 animate-spin text-blue-500" />
+            ) : preview ? (
+              <ShieldCheck className="mt-0.5 size-4 shrink-0 text-emerald-500" />
+            ) : (
+              <ShieldAlert className="mt-0.5 size-4 shrink-0 text-amber-500" />
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium">{text.preflightPlan}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {isPreviewLoading
+                  ? text.preflightLoading
+                    : preview?.plan.status === "partial_failure"
+                      ? text.preflightUnavailable
+                      : preview
+                    ? text.preflightPlanHint
+                    : text.preflightUnavailable}
+              </p>
+            </div>
+          </div>
+
+          {preview ? (
+            <div className="mt-3 space-y-2">
+              <p className="break-all rounded-md bg-background px-2.5 py-2 font-mono text-[11px] text-muted-foreground">
+                {formatPlanFingerprint(preview.plan)}
+              </p>
+              {preview.plan.actions.length > 0 ? (
+                <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                  {preview.plan.actions.map((action, index) => (
+                    <div key={`${action.system}-${action.action}-${index}`} className="rounded-md border bg-background p-2.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-xs font-medium">{action.system}</span>
+                        <span className="font-mono text-[11px] text-muted-foreground">{action.action}</span>
+                        <Badge variant="outline" className="ml-auto text-[10px]">
+                          {getStatusLabel(action.status, text)}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{action.message}</p>
+                      {action.reason ? (
+                        <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
+                          {text.reasonLabel} {action.reason}
+                        </p>
+                      ) : null}
+                      {Object.keys(action.details).length > 0 ? (
+                        <p className="mt-1 break-all font-mono text-[10px] leading-relaxed text-muted-foreground">
+                          {formatPlanDetails(action.details)}
+                        </p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 text-xs text-muted-foreground">{text.noPlannedActions}</p>
+              )}
+            </div>
+          ) : null}
+        </div>
+
         {error && <ErrorBanner message={error} text={text} />}
       </div>
     </Modal>
@@ -5128,7 +5271,8 @@ function BackgroundJobsPanel({
   if (jobs.length === 0) return null
 
   const activeCount = jobs.reduce(
-    (count, job) => count + (job.status === "queued" || job.status === "running" ? 1 : 0),
+    (count, job) =>
+      count + (job.status === "queued" || job.status === "running" || job.status === "retry_wait" ? 1 : 0),
     0,
   )
 
@@ -5157,7 +5301,8 @@ function BackgroundJobsPanel({
       {expanded ? (
         <div className="max-h-[min(28rem,65vh)] space-y-2 overflow-y-auto border-t p-2.5" aria-live="polite">
           {jobs.map((job) => {
-            const isActive = job.status === "queued" || job.status === "running"
+            const isActive =
+              job.status === "queued" || job.status === "running" || job.status === "retry_wait"
             const hasProblem = job.status === "failed" || job.result?.status === "partial_failure"
             const itemName = job.item_name ?? `${getItemTypeLabel(job.item_type, text)}: ${text.deletion}`
 
@@ -5217,9 +5362,17 @@ function BackgroundJobsPanel({
                       <span>{getStatusLabel(job.phase, text)}</span>
                       <span>
                         {job.result ? `${job.result.actions.length} ${text.actions} · ` : ""}
+                        {job.attempt_count > 0
+                          ? `${text.attempt} ${job.attempt_count}/${job.max_attempts} · `
+                          : ""}
                         {job.progress_percent}%
                       </span>
                     </div>
+                    {job.status === "retry_wait" && job.next_retry_at ? (
+                      <p className="mt-1 text-right text-[10px] text-muted-foreground">
+                        {text.retrying}: {new Date(job.next_retry_at).toLocaleTimeString()}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -5235,6 +5388,24 @@ function BackgroundJobsPanel({
 
 function formatMediaTitle(itemType: string, name: string): string {
   return `${itemType}: ${name}`
+}
+
+function formatPlanFingerprint(plan: ManualDeletePreviewResponse["plan"]): string {
+  const values = [
+    `item_id=${plan.item_id}`,
+    plan.fingerprint.tmdb_id != null ? `tmdb_id=${plan.fingerprint.tmdb_id}` : null,
+    plan.fingerprint.tvdb_id != null ? `tvdb_id=${plan.fingerprint.tvdb_id}` : null,
+    plan.fingerprint.imdb_id ? `imdb_id=${plan.fingerprint.imdb_id}` : null,
+    plan.fingerprint.path ? `path=${plan.fingerprint.path}` : null,
+    plan.season_number != null ? `season=${plan.season_number}` : null,
+  ]
+  return values.filter((value): value is string => value != null).join(" · ")
+}
+
+function formatPlanDetails(details: Record<string, unknown>): string {
+  return Object.entries(details)
+    .map(([key, value]) => `${key}=${typeof value === "string" ? value : JSON.stringify(value)}`)
+    .join(" · ")
 }
 
 function formatBytes(bytes: number): string {

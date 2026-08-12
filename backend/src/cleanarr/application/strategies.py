@@ -129,7 +129,9 @@ class BaseDeletionStrategy(ABC):
         else:
             collector.add(system, action, ActionStatus.DELETED, message, reason=reason, **details)
 
-    async def _cleanup_hashes(self, collector: ActionCollector, hashes: set[str]) -> None:
+    async def _cleanup_hashes(self, collector: ActionCollector, hashes: set[str]) -> bool:
+        """Delete resolved hashes and report whether dependent mutations may continue."""
+
         if not hashes:
             collector.add(
                 "downloader",
@@ -138,7 +140,7 @@ class BaseDeletionStrategy(ABC):
                 "No safe downloader hashes were found for deletion.",
                 reason=FailureReason.NO_MATCH,
             )
-            return
+            return True
 
         try:
             removal_results = await self._downloader.delete_hashes(
@@ -155,10 +157,12 @@ class BaseDeletionStrategy(ABC):
                 str(exc),
                 reason=FailureReason.DOWNSTREAM_ERROR,
             )
-            return
+            return False
 
+        cleanup_succeeded = True
         for result in removal_results:
             if result.error:
+                cleanup_succeeded = False
                 collector.add(
                     result.client_kind or "downloader",
                     "delete_hash",
@@ -209,6 +213,25 @@ class BaseDeletionStrategy(ABC):
                 ratio=result.ratio,
                 seeding_time_seconds=result.seeding_time_seconds,
             )
+        return cleanup_succeeded
+
+    @staticmethod
+    def _record_downloader_block(
+        collector: ActionCollector,
+        *,
+        system: str,
+        action: str,
+        message: str,
+        **details: object,
+    ) -> None:
+        collector.add(
+            system,
+            action,
+            ActionStatus.SKIPPED,
+            message,
+            reason=FailureReason.DOWNSTREAM_ERROR,
+            **details,
+        )
 
     async def _list_requests_for_media(self, media_id: int) -> list[SeerrRequest]:
         requests = await self._seerr.list_requests()
@@ -516,25 +539,44 @@ class MovieDeletionStrategy(BaseDeletionStrategy):
                 for record in history_records
                 if record.event_type == "grabbed" and record.download_id
             }
-            await self._cleanup_hashes(collector, hashes)
-            await self._run_mutation(
-                collector,
-                system="radarr",
-                action="delete_movie",
-                message=f"Deleted Radarr movie {movie.id}.",
-                mutation=bind_async(
-                    self._radarr.delete_movie,
-                    movie.id,
-                    delete_files=True,
-                    add_import_exclusion=False,
-                ),
-                movie_id=movie.id,
-                title=movie.title,
-                radarr_instance_id=movie.service_id,
-                radarr_instance_name=movie.service_name,
-            )
+            downloader_ready = await self._cleanup_hashes(collector, hashes)
+            if downloader_ready:
+                await self._run_mutation(
+                    collector,
+                    system="radarr",
+                    action="delete_movie",
+                    message=f"Deleted Radarr movie {movie.id}.",
+                    mutation=bind_async(
+                        self._radarr.delete_movie,
+                        movie.id,
+                        delete_files=True,
+                        add_import_exclusion=False,
+                    ),
+                    movie_id=movie.id,
+                    title=movie.title,
+                    path=movie.path,
+                    radarr_instance_id=movie.service_id,
+                    radarr_instance_name=movie.service_name,
+                )
+            else:
+                self._record_downloader_block(
+                    collector,
+                    system="radarr",
+                    action="delete_movie",
+                    message="Kept the Radarr movie so failed torrent cleanup can be retried safely.",
+                    movie_id=movie.id,
+                    path=movie.path,
+                )
 
-        await self._cleanup_seerr_movie(event, collector)
+        if movie is None or downloader_ready:
+            await self._cleanup_seerr_movie(event, collector)
+        else:
+            self._record_downloader_block(
+                collector,
+                system="seerr",
+                action="cleanup_movie",
+                message="Kept Seerr records until torrent cleanup completes safely.",
+            )
         return collector.build()
 
 
@@ -580,25 +622,44 @@ class SeriesDeletionStrategy(BaseDeletionStrategy):
                     reason=note.reason,
                     **note.details,
                 )
-            await self._cleanup_hashes(collector, set(safety.hashes_to_delete))
-            await self._run_mutation(
-                collector,
-                system="sonarr",
-                action="delete_series",
-                message=f"Deleted Sonarr series {series.id}.",
-                mutation=bind_async(
-                    self._sonarr.delete_series,
-                    series.id,
-                    delete_files=True,
-                    add_import_list_exclusion=False,
-                ),
-                series_id=series.id,
-                title=series.title,
-                sonarr_instance_id=series.service_id,
-                sonarr_instance_name=series.service_name,
-            )
+            downloader_ready = await self._cleanup_hashes(collector, set(safety.hashes_to_delete))
+            if downloader_ready:
+                await self._run_mutation(
+                    collector,
+                    system="sonarr",
+                    action="delete_series",
+                    message=f"Deleted Sonarr series {series.id}.",
+                    mutation=bind_async(
+                        self._sonarr.delete_series,
+                        series.id,
+                        delete_files=True,
+                        add_import_list_exclusion=False,
+                    ),
+                    series_id=series.id,
+                    title=series.title,
+                    path=series.path,
+                    sonarr_instance_id=series.service_id,
+                    sonarr_instance_name=series.service_name,
+                )
+            else:
+                self._record_downloader_block(
+                    collector,
+                    system="sonarr",
+                    action="delete_series",
+                    message="Kept the Sonarr series so failed torrent cleanup can be retried safely.",
+                    series_id=series.id,
+                    path=series.path,
+                )
 
-        await self._cleanup_seerr_series(event, collector)
+        if series is None or downloader_ready:
+            await self._cleanup_seerr_series(event, collector)
+        else:
+            self._record_downloader_block(
+                collector,
+                system="seerr",
+                action="cleanup_series",
+                message="Kept Seerr records until torrent cleanup completes safely.",
+            )
         return collector.build()
 
 
@@ -647,6 +708,27 @@ class SeasonDeletionStrategy(BaseDeletionStrategy):
                 **note.details,
             )
 
+        downloader_ready = await self._cleanup_hashes(collector, set(safety.hashes_to_delete))
+        if not downloader_ready:
+            self._record_downloader_block(
+                collector,
+                system="sonarr",
+                action="delete_season_scope",
+                message=(
+                    "Kept Sonarr season files and monitoring state so failed torrent cleanup can be retried safely."
+                ),
+                series_id=series.id,
+                season_number=event.season_number,
+                path=series.path,
+            )
+            self._record_downloader_block(
+                collector,
+                system="seerr",
+                action="cleanup_season",
+                message="Kept Seerr records until torrent cleanup completes safely.",
+            )
+            return collector.build()
+
         if safety.episode_ids_to_unmonitor:
             episode_ids = sorted(safety.episode_ids_to_unmonitor)
             await self._run_mutation(
@@ -666,7 +748,6 @@ class SeasonDeletionStrategy(BaseDeletionStrategy):
                 reason=FailureReason.NO_MATCH,
             )
 
-        await self._cleanup_hashes(collector, set(safety.hashes_to_delete))
         for episode_file_id in sorted(safety.episode_file_ids_to_delete):
             await self._run_mutation(
                 collector,
@@ -686,6 +767,7 @@ class SeasonDeletionStrategy(BaseDeletionStrategy):
                 mutation=bind_async(self._sonarr.unmonitor_season, series.id, event.season_number),
                 series_id=series.id,
                 season_number=event.season_number,
+                path=series.path,
                 sonarr_instance_id=series.service_id,
                 sonarr_instance_name=series.service_name,
             )
@@ -739,6 +821,28 @@ class EpisodeDeletionStrategy(BaseDeletionStrategy):
                 **note.details,
             )
 
+        downloader_ready = await self._cleanup_hashes(collector, set(safety.hashes_to_delete))
+        if not downloader_ready:
+            self._record_downloader_block(
+                collector,
+                system="sonarr",
+                action="delete_episode_scope",
+                message=(
+                    "Kept Sonarr episode files and monitoring state so failed torrent cleanup can be retried safely."
+                ),
+                series_id=series.id,
+                season_number=event.season_number,
+                episode_numbers=sorted(event.episode_numbers),
+                path=series.path,
+            )
+            self._record_downloader_block(
+                collector,
+                system="seerr",
+                action="cleanup_episode",
+                message="Kept Seerr records until torrent cleanup completes safely.",
+            )
+            return collector.build()
+
         if safety.episode_ids_to_unmonitor:
             episode_ids = sorted(safety.episode_ids_to_unmonitor)
             await self._run_mutation(
@@ -758,7 +862,6 @@ class EpisodeDeletionStrategy(BaseDeletionStrategy):
                 reason=FailureReason.NO_MATCH,
             )
 
-        await self._cleanup_hashes(collector, set(safety.hashes_to_delete))
         for episode_file_id in sorted(safety.episode_file_ids_to_delete):
             await self._run_mutation(
                 collector,
@@ -786,40 +889,50 @@ class DeletionStrategyFactory:
         seerr: SeerrClientPort,
         downloader: DownloaderClientPort,
     ) -> None:
-        self._movie = MovieDeletionStrategy(
-            dry_run=dry_run,
-            logger=logger,
-            radarr=radarr,
-            seerr=seerr,
-            downloader=downloader,
-        )
-        self._series = SeriesDeletionStrategy(
-            dry_run=dry_run,
-            logger=logger,
-            sonarr=sonarr,
-            seerr=seerr,
-            downloader=downloader,
-        )
-        self._season = SeasonDeletionStrategy(
-            dry_run=dry_run,
-            logger=logger,
-            sonarr=sonarr,
-            seerr=seerr,
-            downloader=downloader,
-        )
-        self._episode = EpisodeDeletionStrategy(
-            dry_run=dry_run,
-            logger=logger,
-            sonarr=sonarr,
-            seerr=seerr,
-            downloader=downloader,
-        )
+        self._dry_run = dry_run
+        self._logger = logger
+        self._radarr = radarr
+        self._sonarr = sonarr
+        self._seerr = seerr
+        self._downloader = downloader
 
-    def for_item_type(self, item_type: ItemType) -> BaseDeletionStrategy:
+    def for_item_type(
+        self,
+        item_type: ItemType,
+        *,
+        dry_run: bool | None = None,
+    ) -> BaseDeletionStrategy:
+        """Build a live strategy or an explicit dry-run preflight strategy."""
+
+        effective_dry_run = self._dry_run if dry_run is None else dry_run
         if item_type is ItemType.MOVIE:
-            return self._movie
+            return MovieDeletionStrategy(
+                dry_run=effective_dry_run,
+                logger=self._logger,
+                radarr=self._radarr,
+                seerr=self._seerr,
+                downloader=self._downloader,
+            )
         if item_type is ItemType.SERIES:
-            return self._series
+            return SeriesDeletionStrategy(
+                dry_run=effective_dry_run,
+                logger=self._logger,
+                sonarr=self._sonarr,
+                seerr=self._seerr,
+                downloader=self._downloader,
+            )
         if item_type is ItemType.SEASON:
-            return self._season
-        return self._episode
+            return SeasonDeletionStrategy(
+                dry_run=effective_dry_run,
+                logger=self._logger,
+                sonarr=self._sonarr,
+                seerr=self._seerr,
+                downloader=self._downloader,
+            )
+        return EpisodeDeletionStrategy(
+            dry_run=effective_dry_run,
+            logger=self._logger,
+            sonarr=self._sonarr,
+            seerr=self._seerr,
+            downloader=self._downloader,
+        )
