@@ -874,8 +874,8 @@ class JellyfinServerClient(JsonServiceClient):
         )
 
     async def ping(self) -> None:
-        """Verify Jellyfin connectivity."""
-        await self._request("GET", "/System/Ping", expected_statuses={200, 204})
+        """Verify Jellyfin connectivity and the configured credential."""
+        await self._request("GET", "/System/Info")
 
     async def get_version(self) -> str:
         payload = await self._request("GET", "/System/Info")

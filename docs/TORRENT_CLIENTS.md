@@ -38,9 +38,9 @@ Each torrent-client profile has an independent removal policy:
 - **Defer until seeded** checks an optional minimum ratio and/or minimum seed
   time. If both thresholds are configured, both must be reached before removal.
 
-The policy is evaluated on every cleanup attempt. In the current v0.3 stage an
-unmet threshold safely skips that attempt; durable scheduled retries are part
-of the v0.4 milestone. qBittorrent, Transmission, and Deluge use the clients'
+The policy is evaluated on every cleanup attempt. An unmet threshold safely
+skips that attempt; persistent manual jobs can be retried after the threshold
+is met. qBittorrent, Transmission, and Deluge use the clients'
 reported ratio and seeding-time values. rTorrent reports ratio in thousandths;
 CleanArr normalizes it and derives elapsed time from `d.timestamp.finished`.
 Dry-run performs the same ownership and policy lookup but never calls a removal
@@ -65,7 +65,7 @@ entry and records a failed action.
 The adapters have automated protocol contract tests, including Transmission
 generation negotiation, qBittorrent v1/v2 hybrid identifiers, authentication
 failures, absent hashes, both removal modes, seeding thresholds, partial
-multi-client failure, and rTorrent unsafe-path rejection. The real-service
-version matrix is still a release-candidate gate tracked in the
-[1.0 roadmap](ROADMAP.md); protocol tests are not presented as real-service
-certification.
+multi-client failure, and rTorrent unsafe-path rejection. The release gate also
+runs the adapters against digest-pinned real services. See the exact certified
+versions, evidence boundary, and 1.x support policy in the public
+[compatibility matrix](COMPATIBILITY.md).

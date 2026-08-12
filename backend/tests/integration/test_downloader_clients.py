@@ -168,7 +168,7 @@ async def test_deluge_web_rpc_authenticates_and_uses_batch_removal() -> None:
         await client.close()
 
     removal = next(call for call in calls if call["method"] == "core.remove_torrents")
-    assert removal["params"] == [["AA"], True]
+    assert removal["params"] == [["aa"], True]
     assert [(result.hash_value, result.existed) for result in results] == [("AA", True), ("BB", False)]
 
 
@@ -215,7 +215,7 @@ async def test_deluge_removes_only_after_all_seeding_thresholds_are_met() -> Non
         await client.close()
 
     removal = next(call for call in calls if call["method"] == "core.remove_torrents")
-    assert removal["params"] == [["AA"], False]
+    assert removal["params"] == [["aa"], False]
     assert results[0].skip_reason is None
     assert results[0].ratio == 2.0
     assert results[0].seeding_time_seconds == 7_200
@@ -255,8 +255,8 @@ async def test_rtorrent_xmlrpc_removes_data_only_from_validated_absolute_path() 
     finally:
         await client.close()
 
-    assert ("execute.throw", ("/bin/rm", "-rf", "--", "/downloads/movies/Movie")) in calls
-    assert calls.index(("execute.throw", ("/bin/rm", "-rf", "--", "/downloads/movies/Movie"))) < calls.index(
+    assert ("execute.throw", ("", "/bin/rm", "-rf", "--", "/downloads/movies/Movie")) in calls
+    assert calls.index(("execute.throw", ("", "/bin/rm", "-rf", "--", "/downloads/movies/Movie"))) < calls.index(
         ("d.erase", ("AA",))
     )
     assert [(result.hash_value, result.existed) for result in results] == [("AA", True), ("BB", False)]

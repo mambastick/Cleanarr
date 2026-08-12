@@ -40,6 +40,18 @@ async def test_service_clients_report_versions_from_documented_status_contracts(
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_jellyfin_ping_validates_the_configured_token() -> None:
+    respx.get("http://jellyfin/System/Info").respond(status_code=401)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="wrong", timeout_seconds=5)
+    try:
+        with pytest.raises(AuthenticationError):
+            await client.ping()
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_radarr_client_parses_movies_and_history() -> None:
     respx.get("http://radarr/api/v3/movie").respond(
         json=[{"id": 1, "title": "Movie", "path": "/data/movie", "tmdbId": 10, "imdbId": "tt10"}]

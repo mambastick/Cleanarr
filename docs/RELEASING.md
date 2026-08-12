@@ -23,7 +23,9 @@ CleanArr release notes are always written in Russian and English. A release tag 
 - ...
 ```
 
-3. Run backend tests, frontend build, Docker build, and the native package smoke tests.
+3. Run backend tests, frontend build, Docker build, native package smoke tests,
+   the digest-pinned real-service compatibility stack, and the upgrade/rollback
+   rehearsal documented in [Compatibility matrix](COMPATIBILITY.md).
 4. Merge the release commit into `main`.
 
 ## Publish
@@ -35,6 +37,8 @@ git push origin main vX.Y.Z
 
 `.github/workflows/docker-release.yml` then:
 
+- blocks publication until the ordinary quality suite and real-service
+  compatibility/upgrade gate both pass from a clean checkout;
 - builds and publishes GHCR images for `linux/amd64` and `linux/arm64`;
 - builds DEB and RPM packages for `amd64` and `arm64` on native runners;
 - creates or updates the GitHub Release with `docs/releases/vX.Y.Z.md`;
@@ -45,7 +49,8 @@ git push origin main vX.Y.Z
 The required quality workflow fails on fixable high/critical dependency or
 container vulnerabilities, committed secrets, and high/critical deployment
 misconfiguration findings reported by Trivy. A release must not bypass a red
-scan.
+scan. The compatibility workflow must also prove the published dependency
+matrix and backup-based rollback. A release must not bypass either red gate.
 
 ## Verify downloaded artifacts
 

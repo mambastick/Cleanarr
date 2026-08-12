@@ -30,6 +30,9 @@ packages = ["src/cleanarr"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = ["src", "."]
+markers = [
+  "compatibility: tests against the pinned real-service compatibility stack",
+]
 
 [tool.ruff]
 line-length = 120

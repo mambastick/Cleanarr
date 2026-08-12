@@ -23,7 +23,9 @@
 - ...
 ```
 
-3. Выполните backend-тесты, сборку frontend и Docker, а также smoke-тесты нативных пакетов.
+3. Выполните backend-тесты, сборку frontend и Docker, smoke-тесты нативных
+   пакетов, digest-pinned real-service stack и репетицию upgrade/rollback из
+   [матрицы совместимости](COMPATIBILITY_RU.md).
 4. Влейте релизный коммит в `main`.
 
 ## Публикация
@@ -35,6 +37,8 @@ git push origin main vX.Y.Z
 
 После этого `.github/workflows/docker-release.yml`:
 
+- блокирует публикацию, пока обычный quality suite и real-service
+  compatibility/upgrade gate не пройдут из чистого checkout;
 - собирает и публикует GHCR-образ для `linux/amd64` и `linux/arm64`;
 - собирает DEB и RPM для `amd64` и `arm64` на нативных runner-ах;
 - создаёт или обновляет GitHub Release из `docs/releases/vX.Y.Z.md`;
@@ -44,8 +48,9 @@ git push origin main vX.Y.Z
 
 Обязательный quality workflow завершается ошибкой при исправимых high/critical
 уязвимостях dependencies или container, committed secrets и high/critical
-ошибках deployment configuration, обнаруженных Trivy. Релиз нельзя публиковать
-в обход красного scan.
+ошибках deployment configuration, обнаруженных Trivy. Compatibility workflow
+также обязан доказать опубликованную dependency matrix и rollback из backup.
+Релиз нельзя публиковать в обход любого красного gate.
 
 ## Проверка скачанных артефактов
 

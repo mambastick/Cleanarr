@@ -28,6 +28,12 @@ jobs:
     permissions:
       contents: read
 
+  compatibility-gate:
+    name: Required compatibility gate
+    uses: ./.github/workflows/compatibility.yml
+    permissions:
+      contents: read
+
   validate-release:
     name: Validate release metadata
     runs-on: ubuntu-24.04
@@ -73,6 +79,7 @@ jobs:
 
   build-and-push:
     needs:
+      - compatibility-gate
       - quality-gate
       - validate-release
     if: github.event_name == 'push'
@@ -163,6 +170,7 @@ jobs:
   native-packages:
     name: Native packages (${{ matrix.arch }})
     needs:
+      - compatibility-gate
       - quality-gate
       - validate-release
     runs-on: ${{ matrix.runner }}

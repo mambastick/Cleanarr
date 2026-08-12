@@ -372,7 +372,12 @@ class DelugeClient:
         await self._login()
         torrent_ids = await self._rpc("core.get_session_state", [])
         torrent_ids = torrent_ids if isinstance(torrent_ids, list) else []
-        existing = {str(torrent_id).upper() for torrent_id in torrent_ids if str(torrent_id).upper() in normalized}
+        actual_ids = {
+            str(torrent_id).upper(): str(torrent_id)
+            for torrent_id in torrent_ids
+            if str(torrent_id).upper() in normalized
+        }
+        existing = set(actual_ids)
         statuses: dict[str, TorrentSeedingStatus] = {}
         if existing and self._seeding_policy is TorrentRemovalPolicy.DEFER:
             raw_statuses = await self._rpc(
@@ -394,7 +399,10 @@ class DelugeClient:
         }
         removable = {hash_value for hash_value in existing if decisions[hash_value] is None}
         if removable and not dry_run:
-            errors = await self._rpc("core.remove_torrents", [sorted(removable), delete_files])
+            errors = await self._rpc(
+                "core.remove_torrents",
+                [[actual_ids[hash_value] for hash_value in sorted(removable)], delete_files],
+            )
             if errors:
                 raise ExternalServiceError(self._system, "Deluge failed to remove one or more torrents.")
         return [
@@ -544,7 +552,7 @@ class RTorrentClient:
                 data_path = await self._data_path(hash_value)
                 await self._rpc("d.stop", hash_value)
                 await self._rpc("d.close", hash_value)
-                await self._rpc("execute.throw", "/bin/rm", "-rf", "--", data_path)
+                await self._rpc("execute.throw", "", "/bin/rm", "-rf", "--", data_path)
             await self._rpc("d.erase", hash_value)
         return [
             self._result(

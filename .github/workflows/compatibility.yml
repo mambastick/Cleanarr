@@ -1,0 +1,44 @@
+name: Real-service compatibility
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compatibility-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  compatibility:
+    name: Pinned services and upgrade rehearsal
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install compatibility test dependencies
+        working-directory: backend
+        run: python -m pip install --disable-pip-version-check --editable '.[dev]'
+
+      - name: Build candidate image
+        run: docker build --provenance=false --file deploy/Dockerfile --tag cleanarr:compatibility-candidate .
+
+      - name: Test pinned real services
+        run: python compatibility/run.py
+
+      - name: Rehearse upgrade and rollback
+        run: python compatibility/rehearse_upgrade.py cleanarr:compatibility-candidate

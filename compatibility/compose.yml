@@ -1,0 +1,154 @@
+name: cleanarr-compatibility
+
+x-common: &common
+  restart: "no"
+  networks:
+    - compatibility
+
+services:
+  qbittorrent:
+    <<: *common
+    image: lscr.io/linuxserver/qbittorrent:5.2.3_v2.0.14-ls471@sha256:6816d2b144b1eb97665f886e41e18a14d026ba78c9d0953fc68a1211ea819433
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: UTC
+      WEBUI_PORT: "18080"
+    ports:
+      - "127.0.0.1:18080:18080"
+    volumes:
+      - qbittorrent-config:/config
+      - qbittorrent-downloads:/downloads
+
+  transmission-legacy:
+    <<: *common
+    image: lscr.io/linuxserver/transmission:4.0.6-r6-ls326@sha256:452310cb020c036d293e879698097acb6cc653db2676610bf8e3b58a3f4d2af5
+    environment: &transmission-environment
+      PUID: "1000"
+      PGID: "1000"
+      TZ: UTC
+      USER: cleanarr
+      PASS: compat-password
+      WHITELIST: "127.0.0.1,172.*.*.*"
+      HOST_WHITELIST: "*"
+    ports:
+      - "127.0.0.1:19091:9091"
+    volumes:
+      - transmission-legacy-config:/config
+      - transmission-legacy-downloads:/downloads
+
+  transmission-modern:
+    <<: *common
+    image: lscr.io/linuxserver/transmission:4.1.3-r0-ls357@sha256:81787bc706d3833d252e6d8b94545fea46bf2156f616320991a395619a477d2c
+    environment: *transmission-environment
+    ports:
+      - "127.0.0.1:19092:9091"
+    volumes:
+      - transmission-modern-config:/config
+      - transmission-modern-downloads:/downloads
+
+  deluge:
+    <<: *common
+    image: lscr.io/linuxserver/deluge:2.2.0-ls381@sha256:33a939576f7ecfc1227db1a0cb2afce030ce983e620ec9d93c956e3700e21fe9
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: UTC
+      DELUGE_LOGLEVEL: warning
+    ports:
+      - "127.0.0.1:18112:8112"
+    volumes:
+      - deluge-config:/config
+      - deluge-downloads:/downloads
+
+  rtorrent:
+    <<: *common
+    image: crazymax/rtorrent-rutorrent:5.3.7-0.16.17@sha256:395f32ff75ab84a5615336829c4b846c154113129bc90b911c08a0f5261043f1
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: UTC
+      WAN_IP_CMD: "false"
+      LOG_ACCESS: "false"
+      XMLRPC_PORT: "8000"
+      RUTORRENT_PORT: "8080"
+      WEBDAV_PORT: "9000"
+    ports:
+      - "127.0.0.1:18000:8000"
+    volumes:
+      - rtorrent-data:/data
+      - rtorrent-downloads:/downloads
+      - type: bind
+        source: ${CLEANARR_COMPAT_RUNTIME:?set CLEANARR_COMPAT_RUNTIME}/rtorrent-passwd
+        target: /passwd
+
+  radarr:
+    <<: *common
+    image: lscr.io/linuxserver/radarr:version-6.3.0.10514@sha256:a45b5ab0f850f39edb4cc9c95bbd967b52ddc3d4574a4dfb45561177db6c88f4
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: UTC
+    ports:
+      - "127.0.0.1:17878:7878"
+    volumes:
+      - type: bind
+        source: ${CLEANARR_COMPAT_RUNTIME:?set CLEANARR_COMPAT_RUNTIME}/radarr
+        target: /config
+
+  sonarr:
+    <<: *common
+    image: lscr.io/linuxserver/sonarr:version-4.0.19.2979@sha256:373159ba768e23a3a1c497d9f2b936addf8fd5b1fdce7dd6a14080ac928bfda0
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: UTC
+    ports:
+      - "127.0.0.1:18989:8989"
+    volumes:
+      - type: bind
+        source: ${CLEANARR_COMPAT_RUNTIME:?set CLEANARR_COMPAT_RUNTIME}/sonarr
+        target: /config
+
+  jellyfin:
+    <<: *common
+    image: jellyfin/jellyfin:10.11.11@sha256:aefb67e6a7ff1debdd154a78a7bbb780fd0c873d8639210a7f6a2016ad2b35db
+    environment:
+      JELLYFIN_PublishedServerUrl: http://jellyfin:8096
+    ports:
+      - "127.0.0.1:18096:8096"
+    volumes:
+      - jellyfin-config:/config
+      - jellyfin-cache:/cache
+
+  seerr:
+    <<: *common
+    image: ghcr.io/seerr-team/seerr:v3.4.1@sha256:f4768de5f616248d723e05891f3345a1402123775d03bf0890dbfedc0831bda1
+    environment:
+      API_KEY: cleanarr-compat-api-key
+      LOG_LEVEL: warn
+      TZ: UTC
+    ports:
+      - "127.0.0.1:15055:5055"
+    volumes:
+      - seerr-config:/app/config
+    depends_on:
+      - jellyfin
+
+networks:
+  compatibility:
+
+volumes:
+  qbittorrent-config:
+  qbittorrent-downloads:
+  transmission-legacy-config:
+  transmission-legacy-downloads:
+  transmission-modern-config:
+  transmission-modern-downloads:
+  deluge-config:
+  deluge-downloads:
+  rtorrent-data:
+  rtorrent-downloads:
+  jellyfin-config:
+  jellyfin-cache:
+  seerr-config:
