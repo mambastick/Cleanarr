@@ -18,7 +18,7 @@ from pathlib import Path
 V0211_IMAGE = (
     "ghcr.io/mambastick/cleanarr:0.2.11@sha256:a7c8c64f102e134c30a385ed42d3951766cf1a97891d9af2de133d93f7f95aa6"
 )
-V050_IMAGE = "ghcr.io/mambastick/cleanarr:0.5.0@sha256:5425c1f73ecc4abd6434e9db750a6cc5ddc8f4426d1df028118e97a8fa9e13ca"
+V090_IMAGE = "ghcr.io/mambastick/cleanarr:0.9.0@sha256:c77bffd72ca49279b95a5c1b82e3b20938d702d7016ab759ce11fc39be29de67"
 
 
 @dataclass(frozen=True)
@@ -65,8 +65,8 @@ SOURCES = (
         },
     ),
     SourceRelease(
-        version="0.5.0",
-        image=V050_IMAGE,
+        version="0.9.0",
+        image=V090_IMAGE,
         schema_version=2,
         config={
             "config_schema_version": 2,
@@ -78,7 +78,7 @@ SOURCES = (
             "general": {
                 "dry_run": False,
                 "log_level": "WARNING",
-                "webhook_shared_token": "upgrade-marker-0.5.0",
+                "webhook_shared_token": "upgrade-marker-0.9.0",
                 "ui_language": "ru",
                 "sso_mode": "password_only",
                 "sso_allowed_users": [],

@@ -52,7 +52,7 @@ versions and read contracts used by those scenario flows.
 
 The same gate builds the candidate and rehearses both directions with real
 released containers: `v0.2.11 -> candidate -> restored v0.2.11` and
-`v0.5.0 -> candidate -> restored v0.5.0`. It checks the byte-identical verified
+`v0.9.0 -> candidate -> restored v0.9.0`. It checks the byte-identical verified
 backup, database/config schema migration, retained configuration, and retained
 activity history.
 
