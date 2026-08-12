@@ -8,11 +8,11 @@ from typing import Protocol
 from cleanarr.domain import (
     DownloaderRemovalResult,
     JellyfinItem,
-    JellyseerrIssue,
-    JellyseerrMedia,
-    JellyseerrRequest,
     RadarrHistoryRecord,
     RadarrMovie,
+    SeerrIssue,
+    SeerrMedia,
+    SeerrRequest,
     SonarrEpisode,
     SonarrEpisodeFile,
     SonarrHistoryRecord,
@@ -85,16 +85,16 @@ class SonarrClientPort(Protocol):
         """Delete a series from Sonarr."""
 
 
-class JellyseerrClientPort(Protocol):
-    """Jellyseerr operations used by the application layer."""
+class SeerrClientPort(Protocol):
+    """Seerr operations used by the application layer."""
 
-    async def list_media(self) -> Sequence[JellyseerrMedia]:
+    async def list_media(self) -> Sequence[SeerrMedia]:
         """Return tracked media records."""
 
-    async def list_requests(self) -> Sequence[JellyseerrRequest]:
+    async def list_requests(self) -> Sequence[SeerrRequest]:
         """Return all request records."""
 
-    async def list_issues(self) -> Sequence[JellyseerrIssue]:
+    async def list_issues(self) -> Sequence[SeerrIssue]:
         """Return all issues."""
 
     async def delete_request(self, request_id: int) -> None:
@@ -102,7 +102,7 @@ class JellyseerrClientPort(Protocol):
 
     async def update_request_seasons(
         self,
-        request: JellyseerrRequest,
+        request: SeerrRequest,
         *,
         season_numbers: Sequence[int],
     ) -> None:

@@ -12,19 +12,19 @@ from cleanarr.application.service import CascadeDeletionService
 from cleanarr.application.strategies import DeletionStrategyFactory
 from cleanarr.domain.config import (
     JellyfinServiceConfig,
-    JellyseerrServiceConfig,
     RuntimeConfig,
+    SeerrServiceConfig,
 )
 from cleanarr.infrastructure.auth import InMemorySessionStore, PasswordHasher
 from cleanarr.infrastructure.clients import (
     JellyfinServerClient,
-    JellyseerrClient,
     NullDownloaderClient,
     NullJellyfinServerClient,
-    NullJellyseerrClient,
     NullRadarrClient,
+    NullSeerrClient,
     NullSonarrClient,
     RadarrClient,
+    SeerrClient,
     SonarrClient,
 )
 from cleanarr.infrastructure.config_store import SqliteConfigStore
@@ -46,7 +46,7 @@ class ServiceRuntime:
     strategy_factory: DeletionStrategyFactory
     radarr: RoutedRadarrClient
     sonarr: RoutedSonarrClient
-    jellyseerr: JellyseerrClient | NullJellyseerrClient
+    seerr: SeerrClient | NullSeerrClient
     downloader: DownloaderClient
     jellyfin_server: JellyfinServerClient | NullJellyfinServerClient
 
@@ -55,7 +55,7 @@ class ServiceRuntime:
 
         await self.radarr.close()
         await self.sonarr.close()
-        await self.jellyseerr.close()
+        await self.seerr.close()
         await self.downloader.close()
         await self.jellyfin_server.close()
 
@@ -120,8 +120,8 @@ class ServiceContainer:
         return self._runtime.sonarr
 
     @property
-    def jellyseerr(self) -> JellyseerrClient | NullJellyseerrClient:
-        return self._runtime.jellyseerr
+    def seerr(self) -> SeerrClient | NullSeerrClient:
+        return self._runtime.seerr
 
     @property
     def downloader(self) -> DownloaderClient:
@@ -169,7 +169,7 @@ class ServiceContainer:
 
         active_radarr = [service for service in config.radarr if service.enabled]
         active_sonarr = [service for service in config.sonarr if service.enabled]
-        active_jellyseerr = ServiceContainer._pick_active_jellyseerr(config.jellyseerr)
+        active_seerr = ServiceContainer._pick_active_seerr(config.seerr)
         active_downloaders = [service for service in config.downloaders if service.enabled]
         active_jellyfin = ServiceContainer._pick_active_jellyfin(config.jellyfin)
 
@@ -209,14 +209,14 @@ class ServiceContainer:
             if active_sonarr
             else NullSonarrClient()
         )
-        jellyseerr = (
-            JellyseerrClient(
-                base_url=active_jellyseerr.url,
-                api_key=active_jellyseerr.api_key,
+        seerr = (
+            SeerrClient(
+                base_url=active_seerr.url,
+                api_key=active_seerr.api_key,
                 timeout_seconds=general.http_timeout_seconds,
             )
-            if active_jellyseerr
-            else NullJellyseerrClient()
+            if active_seerr
+            else NullSeerrClient()
         )
         downloader: DownloaderClient = (
             MultiDownloaderClient(
@@ -251,7 +251,7 @@ class ServiceContainer:
             logger=logger,
             radarr=radarr,
             sonarr=sonarr,
-            jellyseerr=jellyseerr,
+            seerr=seerr,
             downloader=downloader,
         )
         return ServiceRuntime(
@@ -260,15 +260,15 @@ class ServiceContainer:
             strategy_factory=strategy_factory,
             radarr=radarr,
             sonarr=sonarr,
-            jellyseerr=jellyseerr,
+            seerr=seerr,
             downloader=downloader,
             jellyfin_server=jellyfin_server,
         )
 
     @staticmethod
-    def _pick_active_jellyseerr(
-        services: list[JellyseerrServiceConfig],
-    ) -> JellyseerrServiceConfig | None:
+    def _pick_active_seerr(
+        services: list[SeerrServiceConfig],
+    ) -> SeerrServiceConfig | None:
         enabled = [service for service in services if service.enabled]
         if not enabled:
             return None

@@ -12,11 +12,11 @@ from cleanarr.domain.config import (
     DownloaderServiceConfig,
     GeneralConfig,
     JellyfinServiceConfig,
-    JellyseerrServiceConfig,
     QbittorrentServiceConfig,
     RadarrServiceConfig,
     RTorrentServiceConfig,
     RuntimeConfig,
+    SeerrServiceConfig,
     ServiceKind,
     SonarrServiceConfig,
     TransmissionServiceConfig,
@@ -24,9 +24,9 @@ from cleanarr.domain.config import (
 from cleanarr.domain.errors import ExternalServiceError
 from cleanarr.infrastructure.clients import (
     JellyfinServerClient,
-    JellyseerrClient,
     QbittorrentClient,
     RadarrClient,
+    SeerrClient,
     SonarrClient,
 )
 from cleanarr.infrastructure.downloaders import DelugeClient, RTorrentClient, TransmissionClient
@@ -35,7 +35,7 @@ from cleanarr.infrastructure.settings import Settings
 AnyServiceConfig = (
     RadarrServiceConfig
     | SonarrServiceConfig
-    | JellyseerrServiceConfig
+    | SeerrServiceConfig
     | QbittorrentServiceConfig
     | TransmissionServiceConfig
     | DelugeServiceConfig
@@ -119,8 +119,8 @@ class RuntimeConfigurationService:
             self._config = self._config.model_copy(update={"radarr": [*self._config.radarr, payload]})
         elif kind is ServiceKind.SONARR and isinstance(payload, SonarrServiceConfig):
             self._config = self._config.model_copy(update={"sonarr": [*self._config.sonarr, payload]})
-        elif kind is ServiceKind.JELLYSEERR and isinstance(payload, JellyseerrServiceConfig):
-            self._config = self._config.model_copy(update={"jellyseerr": [*self._config.jellyseerr, payload]})
+        elif kind is ServiceKind.SEERR and isinstance(payload, SeerrServiceConfig):
+            self._config = self._config.model_copy(update={"seerr": [*self._config.seerr, payload]})
         elif _is_downloader_payload(kind, payload):
             self._config = self._config.model_copy(update={"downloaders": [*self._config.downloaders, payload]})
         elif kind is ServiceKind.JELLYFIN and isinstance(payload, JellyfinServiceConfig):
@@ -148,13 +148,9 @@ class RuntimeConfigurationService:
             self._config = self._config.model_copy(
                 update={"sonarr": [payload if service.id == service_id else service for service in self._config.sonarr]}
             )
-        elif kind is ServiceKind.JELLYSEERR and isinstance(payload, JellyseerrServiceConfig):
+        elif kind is ServiceKind.SEERR and isinstance(payload, SeerrServiceConfig):
             self._config = self._config.model_copy(
-                update={
-                    "jellyseerr": [
-                        payload if service.id == service_id else service for service in self._config.jellyseerr
-                    ]
-                }
+                update={"seerr": [payload if service.id == service_id else service for service in self._config.seerr]}
             )
         elif _is_downloader_payload(kind, payload):
             self._config = self._config.model_copy(
@@ -188,9 +184,9 @@ class RuntimeConfigurationService:
             self._config = self._config.model_copy(
                 update={"sonarr": [service for service in self._config.sonarr if service.id != service_id]}
             )
-        elif kind is ServiceKind.JELLYSEERR:
+        elif kind is ServiceKind.SEERR:
             self._config = self._config.model_copy(
-                update={"jellyseerr": [service for service in self._config.jellyseerr if service.id != service_id]}
+                update={"seerr": [service for service in self._config.seerr if service.id != service_id]}
             )
         elif kind in DOWNLOADER_SERVICE_KINDS:
             self._config = self._config.model_copy(
@@ -235,17 +231,17 @@ class RuntimeConfigurationService:
                     await sonarr_client.close()
                 return ConnectionTestResult(ok=True, message="Sonarr responded successfully.")
 
-            if isinstance(payload, JellyseerrServiceConfig):
-                jellyseerr_client = JellyseerrClient(
+            if isinstance(payload, SeerrServiceConfig):
+                seerr_client = SeerrClient(
                     base_url=payload.url,
                     api_key=payload.api_key,
                     timeout_seconds=timeout,
                 )
                 try:
-                    await jellyseerr_client.list_media()
+                    await seerr_client.list_media()
                 finally:
-                    await jellyseerr_client.close()
-                return ConnectionTestResult(ok=True, message="Jellyseerr responded successfully.")
+                    await seerr_client.close()
+                return ConnectionTestResult(ok=True, message="Seerr responded successfully.")
 
             if isinstance(payload, JellyfinServiceConfig):
                 jellyfin_client = JellyfinServerClient(
@@ -302,7 +298,7 @@ class RuntimeConfigurationService:
                 "general": general,
                 "radarr": RuntimeConfigurationService._normalize_defaults(config.radarr),
                 "sonarr": RuntimeConfigurationService._normalize_defaults(config.sonarr),
-                "jellyseerr": RuntimeConfigurationService._normalize_defaults(config.jellyseerr),
+                "seerr": RuntimeConfigurationService._normalize_defaults(config.seerr),
                 "downloaders": RuntimeConfigurationService._normalize_defaults(config.downloaders),
                 "jellyfin": RuntimeConfigurationService._normalize_defaults(config.jellyfin),
             }
@@ -334,8 +330,8 @@ class RuntimeConfigurationService:
             return any(service.id == service_id for service in self._config.radarr)
         if kind is ServiceKind.SONARR:
             return any(service.id == service_id for service in self._config.sonarr)
-        if kind is ServiceKind.JELLYSEERR:
-            return any(service.id == service_id for service in self._config.jellyseerr)
+        if kind is ServiceKind.SEERR:
+            return any(service.id == service_id for service in self._config.seerr)
         if kind is ServiceKind.JELLYFIN:
             return any(service.id == service_id for service in self._config.jellyfin)
         if kind in DOWNLOADER_SERVICE_KINDS:

@@ -10,11 +10,11 @@ from cleanarr.domain.config import (
     DownloaderServiceConfig,
     GeneralConfig,
     JellyfinServiceConfig,
-    JellyseerrServiceConfig,
     QbittorrentServiceConfig,
     RadarrServiceConfig,
     RTorrentServiceConfig,
     RuntimeConfig,
+    SeerrServiceConfig,
     ServiceKind,
     SonarrServiceConfig,
     TorrentRemovalPolicy,
@@ -28,7 +28,7 @@ class RuntimeConfigResponse(BaseModel):
     general: GeneralConfig
     radarr: list[RadarrServiceConfig]
     sonarr: list[SonarrServiceConfig]
-    jellyseerr: list[JellyseerrServiceConfig]
+    seerr: list[SeerrServiceConfig]
     downloaders: list[DownloaderServiceConfig]
     jellyfin: list[JellyfinServiceConfig]
     admin_token_configured: bool
@@ -39,7 +39,7 @@ class RuntimeConfigResponse(BaseModel):
             general=config.general,
             radarr=config.radarr,
             sonarr=config.sonarr,
-            jellyseerr=config.jellyseerr,
+            seerr=config.seerr,
             downloaders=config.downloaders,
             jellyfin=config.jellyfin,
             admin_token_configured=admin_token_configured,
@@ -100,8 +100,8 @@ class SonarrServiceRequest(BaseModel):
         return SonarrServiceConfig.model_validate(payload)
 
 
-class JellyseerrServiceRequest(BaseModel):
-    """Create or update a Jellyseerr integration."""
+class SeerrServiceRequest(BaseModel):
+    """Create or update a Seerr integration."""
 
     name: str
     url: str
@@ -109,11 +109,11 @@ class JellyseerrServiceRequest(BaseModel):
     enabled: bool = True
     is_default: bool = False
 
-    def to_domain(self, *, service_id: str | None = None) -> JellyseerrServiceConfig:
+    def to_domain(self, *, service_id: str | None = None) -> SeerrServiceConfig:
         payload = self.model_dump()
         if service_id is not None:
             payload["id"] = service_id
-        return JellyseerrServiceConfig.model_validate(payload)
+        return SeerrServiceConfig.model_validate(payload)
 
 
 class BaseDownloaderServiceRequest(BaseModel):

@@ -94,9 +94,13 @@ idempotent webhook handling, and durable retry scheduling.
   `partial_request_retained` reason unless the event and Sonarr inventory prove
   that the complete season is covered; only then is the season removed from the
   request or the empty request deleted.
-- Remaining milestone work includes canonical Seerr configuration migration,
-  exact persisted preflight plans, duplicate-event suppression, serialized
-  ownership locks, and durable retry/resume across process restarts.
+- Seerr is now the canonical name in the domain, API, UI, logs, and persisted
+  configuration. Existing `jellyseerr` SQLite/JSON profiles are rewritten
+  without data loss; legacy environment variables and hidden configuration API
+  routes remain accepted as compatibility aliases.
+- Remaining milestone work includes exact persisted preflight plans,
+  duplicate-event suppression, serialized ownership locks, and durable
+  retry/resume across process restarts.
 
 ## Required 1.0 scope
 

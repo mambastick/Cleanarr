@@ -8,13 +8,13 @@ from collections.abc import Awaitable, Callable, Sequence
 
 from cleanarr.application.ports import (
     DownloaderClientPort,
-    JellyseerrClientPort,
     RadarrClientPort,
+    SeerrClientPort,
     SonarrClientPort,
 )
 from cleanarr.application.resolver import (
-    StrictJellyseerrResolver,
     StrictMovieResolver,
+    StrictSeerrResolver,
     StrictSeriesResolver,
 )
 from cleanarr.application.results import ActionCollector
@@ -24,12 +24,12 @@ from cleanarr.domain import (
     AuthenticationError,
     FailureReason,
     ItemType,
-    JellyseerrIssue,
-    JellyseerrMedia,
-    JellyseerrRequest,
     MediaDeletionEvent,
     ProcessingResult,
     ResourceNotFoundError,
+    SeerrIssue,
+    SeerrMedia,
+    SeerrRequest,
     SonarrEpisode,
 )
 
@@ -58,14 +58,14 @@ class BaseDeletionStrategy(ABC):
         *,
         dry_run: bool,
         logger: logging.Logger,
-        jellyseerr: JellyseerrClientPort,
+        seerr: SeerrClientPort,
         downloader: DownloaderClientPort,
     ) -> None:
         self._dry_run = dry_run
         self._logger = logger
-        self._jellyseerr = jellyseerr
+        self._seerr = seerr
         self._downloader = downloader
-        self._jellyseerr_resolver = StrictJellyseerrResolver()
+        self._seerr_resolver = StrictSeerrResolver()
 
     @abstractmethod
     async def handle(self, event: MediaDeletionEvent) -> ProcessingResult:
@@ -210,45 +210,45 @@ class BaseDeletionStrategy(ABC):
                 seeding_time_seconds=result.seeding_time_seconds,
             )
 
-    async def _list_requests_for_media(self, media_id: int) -> list[JellyseerrRequest]:
-        requests = await self._jellyseerr.list_requests()
+    async def _list_requests_for_media(self, media_id: int) -> list[SeerrRequest]:
+        requests = await self._seerr.list_requests()
         return [request for request in requests if request.media_id == media_id]
 
-    async def _list_issues_for_media(self, media_id: int) -> list[JellyseerrIssue]:
-        issues = await self._jellyseerr.list_issues()
+    async def _list_issues_for_media(self, media_id: int) -> list[SeerrIssue]:
+        issues = await self._seerr.list_issues()
         return [issue for issue in issues if issue.media_id == media_id]
 
-    async def _resolve_jellyseerr_media(
+    async def _resolve_seerr_media(
         self,
         event: MediaDeletionEvent,
         *,
         media_type: str,
         collector: ActionCollector,
-    ) -> JellyseerrMedia | None:
-        media_items = list(await self._jellyseerr.list_media())
+    ) -> SeerrMedia | None:
+        media_items = list(await self._seerr.list_media())
         if media_type == "movie":
-            decision = self._jellyseerr_resolver.resolve_movie(event.fingerprint, media_items)
+            decision = self._seerr_resolver.resolve_movie(event.fingerprint, media_items)
         else:
-            decision = self._jellyseerr_resolver.resolve_tv(event.fingerprint, media_items)
+            decision = self._seerr_resolver.resolve_tv(event.fingerprint, media_items)
 
         if decision.candidate is not None:
             return decision.candidate
 
         collector.add(
-            "jellyseerr",
+            "seerr",
             "resolve_media",
             ActionStatus.SKIPPED,
-            "No strict Jellyseerr media match was found.",
+            "No strict Seerr media match was found.",
             reason=decision.reason,
         )
         return None
 
-    async def _cleanup_jellyseerr_movie(
+    async def _cleanup_seerr_movie(
         self,
         event: MediaDeletionEvent,
         collector: ActionCollector,
     ) -> None:
-        media = await self._resolve_jellyseerr_media(event, media_type="movie", collector=collector)
+        media = await self._resolve_seerr_media(event, media_type="movie", collector=collector)
         if media is None:
             return
 
@@ -258,38 +258,38 @@ class BaseDeletionStrategy(ABC):
         for request in requests:
             await self._run_mutation(
                 collector,
-                system="jellyseerr",
+                system="seerr",
                 action="delete_request",
-                message=f"Deleted Jellyseerr request {request.id}.",
-                mutation=bind_async(self._jellyseerr.delete_request, request.id),
+                message=f"Deleted Seerr request {request.id}.",
+                mutation=bind_async(self._seerr.delete_request, request.id),
                 request_id=request.id,
             )
 
         for issue in issues:
             await self._run_mutation(
                 collector,
-                system="jellyseerr",
+                system="seerr",
                 action="delete_issue",
-                message=f"Deleted Jellyseerr issue {issue.id}.",
-                mutation=bind_async(self._jellyseerr.delete_issue, issue.id),
+                message=f"Deleted Seerr issue {issue.id}.",
+                mutation=bind_async(self._seerr.delete_issue, issue.id),
                 issue_id=issue.id,
             )
 
         await self._run_mutation(
             collector,
-            system="jellyseerr",
+            system="seerr",
             action="delete_media",
-            message=f"Deleted Jellyseerr media {media.id}.",
-            mutation=bind_async(self._jellyseerr.delete_media, media.id),
+            message=f"Deleted Seerr media {media.id}.",
+            mutation=bind_async(self._seerr.delete_media, media.id),
             media_id=media.id,
         )
 
-    async def _cleanup_jellyseerr_series(
+    async def _cleanup_seerr_series(
         self,
         event: MediaDeletionEvent,
         collector: ActionCollector,
     ) -> None:
-        media = await self._resolve_jellyseerr_media(event, media_type="tv", collector=collector)
+        media = await self._resolve_seerr_media(event, media_type="tv", collector=collector)
         if media is None:
             return
 
@@ -299,38 +299,38 @@ class BaseDeletionStrategy(ABC):
         for request in requests:
             await self._run_mutation(
                 collector,
-                system="jellyseerr",
+                system="seerr",
                 action="delete_request",
-                message=f"Deleted Jellyseerr request {request.id}.",
-                mutation=bind_async(self._jellyseerr.delete_request, request.id),
+                message=f"Deleted Seerr request {request.id}.",
+                mutation=bind_async(self._seerr.delete_request, request.id),
                 request_id=request.id,
             )
 
         for issue in issues:
             await self._run_mutation(
                 collector,
-                system="jellyseerr",
+                system="seerr",
                 action="delete_issue",
-                message=f"Deleted Jellyseerr issue {issue.id}.",
-                mutation=bind_async(self._jellyseerr.delete_issue, issue.id),
+                message=f"Deleted Seerr issue {issue.id}.",
+                mutation=bind_async(self._seerr.delete_issue, issue.id),
                 issue_id=issue.id,
             )
 
         await self._run_mutation(
             collector,
-            system="jellyseerr",
+            system="seerr",
             action="delete_media",
-            message=f"Deleted Jellyseerr media {media.id}.",
-            mutation=bind_async(self._jellyseerr.delete_media, media.id),
+            message=f"Deleted Seerr media {media.id}.",
+            mutation=bind_async(self._seerr.delete_media, media.id),
             media_id=media.id,
         )
 
-    async def _cleanup_jellyseerr_season(
+    async def _cleanup_seerr_season(
         self,
         event: MediaDeletionEvent,
         collector: ActionCollector,
     ) -> None:
-        media = await self._resolve_jellyseerr_media(event, media_type="tv", collector=collector)
+        media = await self._resolve_seerr_media(event, media_type="tv", collector=collector)
         if media is None or event.season_number is None:
             return
 
@@ -344,11 +344,11 @@ class BaseDeletionStrategy(ABC):
             if remaining_seasons:
                 await self._run_mutation(
                     collector,
-                    system="jellyseerr",
+                    system="seerr",
                     action="update_request",
-                    message=f"Removed season {event.season_number} from Jellyseerr request {request.id}.",
+                    message=f"Removed season {event.season_number} from Seerr request {request.id}.",
                     mutation=bind_async(
-                        self._jellyseerr.update_request_seasons,
+                        self._seerr.update_request_seasons,
                         request,
                         season_numbers=remaining_seasons,
                     ),
@@ -358,10 +358,10 @@ class BaseDeletionStrategy(ABC):
                 continue
             await self._run_mutation(
                 collector,
-                system="jellyseerr",
+                system="seerr",
                 action="delete_request",
-                message=f"Deleted Jellyseerr request {request.id}.",
-                mutation=bind_async(self._jellyseerr.delete_request, request.id),
+                message=f"Deleted Seerr request {request.id}.",
+                mutation=bind_async(self._seerr.delete_request, request.id),
                 request_id=request.id,
                 season_number=event.season_number,
             )
@@ -370,22 +370,22 @@ class BaseDeletionStrategy(ABC):
         for issue in matching_issues:
             await self._run_mutation(
                 collector,
-                system="jellyseerr",
+                system="seerr",
                 action="delete_issue",
-                message=f"Deleted Jellyseerr issue {issue.id}.",
-                mutation=bind_async(self._jellyseerr.delete_issue, issue.id),
+                message=f"Deleted Seerr issue {issue.id}.",
+                mutation=bind_async(self._seerr.delete_issue, issue.id),
                 issue_id=issue.id,
                 season_number=event.season_number,
             )
 
-    async def _cleanup_jellyseerr_episode(
+    async def _cleanup_seerr_episode(
         self,
         event: MediaDeletionEvent,
         collector: ActionCollector,
         *,
         episodes: Sequence[SonarrEpisode],
     ) -> None:
-        media = await self._resolve_jellyseerr_media(event, media_type="tv", collector=collector)
+        media = await self._resolve_seerr_media(event, media_type="tv", collector=collector)
         if media is None or event.season_number is None or not event.episode_numbers:
             return
 
@@ -424,7 +424,7 @@ class BaseDeletionStrategy(ABC):
                     action="update_request",
                     message=f"Removed fully deleted season {season_number} from Seerr request {request.id}.",
                     mutation=bind_async(
-                        self._jellyseerr.update_request_seasons,
+                        self._seerr.update_request_seasons,
                         request,
                         season_numbers=remaining_seasons,
                     ),
@@ -438,7 +438,7 @@ class BaseDeletionStrategy(ABC):
                 system="seerr",
                 action="delete_request",
                 message=f"Deleted Seerr request {request.id} after the complete requested season was deleted.",
-                mutation=bind_async(self._jellyseerr.delete_request, request.id),
+                mutation=bind_async(self._seerr.delete_request, request.id),
                 request_id=request.id,
                 season_number=season_number,
                 episode_numbers=sorted(episode_numbers),
@@ -455,7 +455,7 @@ class BaseDeletionStrategy(ABC):
                 system="seerr",
                 action="delete_issue",
                 message=f"Deleted Seerr issue {issue.id} for a deleted episode.",
-                mutation=bind_async(self._jellyseerr.delete_issue, issue.id),
+                mutation=bind_async(self._seerr.delete_issue, issue.id),
                 issue_id=issue.id,
                 season_number=season_number,
                 episode_number=issue.problem_episode,
@@ -484,13 +484,13 @@ class MovieDeletionStrategy(BaseDeletionStrategy):
         dry_run: bool,
         logger: logging.Logger,
         radarr: RadarrClientPort,
-        jellyseerr: JellyseerrClientPort,
+        seerr: SeerrClientPort,
         downloader: DownloaderClientPort,
     ) -> None:
         super().__init__(
             dry_run=dry_run,
             logger=logger,
-            jellyseerr=jellyseerr,
+            seerr=seerr,
             downloader=downloader,
         )
         self._radarr = radarr
@@ -534,7 +534,7 @@ class MovieDeletionStrategy(BaseDeletionStrategy):
                 radarr_instance_name=movie.service_name,
             )
 
-        await self._cleanup_jellyseerr_movie(event, collector)
+        await self._cleanup_seerr_movie(event, collector)
         return collector.build()
 
 
@@ -547,13 +547,13 @@ class SeriesDeletionStrategy(BaseDeletionStrategy):
         dry_run: bool,
         logger: logging.Logger,
         sonarr: SonarrClientPort,
-        jellyseerr: JellyseerrClientPort,
+        seerr: SeerrClientPort,
         downloader: DownloaderClientPort,
     ) -> None:
         super().__init__(
             dry_run=dry_run,
             logger=logger,
-            jellyseerr=jellyseerr,
+            seerr=seerr,
             downloader=downloader,
         )
         self._sonarr = sonarr
@@ -598,7 +598,7 @@ class SeriesDeletionStrategy(BaseDeletionStrategy):
                 sonarr_instance_name=series.service_name,
             )
 
-        await self._cleanup_jellyseerr_series(event, collector)
+        await self._cleanup_seerr_series(event, collector)
         return collector.build()
 
 
@@ -611,13 +611,13 @@ class SeasonDeletionStrategy(BaseDeletionStrategy):
         dry_run: bool,
         logger: logging.Logger,
         sonarr: SonarrClientPort,
-        jellyseerr: JellyseerrClientPort,
+        seerr: SeerrClientPort,
         downloader: DownloaderClientPort,
     ) -> None:
         super().__init__(
             dry_run=dry_run,
             logger=logger,
-            jellyseerr=jellyseerr,
+            seerr=seerr,
             downloader=downloader,
         )
         self._sonarr = sonarr
@@ -631,7 +631,7 @@ class SeasonDeletionStrategy(BaseDeletionStrategy):
         series = decision.candidate
         if series is None:
             self._record_sonarr_match_failure(collector, decision.reason)
-            await self._cleanup_jellyseerr_season(event, collector)
+            await self._cleanup_seerr_season(event, collector)
             return collector.build()
 
         history_records = list(await self._sonarr.list_series_history(series.id))
@@ -690,7 +690,7 @@ class SeasonDeletionStrategy(BaseDeletionStrategy):
                 sonarr_instance_name=series.service_name,
             )
 
-        await self._cleanup_jellyseerr_season(event, collector)
+        await self._cleanup_seerr_season(event, collector)
         return collector.build()
 
 
@@ -703,13 +703,13 @@ class EpisodeDeletionStrategy(BaseDeletionStrategy):
         dry_run: bool,
         logger: logging.Logger,
         sonarr: SonarrClientPort,
-        jellyseerr: JellyseerrClientPort,
+        seerr: SeerrClientPort,
         downloader: DownloaderClientPort,
     ) -> None:
         super().__init__(
             dry_run=dry_run,
             logger=logger,
-            jellyseerr=jellyseerr,
+            seerr=seerr,
             downloader=downloader,
         )
         self._sonarr = sonarr
@@ -723,7 +723,7 @@ class EpisodeDeletionStrategy(BaseDeletionStrategy):
         series = decision.candidate
         if series is None:
             self._record_sonarr_match_failure(collector, decision.reason)
-            await self._cleanup_jellyseerr_episode(event, collector, episodes=())
+            await self._cleanup_seerr_episode(event, collector, episodes=())
             return collector.build()
 
         history_records = list(await self._sonarr.list_series_history(series.id))
@@ -769,7 +769,7 @@ class EpisodeDeletionStrategy(BaseDeletionStrategy):
                 episode_file_id=episode_file_id,
             )
 
-        await self._cleanup_jellyseerr_episode(event, collector, episodes=episodes)
+        await self._cleanup_seerr_episode(event, collector, episodes=episodes)
         return collector.build()
 
 
@@ -783,35 +783,35 @@ class DeletionStrategyFactory:
         logger: logging.Logger,
         radarr: RadarrClientPort,
         sonarr: SonarrClientPort,
-        jellyseerr: JellyseerrClientPort,
+        seerr: SeerrClientPort,
         downloader: DownloaderClientPort,
     ) -> None:
         self._movie = MovieDeletionStrategy(
             dry_run=dry_run,
             logger=logger,
             radarr=radarr,
-            jellyseerr=jellyseerr,
+            seerr=seerr,
             downloader=downloader,
         )
         self._series = SeriesDeletionStrategy(
             dry_run=dry_run,
             logger=logger,
             sonarr=sonarr,
-            jellyseerr=jellyseerr,
+            seerr=seerr,
             downloader=downloader,
         )
         self._season = SeasonDeletionStrategy(
             dry_run=dry_run,
             logger=logger,
             sonarr=sonarr,
-            jellyseerr=jellyseerr,
+            seerr=seerr,
             downloader=downloader,
         )
         self._episode = EpisodeDeletionStrategy(
             dry_run=dry_run,
             logger=logger,
             sonarr=sonarr,
-            jellyseerr=jellyseerr,
+            seerr=seerr,
             downloader=downloader,
         )
 

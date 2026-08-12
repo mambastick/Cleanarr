@@ -93,9 +93,12 @@ CleanArr 1.0 — стабильный и безопасный оркестрат
   машинно-читаемой причиной `partial_request_retained`, пока event и inventory
   Sonarr не докажут охват всего сезона; только после этого сезон удаляется из
   запроса либо удаляется ставший пустым запрос.
-- В этапе остаются canonical migration конфигурации Seerr, точные персистентные
-  preflight plans, подавление duplicate events, ownership locks и durable
-  retry/resume после рестарта процесса.
+- Seerr теперь используется как каноническое имя в domain, API, UI, логах и
+  сохранённой конфигурации. Существующие SQLite/JSON-профили `jellyseerr`
+  переписываются без потери данных; старые переменные окружения и скрытые
+  маршруты configuration API остаются совместимыми псевдонимами.
+- В этапе остаются точные персистентные preflight plans, подавление duplicate
+  events, ownership locks и durable retry/resume после рестарта процесса.
 
 ## Обязательный scope 1.0
 

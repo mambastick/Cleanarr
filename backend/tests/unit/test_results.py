@@ -18,6 +18,6 @@ def test_action_collector_notifies_scoped_observer() -> None:
         collector = ActionCollector(event)
         collector.add("radarr", "delete_movie", ActionStatus.DELETED, "Movie deleted.")
 
-    collector.add("jellyseerr", "delete_media", ActionStatus.DELETED, "Media deleted.")
+    collector.add("seerr", "delete_media", ActionStatus.DELETED, "Media deleted.")
 
     assert observed_messages == ["Movie deleted."]

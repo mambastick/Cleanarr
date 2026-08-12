@@ -81,8 +81,8 @@ class FakeContainer:
             radarr_api_key="radarr-key",
             sonarr_url="http://sonarr",
             sonarr_api_key="sonarr-key",
-            jellyseerr_url="http://jellyseerr",
-            jellyseerr_api_key="jellyseerr-key",
+            seerr_url="http://seerr",
+            seerr_api_key="seerr-key",
             downloader_kind="qbittorrent",
             qbittorrent_url="http://qbt",
             qbittorrent_username="user",
@@ -312,8 +312,8 @@ async def test_runtime_config_endpoints_persist_and_rebuild(tmp_path: Path) -> N
         radarr_api_key=None,
         sonarr_url=None,
         sonarr_api_key=None,
-        jellyseerr_url=None,
-        jellyseerr_api_key=None,
+        seerr_url=None,
+        seerr_api_key=None,
         downloader_kind="qbittorrent",
         qbittorrent_url=None,
         qbittorrent_username=None,
@@ -365,6 +365,40 @@ async def test_runtime_config_endpoints_persist_and_rebuild(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_legacy_jellyseerr_config_route_writes_canonical_seerr_payload(tmp_path: Path) -> None:
+    settings = Settings.model_construct(
+        db_path=str(tmp_path / "cleanarr.db"),
+        config_state_path=str(tmp_path / "runtime-config.json"),
+        admin_shared_token="admin-token",
+        log_level="INFO",
+        dry_run=True,
+        webhook_shared_token="secret-token",
+        http_timeout_seconds=5.0,
+    )
+    container = ServiceContainer.from_settings(settings)
+    app = create_app(container=container)
+
+    async with app_client(app) as client:
+        response = await client.post(
+            "/api/config/jellyseerr",
+            headers={"X-Admin-Token": "admin-token"},
+            json={
+                "name": "Migrated Seerr",
+                "url": "https://seerr.example.com",
+                "api_key": "key",
+            },
+        )
+
+    assert response.status_code == 200
+    assert "jellyseerr" not in response.json()
+    assert response.json()["seerr"][0]["kind"] == "seerr"
+    assert "/api/config/seerr" in app.openapi()["paths"]
+    assert "/api/config/jellyseerr" not in app.openapi()["paths"]
+
+    await container.close()
+
+
+@pytest.mark.asyncio
 async def test_runtime_config_crud_supports_all_tier_one_downloaders(tmp_path: Path) -> None:
     settings = Settings.model_construct(
         db_path=str(tmp_path / "cleanarr.db"),
@@ -378,8 +412,8 @@ async def test_runtime_config_crud_supports_all_tier_one_downloaders(tmp_path: P
         radarr_api_key=None,
         sonarr_url=None,
         sonarr_api_key=None,
-        jellyseerr_url=None,
-        jellyseerr_api_key=None,
+        seerr_url=None,
+        seerr_api_key=None,
         downloader_kind="qbittorrent",
         qbittorrent_url=None,
         qbittorrent_username=None,
@@ -464,8 +498,8 @@ async def test_first_run_config_does_not_seed_integrations_from_env(tmp_path: Pa
         radarr_api_key="radarr-key",
         sonarr_url="http://sonarr.example/api/v3",
         sonarr_api_key="sonarr-key",
-        jellyseerr_url="http://jellyseerr.example/api/v1",
-        jellyseerr_api_key="jellyseerr-key",
+        seerr_url="http://seerr.example/api/v1",
+        seerr_api_key="seerr-key",
         downloader_kind="qbittorrent",
         qbittorrent_url="http://qbt.example",
         qbittorrent_username="user",
@@ -480,7 +514,7 @@ async def test_first_run_config_does_not_seed_integrations_from_env(tmp_path: Pa
     assert response.status_code == 200
     assert response.json()["radarr"] == []
     assert response.json()["sonarr"] == []
-    assert response.json()["jellyseerr"] == []
+    assert response.json()["seerr"] == []
     assert response.json()["downloaders"] == []
     assert response.json()["general"]["webhook_shared_token"] == "secret-token"
 
@@ -502,8 +536,8 @@ async def test_runtime_config_connection_test_returns_structured_failure(tmp_pat
         radarr_api_key=None,
         sonarr_url=None,
         sonarr_api_key=None,
-        jellyseerr_url=None,
-        jellyseerr_api_key=None,
+        seerr_url=None,
+        seerr_api_key=None,
         downloader_kind="qbittorrent",
         qbittorrent_url=None,
         qbittorrent_username=None,
@@ -549,8 +583,8 @@ async def test_sonarr_test_endpoint_normalizes_plain_base_url_to_api_v3(tmp_path
         radarr_api_key=None,
         sonarr_url=None,
         sonarr_api_key=None,
-        jellyseerr_url=None,
-        jellyseerr_api_key=None,
+        seerr_url=None,
+        seerr_api_key=None,
         downloader_kind="qbittorrent",
         qbittorrent_url=None,
         qbittorrent_username=None,
@@ -582,7 +616,7 @@ async def test_sonarr_test_endpoint_normalizes_plain_base_url_to_api_v3(tmp_path
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_jellyseerr_test_endpoint_normalizes_plain_base_url_to_api_v1(tmp_path: Path) -> None:
+async def test_seerr_test_endpoint_normalizes_plain_base_url_to_api_v1(tmp_path: Path) -> None:
     settings = Settings.model_construct(
         db_path=str(tmp_path / "cleanarr.db"),
         config_state_path=str(tmp_path / "runtime-config.json"),
@@ -595,8 +629,8 @@ async def test_jellyseerr_test_endpoint_normalizes_plain_base_url_to_api_v1(tmp_
         radarr_api_key=None,
         sonarr_url=None,
         sonarr_api_key=None,
-        jellyseerr_url=None,
-        jellyseerr_api_key=None,
+        seerr_url=None,
+        seerr_api_key=None,
         downloader_kind="qbittorrent",
         qbittorrent_url=None,
         qbittorrent_username=None,
@@ -604,18 +638,18 @@ async def test_jellyseerr_test_endpoint_normalizes_plain_base_url_to_api_v1(tmp_
     )
     container = ServiceContainer.from_settings(settings)
     app = create_app(container=container)
-    route = respx.get("https://jellyseerr.example.com/api/v1/media").respond(
+    route = respx.get("https://seerr.example.com/api/v1/media").respond(
         status_code=200,
         json={"pageInfo": {"results": 0}, "results": []},
     )
 
     async with app_client(app) as client:
         response = await client.post(
-            "/api/config/jellyseerr/test",
+            "/api/config/seerr/test",
             headers={"X-Admin-Token": "admin-token"},
             json={
-                "name": "Jellyseerr",
-                "url": "https://jellyseerr.example.com",
+                "name": "Seerr",
+                "url": "https://seerr.example.com",
                 "api_key": "key",
                 "enabled": True,
                 "is_default": True,
@@ -643,8 +677,8 @@ async def test_first_run_admin_registration_enables_session_auth(tmp_path: Path)
         radarr_api_key=None,
         sonarr_url=None,
         sonarr_api_key=None,
-        jellyseerr_url=None,
-        jellyseerr_api_key=None,
+        seerr_url=None,
+        seerr_api_key=None,
         downloader_kind="qbittorrent",
         qbittorrent_url=None,
         qbittorrent_username=None,

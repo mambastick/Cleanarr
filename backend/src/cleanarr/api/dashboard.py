@@ -234,7 +234,7 @@ class DashboardEndpointResponse(BaseModel):
 class HealthProbeStore:
     """Stores latest connectivity probe results per downstream service."""
 
-    _SERVICES = ("Radarr", "Sonarr", "Jellyfin", "Jellyseerr", "Downloader")
+    _SERVICES = ("Radarr", "Sonarr", "Jellyfin", "Seerr", "Downloader")
 
     def __init__(self) -> None:
         self._results: dict[str, str] = {name: "unconfigured" for name in self._SERVICES}
@@ -318,7 +318,7 @@ async def build_dashboard_response(
     active_radarr = _pick_active_url(config.radarr)
     active_sonarr = _pick_active_url(config.sonarr)
     active_jellyfin = _pick_active_url(config.jellyfin)
-    active_jellyseerr = _pick_active_url(config.jellyseerr)
+    active_seerr = _pick_active_url(config.seerr)
     active_downloader = _pick_active_url(config.downloaders)
     health = health_probe_store.snapshot()
     activity_records = await activity_store.snapshot()
@@ -383,11 +383,11 @@ async def build_dashboard_response(
                 health_status=health.get("Jellyfin", "unconfigured"),
             ),
             DashboardDownstreamResponse(
-                name="Jellyseerr",
+                name="Seerr",
                 role="Request and issue cleanup",
-                url=_sanitize_url(active_jellyseerr),
-                configured=bool(active_jellyseerr),
-                health_status=health.get("Jellyseerr", "unconfigured"),
+                url=_sanitize_url(active_seerr),
+                configured=bool(active_seerr),
+                health_status=health.get("Seerr", "unconfigured"),
             ),
             DashboardDownstreamResponse(
                 name="Downloader",
@@ -459,7 +459,7 @@ def _build_rules() -> list[DashboardRuleResponse]:
                 "Resolve movie in Radarr using strict identifiers only.",
                 "Collect downloader hashes from grabbed Radarr history records.",
                 "Delete safe hashes with deleteFiles=true.",
-                "Delete the Radarr movie entry and matching Jellyseerr records.",
+                "Delete the Radarr movie entry and matching Seerr records.",
             ],
             guardrails=[
                 "No fuzzy matching.",
@@ -470,10 +470,10 @@ def _build_rules() -> list[DashboardRuleResponse]:
             item_type=ItemType.SERIES,
             matching_order=tv_matching,
             cleanup_steps=[
-                "Resolve series in Sonarr and Jellyseerr.",
+                "Resolve series in Sonarr and Seerr.",
                 "Delete downloader hashes belonging exclusively to the series.",
                 "Delete the Sonarr series entry.",
-                "Delete Jellyseerr requests, issues and media records for the series.",
+                "Delete Seerr requests, issues and media records for the series.",
             ],
             guardrails=[
                 "Pack torrents shared with unrelated content are skipped.",

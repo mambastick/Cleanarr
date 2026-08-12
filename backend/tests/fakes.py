@@ -7,11 +7,11 @@ from typing import Any
 
 from cleanarr.domain import (
     DownloaderRemovalResult,
-    JellyseerrIssue,
-    JellyseerrMedia,
-    JellyseerrRequest,
     RadarrHistoryRecord,
     RadarrMovie,
+    SeerrIssue,
+    SeerrMedia,
+    SeerrRequest,
     SonarrEpisode,
     SonarrEpisodeFile,
     SonarrHistoryRecord,
@@ -103,24 +103,24 @@ class FakeSonarrClient:
 
 
 @dataclass
-class FakeJellyseerrClient:
-    """In-memory Jellyseerr fake."""
+class FakeSeerrClient:
+    """In-memory Seerr fake."""
 
-    media: list[JellyseerrMedia]
-    requests: list[JellyseerrRequest]
-    issues: list[JellyseerrIssue]
+    media: list[SeerrMedia]
+    requests: list[SeerrRequest]
+    issues: list[SeerrIssue]
     deleted_request_ids: list[int] = field(default_factory=list)
     updated_requests: dict[int, list[int]] = field(default_factory=dict)
     deleted_issue_ids: list[int] = field(default_factory=list)
     deleted_media_ids: list[int] = field(default_factory=list)
 
-    async def list_media(self) -> list[JellyseerrMedia]:
+    async def list_media(self) -> list[SeerrMedia]:
         return list(self.media)
 
-    async def list_requests(self) -> list[JellyseerrRequest]:
+    async def list_requests(self) -> list[SeerrRequest]:
         return list(self.requests)
 
-    async def list_issues(self) -> list[JellyseerrIssue]:
+    async def list_issues(self) -> list[SeerrIssue]:
         return list(self.issues)
 
     async def delete_request(self, request_id: int) -> None:
@@ -129,13 +129,13 @@ class FakeJellyseerrClient:
 
     async def update_request_seasons(
         self,
-        request: JellyseerrRequest,
+        request: SeerrRequest,
         *,
         season_numbers: list[int],
     ) -> None:
         self.updated_requests[request.id] = season_numbers
         self.requests = [
-            JellyseerrRequest(
+            SeerrRequest(
                 id=item.id,
                 media_id=item.media_id,
                 media_type=item.media_type,

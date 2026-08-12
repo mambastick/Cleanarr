@@ -13,12 +13,12 @@ from cleanarr.domain import (
     DownloaderRemovalResult,
     ExternalServiceError,
     JellyfinItem,
-    JellyseerrIssue,
-    JellyseerrMedia,
-    JellyseerrRequest,
     RadarrHistoryRecord,
     RadarrMovie,
     ResourceNotFoundError,
+    SeerrIssue,
+    SeerrMedia,
+    SeerrRequest,
     SonarrEpisode,
     SonarrEpisodeFile,
     SonarrHistoryRecord,
@@ -371,19 +371,19 @@ class NullSonarrClient:
         return None
 
 
-class JellyseerrClient(JsonServiceClient):
-    """Jellyseerr HTTP client."""
+class SeerrClient(JsonServiceClient):
+    """Seerr HTTP client."""
 
     def __init__(self, *, base_url: str, api_key: str, timeout_seconds: float) -> None:
         super().__init__(
-            system="jellyseerr",
+            system="seerr",
             base_url=base_url,
             timeout_seconds=timeout_seconds,
             headers={"X-Api-Key": api_key},
         )
 
     async def ping(self) -> None:
-        """Verify Jellyseerr connectivity."""
+        """Verify Seerr connectivity."""
 
         await self._request("GET", "/auth/me")
         self._build_xsrf_headers()
@@ -428,7 +428,7 @@ class JellyseerrClient(JsonServiceClient):
         return "; ".join([*preserved, xsrf_cookie])
 
     async def _prepare_xsrf_headers(self, path: str) -> dict[str, str]:
-        """Fetch a fresh XSRF token for Jellyseerr mutation endpoints."""
+        """Fetch a fresh XSRF token for Seerr mutation endpoints."""
 
         try:
             response = await self._client.request("HEAD", path)
@@ -478,10 +478,10 @@ class JellyseerrClient(JsonServiceClient):
             **kwargs,
         )
 
-    async def list_media(self) -> Sequence[JellyseerrMedia]:
+    async def list_media(self) -> Sequence[SeerrMedia]:
         skip = 0
         take = 100
-        results: list[JellyseerrMedia] = []
+        results: list[SeerrMedia] = []
         total_results = 0
         while True:
             payload = await self._request(
@@ -493,7 +493,7 @@ class JellyseerrClient(JsonServiceClient):
             total_results = page_info.get("results", 0)
             for item in payload.get("results", []):
                 results.append(
-                    JellyseerrMedia(
+                    SeerrMedia(
                         id=item["id"],
                         media_type=item["mediaType"],
                         tmdb_id=item.get("tmdbId"),
@@ -507,9 +507,9 @@ class JellyseerrClient(JsonServiceClient):
                 break
         return results
 
-    async def list_requests(self) -> Sequence[JellyseerrRequest]:
+    async def list_requests(self) -> Sequence[SeerrRequest]:
         skip = 0
-        results: list[JellyseerrRequest] = []
+        results: list[SeerrRequest] = []
         total_results = 0
         while True:
             payload = await self._request(
@@ -523,7 +523,7 @@ class JellyseerrClient(JsonServiceClient):
                 seasons = tuple(season["seasonNumber"] for season in (item.get("seasons") or []))
                 requested_by = item.get("requestedBy") or {}
                 results.append(
-                    JellyseerrRequest(
+                    SeerrRequest(
                         id=item["id"],
                         media_id=item["media"]["id"],
                         media_type=item["type"],
@@ -542,9 +542,9 @@ class JellyseerrClient(JsonServiceClient):
                 break
         return results
 
-    async def list_issues(self) -> Sequence[JellyseerrIssue]:
+    async def list_issues(self) -> Sequence[SeerrIssue]:
         skip = 0
-        results: list[JellyseerrIssue] = []
+        results: list[SeerrIssue] = []
         total_results = 0
         while True:
             payload = await self._request(
@@ -557,7 +557,7 @@ class JellyseerrClient(JsonServiceClient):
             for item in payload.get("results", []):
                 media = item.get("media") or {}
                 results.append(
-                    JellyseerrIssue(
+                    SeerrIssue(
                         id=item["id"],
                         media_id=media["id"],
                         problem_season=item.get("problemSeason"),
@@ -574,7 +574,7 @@ class JellyseerrClient(JsonServiceClient):
 
     async def update_request_seasons(
         self,
-        request: JellyseerrRequest,
+        request: SeerrRequest,
         *,
         season_numbers: Sequence[int],
     ) -> None:
@@ -602,8 +602,8 @@ class JellyseerrClient(JsonServiceClient):
         await self._request_with_xsrf("DELETE", f"/media/{media_id}", expected_statuses={204})
 
 
-class NullJellyseerrClient:
-    """No-op fallback when no active Jellyseerr service is configured."""
+class NullSeerrClient:
+    """No-op fallback when no active Seerr service is configured."""
 
     async def close(self) -> None:
         return None
@@ -611,13 +611,13 @@ class NullJellyseerrClient:
     async def ping(self) -> None:
         return None
 
-    async def list_media(self) -> Sequence[JellyseerrMedia]:
+    async def list_media(self) -> Sequence[SeerrMedia]:
         return []
 
-    async def list_requests(self) -> Sequence[JellyseerrRequest]:
+    async def list_requests(self) -> Sequence[SeerrRequest]:
         return []
 
-    async def list_issues(self) -> Sequence[JellyseerrIssue]:
+    async def list_issues(self) -> Sequence[SeerrIssue]:
         return []
 
     async def delete_request(self, request_id: int) -> None:
@@ -625,7 +625,7 @@ class NullJellyseerrClient:
 
     async def update_request_seasons(
         self,
-        request: JellyseerrRequest,
+        request: SeerrRequest,
         *,
         season_numbers: Sequence[int],
     ) -> None:

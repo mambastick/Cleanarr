@@ -40,7 +40,7 @@ When you delete something in Jellyfin, you usually have to manually clean up the
 2. CleanArr resolves the item in Radarr/Sonarr using strict ID matching (TMDB → IMDB → path)
 3. Torrent hashes are routed to qBittorrent, Transmission, Deluge, and rTorrent — only when Arr history proves ownership
 4. The entry is removed from Radarr/Sonarr
-5. Matching requests, issues, and media records are cleaned up in Jellyseerr
+5. Matching requests, issues, and media records are cleaned up in Seerr
 
 Pack torrents, shared files, and anything that can't be safely attributed are always skipped.
 
@@ -188,6 +188,11 @@ All settings can be changed at runtime from the **Settings** tab. Environment va
 | `SSO_SCOPES` | `openid profile email` | OpenID Connect scopes |
 
 > **Important:** `DB_PATH` must point to a persistent volume. Without it, all service configurations and activity history are lost on restart.
+
+Existing `jellyseerr` profiles are migrated in place to the canonical `seerr`
+configuration on startup. The legacy `JELLYSEERR_URL` /
+`JELLYSEERR_API_KEY` variables and `/api/config/jellyseerr` routes remain
+backward-compatible aliases.
 
 ---
 

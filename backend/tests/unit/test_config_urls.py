@@ -3,11 +3,11 @@ from pydantic import ValidationError
 
 from cleanarr.domain.config import (
     DelugeServiceConfig,
-    JellyseerrServiceConfig,
     QbittorrentServiceConfig,
     RadarrServiceConfig,
     RTorrentServiceConfig,
     RuntimeConfig,
+    SeerrServiceConfig,
     SonarrServiceConfig,
     TorrentRemovalPolicy,
     TransmissionServiceConfig,
@@ -34,14 +34,26 @@ def test_sonarr_url_rewrites_wrong_api_version_to_api_v3() -> None:
     assert config.url == "https://apps.example.com/sonarr/api/v3"
 
 
-def test_jellyseerr_url_is_normalized_to_api_v1() -> None:
-    config = JellyseerrServiceConfig(
-        name="Jellyseerr",
-        url="https://jellyseerr.example.com",
+def test_seerr_url_is_normalized_to_api_v1() -> None:
+    config = SeerrServiceConfig(
+        name="Seerr",
+        url="https://seerr.example.com",
         api_key="key",
     )
 
-    assert config.url == "https://jellyseerr.example.com/api/v1"
+    assert config.url == "https://seerr.example.com/api/v1"
+
+
+def test_legacy_jellyseerr_environment_names_populate_seerr(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JELLYSEERR_URL", "https://legacy-seerr.example.com")
+    monkeypatch.setenv("JELLYSEERR_API_KEY", "legacy-key")
+
+    from cleanarr.infrastructure.settings import Settings
+
+    settings = Settings(_env_file=None)
+
+    assert settings.seerr_url == "https://legacy-seerr.example.com"
+    assert settings.seerr_api_key == "legacy-key"
 
 
 def test_qbittorrent_url_strips_api_v2_suffix() -> None:

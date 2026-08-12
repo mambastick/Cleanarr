@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cleanarr.domain.config import SSOAuthMode
@@ -36,8 +36,14 @@ class Settings(BaseSettings):
     sonarr_url: str | None = Field(default=None, alias="SONARR_URL")
     sonarr_api_key: str | None = Field(default=None, alias="SONARR_API_KEY")
 
-    jellyseerr_url: str | None = Field(default=None, alias="JELLYSEERR_URL")
-    jellyseerr_api_key: str | None = Field(default=None, alias="JELLYSEERR_API_KEY")
+    seerr_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SEERR_URL", "JELLYSEERR_URL"),
+    )
+    seerr_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SEERR_API_KEY", "JELLYSEERR_API_KEY"),
+    )
 
     downloader_kind: str = Field(default="qbittorrent", alias="DOWNLOADER_KIND")
     qbittorrent_url: str | None = Field(default=None, alias="QBITTORRENT_URL")

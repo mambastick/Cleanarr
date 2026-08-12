@@ -232,8 +232,8 @@ class SonarrHistoryRecord:
 
 
 @dataclass(frozen=True)
-class JellyseerrMedia:
-    """Subset of Jellyseerr media metadata."""
+class SeerrMedia:
+    """Subset of Seerr media metadata."""
 
     id: int
     media_type: str
@@ -244,8 +244,8 @@ class JellyseerrMedia:
 
 
 @dataclass(frozen=True)
-class JellyseerrRequest:
-    """Subset of Jellyseerr request metadata."""
+class SeerrRequest:
+    """Subset of Seerr request metadata."""
 
     id: int
     media_id: int
@@ -261,8 +261,8 @@ class JellyseerrRequest:
 
 
 @dataclass(frozen=True)
-class JellyseerrIssue:
-    """Subset of Jellyseerr issue metadata."""
+class SeerrIssue:
+    """Subset of Seerr issue metadata."""
 
     id: int
     media_id: int

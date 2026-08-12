@@ -43,8 +43,8 @@ export interface SonarrServiceConfig extends BaseServiceConfig {
   api_key: string
 }
 
-export interface JellyseerrServiceConfig extends BaseServiceConfig {
-  kind: "jellyseerr"
+export interface SeerrServiceConfig extends BaseServiceConfig {
+  kind: "seerr"
   api_key: string
 }
 
@@ -87,7 +87,7 @@ export interface RuntimeConfigPayload {
   general: GeneralConfig
   radarr: RadarrServiceConfig[]
   sonarr: SonarrServiceConfig[]
-  jellyseerr: JellyseerrServiceConfig[]
+  seerr: SeerrServiceConfig[]
   downloaders: DownloaderServiceConfig[]
   jellyfin: JellyfinServiceConfig[]
   admin_token_configured: boolean

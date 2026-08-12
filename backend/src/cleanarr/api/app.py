@@ -30,11 +30,11 @@ from cleanarr.api.config_schemas import (
     DelugeServiceRequest,
     GeneralConfigRequest,
     JellyfinServiceRequest,
-    JellyseerrServiceRequest,
     QbittorrentServiceRequest,
     RadarrServiceRequest,
     RTorrentServiceRequest,
     RuntimeConfigResponse,
+    SeerrServiceRequest,
     SonarrServiceRequest,
     TransmissionServiceRequest,
 )
@@ -111,7 +111,7 @@ async def _health_probe_loop(container: ServiceContainer, health_store: HealthPr
             await asyncio.gather(
                 _probe("Radarr", _has_active_service(config.radarr), container.radarr),
                 _probe("Sonarr", _has_active_service(config.sonarr), container.sonarr),
-                _probe("Jellyseerr", _has_active_service(config.jellyseerr), container.jellyseerr),
+                _probe("Seerr", _has_active_service(config.seerr), container.seerr),
                 _probe("Downloader", _has_active_service(config.downloaders), container.downloader),
                 _probe("Jellyfin", _has_active_service(config.jellyfin), container.jellyfin_server),
             )
@@ -350,7 +350,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         report(
             ManualDeleteJobPhase.CLEANING,
             30,
-            "Cleaning up Arr services, qBittorrent, and Jellyseerr.",
+            "Cleaning up Arr services, torrent clients, and Seerr.",
             item_name,
         )
         strategy = container.strategy_factory.for_item_type(payload.item_type)
@@ -773,10 +773,16 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         "/api/config/jellyseerr",
         response_model=RuntimeConfigResponse,
         dependencies=[Depends(require_admin_token)],
+        include_in_schema=False,
     )
-    async def create_jellyseerr(
+    @app.post(
+        "/api/config/seerr",
+        response_model=RuntimeConfigResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def create_seerr(
         request: Request,
-        payload: JellyseerrServiceRequest,
+        payload: SeerrServiceRequest,
     ) -> RuntimeConfigResponse:
         container = request.app.state.container
         config = container.config_service.add_service(payload.to_domain().kind, payload.to_domain())
@@ -787,11 +793,17 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         "/api/config/jellyseerr/{service_id}",
         response_model=RuntimeConfigResponse,
         dependencies=[Depends(require_admin_token)],
+        include_in_schema=False,
     )
-    async def update_jellyseerr(
+    @app.put(
+        "/api/config/seerr/{service_id}",
+        response_model=RuntimeConfigResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def update_seerr(
         request: Request,
         service_id: str,
-        payload: JellyseerrServiceRequest,
+        payload: SeerrServiceRequest,
     ) -> RuntimeConfigResponse:
         container = request.app.state.container
         config = container.config_service.update_service(
@@ -806,10 +818,16 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         "/api/config/jellyseerr/{service_id}",
         status_code=status.HTTP_204_NO_CONTENT,
         dependencies=[Depends(require_admin_token)],
+        include_in_schema=False,
     )
-    async def delete_jellyseerr(request: Request, service_id: str) -> Response:
+    @app.delete(
+        "/api/config/seerr/{service_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def delete_seerr(request: Request, service_id: str) -> Response:
         container = request.app.state.container
-        container.config_service.delete_service(ServiceKind.JELLYSEERR, service_id)
+        container.config_service.delete_service(ServiceKind.SEERR, service_id)
         await container.refresh_runtime()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -817,9 +835,15 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         "/api/config/jellyseerr/test",
         response_model=ConnectionTestResponse,
         dependencies=[Depends(require_admin_token)],
+        include_in_schema=False,
     )
-    async def test_jellyseerr(
-        payload: JellyseerrServiceRequest,
+    @app.post(
+        "/api/config/seerr/test",
+        response_model=ConnectionTestResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def test_seerr(
+        payload: SeerrServiceRequest,
         request: Request,
     ) -> ConnectionTestResponse:
         result = await request.app.state.container.config_service.test_service(payload.to_domain())
@@ -1220,11 +1244,11 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                 )
 
         try:
-            seerr_media_items = list(await container.jellyseerr.list_media())
-            seerr_requests = list(await container.jellyseerr.list_requests())
+            seerr_media_items = list(await container.seerr.list_media())
+            seerr_requests = list(await container.seerr.list_requests())
         except Exception:  # noqa: BLE001
             _logger.warning(
-                "Unable to load Jellyseerr requests for the series library",
+                "Unable to load Seerr requests for the series library",
                 exc_info=True,
             )
             seerr_media_items = []
@@ -1311,7 +1335,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                     size_bytes=size_by_season.get(sn, 0),
                     jellyfin_season_id=jf_season_map.get(sn, (None, None))[0],
                     jellyfin_title=jf_season_map.get(sn, (None, None))[1],
-                    has_jellyseerr_request=(
+                    has_seerr_request=(
                         seerr_media_id is not None
                         and has_series_request
                         and (
@@ -1333,7 +1357,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                     jellyfin_series_title=jf_series_title,
                     seasons=seasons,
                     jellyfin_series_id=jf_series_id,
-                    has_jellyseerr_request=has_series_request,
+                    has_seerr_request=has_series_request,
                 )
             )
         return LibrarySeriesResponse(series=result)
@@ -1364,11 +1388,11 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                 jf_movies_by_imdb[item.imdb_id] = (item.id, item.name)
 
         try:
-            seerr_media_items = list(await container.jellyseerr.list_media())
-            seerr_requests = list(await container.jellyseerr.list_requests())
+            seerr_media_items = list(await container.seerr.list_media())
+            seerr_requests = list(await container.seerr.list_requests())
         except Exception:  # noqa: BLE001
             _logger.warning(
-                "Unable to load Jellyseerr requests for the movie library",
+                "Unable to load Seerr requests for the movie library",
                 exc_info=True,
             )
             seerr_media_items = []
@@ -1403,7 +1427,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                     size_bytes=movie.size_on_disk or 0,
                     has_file=movie.has_file,
                     jellyfin_movie_id=jf_movie_id,
-                    has_jellyseerr_request=(seerr_media_id is not None and seerr_media_id in requested_movie_ids),
+                    has_seerr_request=(seerr_media_id is not None and seerr_media_id in requested_movie_ids),
                 )
             )
         return LibraryMoviesResponse(movies=result)

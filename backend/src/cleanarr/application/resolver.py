@@ -6,9 +6,9 @@ from dataclasses import dataclass
 
 from cleanarr.domain import (
     FailureReason,
-    JellyseerrMedia,
     MediaFingerprint,
     RadarrMovie,
+    SeerrMedia,
     SonarrSeries,
 )
 
@@ -130,14 +130,14 @@ class StrictSeriesResolver:
         return MatchDecision(candidate=items[0], matched_by=matched_by)
 
 
-class StrictJellyseerrResolver:
-    """Resolve Jellyseerr media by strict external identifiers."""
+class StrictSeerrResolver:
+    """Resolve Seerr media by strict external identifiers."""
 
     def resolve_movie(
         self,
         fingerprint: MediaFingerprint,
-        media_items: list[JellyseerrMedia],
-    ) -> MatchDecision[JellyseerrMedia]:
+        media_items: list[SeerrMedia],
+    ) -> MatchDecision[SeerrMedia]:
         movie_items = [item for item in media_items if item.media_type == "movie"]
         if fingerprint.tmdb_id is not None:
             match = self._unique([item for item in movie_items if item.tmdb_id == fingerprint.tmdb_id], "tmdb_id")
@@ -152,8 +152,8 @@ class StrictJellyseerrResolver:
     def resolve_tv(
         self,
         fingerprint: MediaFingerprint,
-        media_items: list[JellyseerrMedia],
-    ) -> MatchDecision[JellyseerrMedia]:
+        media_items: list[SeerrMedia],
+    ) -> MatchDecision[SeerrMedia]:
         tv_items = [item for item in media_items if item.media_type == "tv"]
         if fingerprint.tvdb_id is not None:
             match = self._unique([item for item in tv_items if item.tvdb_id == fingerprint.tvdb_id], "tvdb_id")
@@ -171,9 +171,9 @@ class StrictJellyseerrResolver:
 
     @staticmethod
     def _unique(
-        items: list[JellyseerrMedia],
+        items: list[SeerrMedia],
         matched_by: str,
-    ) -> MatchDecision[JellyseerrMedia] | None:
+    ) -> MatchDecision[SeerrMedia] | None:
         if not items:
             return None
         if len(items) > 1:

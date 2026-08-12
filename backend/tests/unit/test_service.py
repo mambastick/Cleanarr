@@ -18,7 +18,7 @@ from cleanarr.domain import (
     RadarrHistoryRecord,
     RadarrMovie,
 )
-from tests.fakes import FakeDownloaderClient, FakeJellyseerrClient, FakeRadarrClient, FakeSonarrClient
+from tests.fakes import FakeDownloaderClient, FakeRadarrClient, FakeSeerrClient, FakeSonarrClient
 
 
 @dataclass
@@ -39,7 +39,7 @@ async def test_service_ignores_non_item_deleted_events() -> None:
         logger=__import__("logging").getLogger("test"),
         radarr=FakeRadarrClient(movies=[], history_by_movie={}),
         sonarr=FakeSonarrClient(series=[], history_by_series={}, episodes_by_series={}, episode_files_by_series={}),
-        jellyseerr=FakeJellyseerrClient(media=[], requests=[], issues=[]),
+        seerr=FakeSeerrClient(media=[], requests=[], issues=[]),
         downloader=FakeDownloaderClient(existing_hashes=set()),
     )
     service = CascadeDeletionService(strategy_factory)
@@ -60,7 +60,7 @@ async def test_service_ignores_non_item_deleted_events() -> None:
 
 class _FailingStrategy:
     async def handle(self, event: MediaDeletionEvent):  # type: ignore[no-untyped-def]
-        raise ExternalServiceError("jellyseerr", "downstream exploded")
+        raise ExternalServiceError("seerr", "downstream exploded")
 
 
 class _FailingStrategyFactory:
@@ -132,7 +132,7 @@ async def test_dry_run_reports_seeding_policy_without_mutating_downloader() -> N
         logger=__import__("logging").getLogger("test"),
         radarr=radarr,
         sonarr=FakeSonarrClient(series=[], history_by_series={}, episodes_by_series={}, episode_files_by_series={}),
-        jellyseerr=FakeJellyseerrClient(media=[], requests=[], issues=[]),
+        seerr=FakeSeerrClient(media=[], requests=[], issues=[]),
         downloader=downloader,  # type: ignore[arg-type]
     )
 
@@ -161,14 +161,14 @@ async def test_service_blocks_series_cascade_when_item_reappears_after_move() ->
         episodes_by_series={},
         episode_files_by_series={},
     )
-    jellyseerr = FakeJellyseerrClient(media=[], requests=[], issues=[])
+    seerr = FakeSeerrClient(media=[], requests=[], issues=[])
     downloader = FakeDownloaderClient(existing_hashes=set())
     strategy_factory = DeletionStrategyFactory(
         dry_run=False,
         logger=__import__("logging").getLogger("test"),
         radarr=FakeRadarrClient(movies=[], history_by_movie={}),
         sonarr=sonarr,
-        jellyseerr=jellyseerr,
+        seerr=seerr,
         downloader=downloader,
     )
     service = CascadeDeletionService(
@@ -206,8 +206,8 @@ async def test_service_blocks_series_cascade_when_item_reappears_after_move() ->
     assert result.actions[0].action == "confirm_deletion"
     assert result.actions[0].reason == FailureReason.SOURCE_STILL_PRESENT
     assert sonarr.deleted_series_ids == []
-    assert jellyseerr.deleted_request_ids == []
-    assert jellyseerr.deleted_media_ids == []
+    assert seerr.deleted_request_ids == []
+    assert seerr.deleted_media_ids == []
     assert downloader.deleted_hashes == []
 
 

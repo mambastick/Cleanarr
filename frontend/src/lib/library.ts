@@ -7,7 +7,7 @@ export interface SeasonSummary {
   size_bytes: number
   jellyfin_title?: string | null
   jellyfin_season_id?: string | null
-  has_jellyseerr_request: boolean
+  has_seerr_request: boolean
 }
 
 export interface SeriesSummary {
@@ -16,7 +16,7 @@ export interface SeriesSummary {
   jellyfin_series_title?: string | null
   seasons: SeasonSummary[]
   jellyfin_series_id?: string | null
-  has_jellyseerr_request: boolean
+  has_seerr_request: boolean
 }
 
 export interface LibrarySeriesResponse {
@@ -30,7 +30,7 @@ export interface MovieSummary {
   size_bytes: number
   has_file: boolean
   jellyfin_movie_id?: string | null
-  has_jellyseerr_request: boolean
+  has_seerr_request: boolean
 }
 
 export interface LibraryMoviesResponse {

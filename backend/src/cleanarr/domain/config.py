@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
 
 class ServiceKind(StrEnum):
@@ -15,7 +15,7 @@ class ServiceKind(StrEnum):
 
     RADARR = "radarr"
     SONARR = "sonarr"
-    JELLYSEERR = "jellyseerr"
+    SEERR = "seerr"
     QBITTORRENT = "qbittorrent"
     TRANSMISSION = "transmission"
     DELUGE = "deluge"
@@ -213,15 +213,24 @@ class SonarrServiceConfig(BaseServiceConfig):
         return _normalize_api_service_url(value, expected_suffix="/api/v3")
 
 
-class JellyseerrServiceConfig(BaseServiceConfig):
-    """Jellyseerr integration settings."""
+class SeerrServiceConfig(BaseServiceConfig):
+    """Seerr integration settings, including migrated Jellyseerr profiles."""
 
-    kind: ServiceKind = ServiceKind.JELLYSEERR
+    kind: Literal[ServiceKind.SEERR] = ServiceKind.SEERR
     api_key: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_kind(cls, values: object) -> object:
+        if not isinstance(values, dict) or values.get("kind") != "jellyseerr":
+            return values
+        migrated = dict(values)
+        migrated["kind"] = ServiceKind.SEERR.value
+        return migrated
 
     @field_validator("url", mode="before")
     @classmethod
-    def normalize_jellyseerr_url(cls, value: str) -> str:
+    def normalize_seerr_url(cls, value: str) -> str:
         return _normalize_api_service_url(value, expected_suffix="/api/v1")
 
 
@@ -297,9 +306,40 @@ class RuntimeConfig(BaseModel):
     general: GeneralConfig = Field(default_factory=GeneralConfig)
     radarr: list[RadarrServiceConfig] = Field(default_factory=list)
     sonarr: list[SonarrServiceConfig] = Field(default_factory=list)
-    jellyseerr: list[JellyseerrServiceConfig] = Field(default_factory=list)
+    seerr: list[SeerrServiceConfig] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("seerr", "jellyseerr"),
+    )
     downloaders: list[DownloaderServiceConfig] = Field(default_factory=list)
     jellyfin: list[JellyfinServiceConfig] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def merge_legacy_seerr_profiles(cls, values: object) -> object:
+        """Accept mixed upgrade payloads without dropping either profile set."""
+
+        if not isinstance(values, dict) or "jellyseerr" not in values:
+            return values
+        canonical = values.get("seerr")
+        legacy = values.get("jellyseerr")
+        canonical_profiles = list(canonical) if isinstance(canonical, list) else []
+        legacy_profiles = list(legacy) if isinstance(legacy, list) else []
+        known_ids = {
+            profile.get("id")
+            for profile in canonical_profiles
+            if isinstance(profile, dict) and profile.get("id") is not None
+        }
+        migrated = dict(values)
+        migrated["seerr"] = [
+            *canonical_profiles,
+            *[
+                profile
+                for profile in legacy_profiles
+                if not isinstance(profile, dict) or profile.get("id") not in known_ids
+            ],
+        ]
+        migrated.pop("jellyseerr", None)
+        return migrated
 
 
 def _normalize_api_service_url(value: str, *, expected_suffix: str) -> str:

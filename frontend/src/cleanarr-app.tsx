@@ -72,7 +72,7 @@ import type {
   DownloaderServiceConfig,
   GeneralConfig,
   JellyfinServiceConfig,
-  JellyseerrServiceConfig,
+  SeerrServiceConfig,
   RadarrServiceConfig,
   RuntimeConfigPayload,
   SonarrServiceConfig,
@@ -106,7 +106,7 @@ function CleanArrBrand({ size = "sm" }: { size?: "sm" | "lg" }) {
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type MainTab = "dashboard" | "settings" | "activity" | "library"
-type ServiceFamily = "radarr" | "sonarr" | "jellyseerr" | "downloaders" | "jellyfin_server"
+type ServiceFamily = "radarr" | "sonarr" | "seerr" | "downloaders" | "jellyfin_server"
 type SetupStepId = "general" | ServiceFamily
 type AuthMode = "register" | "login"
 type DownloaderKind = DownloaderServiceConfig["kind"]
@@ -114,7 +114,7 @@ type TorrentRemovalPolicy = DownloaderServiceConfig["seeding_policy"]
 type ServiceRecord =
   | RadarrServiceConfig
   | SonarrServiceConfig
-  | JellyseerrServiceConfig
+  | SeerrServiceConfig
   | DownloaderServiceConfig
   | JellyfinServiceConfig
 
@@ -223,7 +223,7 @@ const DOWNLOADER_EXAMPLES: Record<DownloaderKind, string> = {
 const SERVICE_FAMILIES: ServiceFamily[] = [
   "radarr",
   "sonarr",
-  "jellyseerr",
+  "seerr",
   "downloaders",
   "jellyfin_server",
 ]
@@ -285,12 +285,12 @@ const SERVICE_META: Record<ServiceFamily, ServiceMeta> = {
     ],
     example: "https://sonarr.example.com",
   },
-  jellyseerr: {
-    family: "jellyseerr",
-    title: "Jellyseerr",
+  seerr: {
+    family: "seerr",
+    title: "Seerr",
     singular: "request manager",
     description: "Request and issue cleanup target.",
-    endpoint: "/api/config/jellyseerr",
+    endpoint: "/api/config/seerr",
     accent: "green",
     icon: ShieldCheck,
     fields: [
@@ -298,20 +298,20 @@ const SERVICE_META: Record<ServiceFamily, ServiceMeta> = {
         key: "api_key",
         label: "API key",
         type: "password",
-        hint: "Jellyseerr → Settings → General → API Key.",
+        hint: "Seerr → Settings → General → API Key.",
       },
     ],
     steps: [
-      "Paste the Jellyseerr base URL only. CleanArr appends /api/v1 automatically.",
-      "Open Jellyseerr → Settings → General and copy the API key.",
+      "Paste the Seerr base URL only. CleanArr appends /api/v1 automatically.",
+      "Open Seerr → Settings → General and copy the API key.",
       "CleanArr removes matching requests, issues, and media records after successful cleanup.",
-      "Keep Jellyseerr pointed at the same Radarr/Sonarr stack you configure here.",
+      "Keep Seerr pointed at the same Radarr/Sonarr stack you configure here.",
     ],
     help: [
-      "Example URL: https://jellyseerr.example.com",
-      "Reverse-proxy paths also work: https://apps.example.com/jellyseerr",
+      "Example URL: https://seerr.example.com",
+      "Reverse-proxy paths also work: https://apps.example.com/seerr",
     ],
-    example: "https://jellyseerr.example.com",
+    example: "https://seerr.example.com",
   },
   downloaders: {
     family: "downloaders",
@@ -373,7 +373,7 @@ const SERVICE_META: Record<ServiceFamily, ServiceMeta> = {
       "Paste the Jellyfin base URL including scheme and port, e.g. http://jellyfin:8096.",
       "Open Jellyfin → Dashboard → API Keys and create a new key for CleanArr.",
       "Connecting Jellyfin enables the Library tab: browse movies and series, delete seasons immediately.",
-      "Deletion cascades through Sonarr/Radarr → qBittorrent → Jellyseerr, then removes the item from Jellyfin instantly.",
+      "Deletion cascades through Sonarr/Radarr → qBittorrent → Seerr, then removes the item from Jellyfin instantly.",
     ],
     help: [
       "Example URL: http://jellyfin:8096",
@@ -406,8 +406,8 @@ const SETUP_STEPS: SetupStepMeta[] = [
     icon: Tv,
   },
   {
-    id: "jellyseerr",
-    title: "Jellyseerr",
+    id: "seerr",
+    title: "Seerr",
     description: "Request and issue cleanup source.",
     accent: "green",
     icon: Star,
@@ -424,7 +424,7 @@ const SETUP_STEPS: SetupStepMeta[] = [
 const EMPTY_DRAFTS: Record<ServiceFamily, ServiceDraft> = {
   radarr: { name: "Radarr", url: "", api_key: "", username: "", password: "", downloader_kind: null, enabled: true, is_default: true, seeding_policy: "immediate", min_seed_ratio: "", min_seed_time_minutes: "" },
   sonarr: { name: "Sonarr", url: "", api_key: "", username: "", password: "", downloader_kind: null, enabled: true, is_default: true, seeding_policy: "immediate", min_seed_ratio: "", min_seed_time_minutes: "" },
-  jellyseerr: { name: "Jellyseerr", url: "", api_key: "", username: "", password: "", downloader_kind: null, enabled: true, is_default: true, seeding_policy: "immediate", min_seed_ratio: "", min_seed_time_minutes: "" },
+  seerr: { name: "Seerr", url: "", api_key: "", username: "", password: "", downloader_kind: null, enabled: true, is_default: true, seeding_policy: "immediate", min_seed_ratio: "", min_seed_time_minutes: "" },
   downloaders: { name: "qBittorrent", url: "", api_key: "", username: "", password: "", downloader_kind: "qbittorrent", enabled: true, is_default: true, seeding_policy: "immediate", min_seed_ratio: "", min_seed_time_minutes: "" },
   jellyfin_server: { name: "Jellyfin", url: "", api_key: "", username: "", password: "", downloader_kind: null, enabled: true, is_default: true, seeding_policy: "immediate", min_seed_ratio: "", min_seed_time_minutes: "" },
 }
@@ -433,7 +433,7 @@ const DASHBOARD_NAME_TO_FAMILY: Partial<Record<string, ServiceFamily>> = {
   Radarr: "radarr",
   Sonarr: "sonarr",
   Jellyfin: "jellyfin_server",
-  Jellyseerr: "jellyseerr",
+  Seerr: "seerr",
   Downloader: "downloaders",
 }
 
@@ -651,7 +651,7 @@ type UiTextKey =
   | "oneYear"
   | "serviceRadarrDescription"
   | "serviceSonarrDescription"
-  | "serviceJellyseerrDescription"
+  | "serviceSeerrDescription"
   | "serviceDownloaderDescription"
   | "serviceJellyfinDescription"
   | "apiKey"
@@ -661,7 +661,7 @@ type UiTextKey =
   | "downloaderUrlHint"
   | "radarrApiHint"
   | "sonarrApiHint"
-  | "jellyseerrApiHint"
+  | "seerrApiHint"
   | "downloaderUsernameHint"
   | "downloaderPasswordHint"
   | "qbittorrentApiHint"
@@ -794,14 +794,14 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     searchPlaceholderSeries: "Search series…",
     searchPlaceholderMovies: "Search movies…",
     libraryDescription:
-      "Browse your media library and delete items — cascades to Sonarr/Radarr, qBittorrent, Jellyseerr, and Jellyfin.",
+      "Browse your media library and delete items — cascades to Sonarr/Radarr, qBittorrent, Seerr, and Jellyfin.",
     dryRunModeInfo: "Dry run mode",
     noLiveChanges: "No actual changes will be made. Enable Live mode in Runtime settings to execute real deletions.",
     deleteButton: "Delete",
     confirmDelete: "Delete",
     simulate: "Simulate (dry run)",
     confirmDeleteDescription:
-      "This will remove files from Sonarr, delete matching torrents from qBittorrent, and clean up requests in Jellyseerr. The task will continue in the background, so you can keep using CleanArr.",
+      "This will remove files from Sonarr, delete matching torrents from qBittorrent, and clean up requests in Seerr. The task will continue in the background, so you can keep using CleanArr.",
     titleDeleteConfirmation: "Delete \"{{title}}\"?",
     dryRunModeNotice: "Dry run mode",
     titleNotConfigured: "No authentication method is currently configured.",
@@ -922,7 +922,7 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     oneYear: "1 year",
     serviceRadarrDescription: "Movie cleanup target used to resolve and delete movies.",
     serviceSonarrDescription: "Series, season, and episode cleanup target.",
-    serviceJellyseerrDescription: "Request and issue cleanup target.",
+    serviceSeerrDescription: "Request and issue cleanup target.",
     serviceDownloaderDescription: "One or more torrent clients used for ownership lookup and safe hash deletion.",
     serviceJellyfinDescription: "Jellyfin media server used for library browsing and immediate item removal.",
     apiKey: "API key",
@@ -932,7 +932,7 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     downloaderUrlHint: "Paste the client base URL. CleanArr adds the default RPC path when it is omitted.",
     radarrApiHint: "Radarr → Settings → General → Security → API Key.",
     sonarrApiHint: "Sonarr → Settings → General → Security → API Key.",
-    jellyseerrApiHint: "Jellyseerr → Settings → General → API Key.",
+    seerrApiHint: "Seerr → Settings → General → API Key.",
     downloaderUsernameHint: "Username for the selected client's Web or RPC interface, when authentication is enabled.",
     downloaderPasswordHint: "Password for the selected client's Web or RPC interface, when authentication is enabled.",
     qbittorrentApiHint: "qBittorrent 5.2+ API key; leave empty to use username and password.",
@@ -1062,14 +1062,14 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     searchPlaceholderSeries: "Поиск сериалов…",
     searchPlaceholderMovies: "Поиск фильмов…",
     libraryDescription:
-      "Просматривайте медиатеку и удаляйте элементы — очистка затем выполняется в Sonarr/Radarr, qBittorrent, Jellyseerr и Jellyfin.",
+      "Просматривайте медиатеку и удаляйте элементы — очистка затем выполняется в Sonarr/Radarr, qBittorrent, Seerr и Jellyfin.",
     dryRunModeInfo: "Тестовый режим",
     noLiveChanges: "Реальные изменения не выполняются. Включите рабочий режим в настройках приложения, чтобы разрешить удаление.",
     deleteButton: "Удалить",
     confirmDelete: "Удалить",
     simulate: "Симулировать (тест)",
     confirmDeleteDescription:
-      "Будут удалены файлы в Sonarr, сопутствующие торренты в qBittorrent и запросы в Jellyseerr. Задача продолжится в фоне.",
+      "Будут удалены файлы в Sonarr, сопутствующие торренты в qBittorrent и запросы в Seerr. Задача продолжится в фоне.",
     titleDeleteConfirmation: "Удалить {{title}}?",
     dryRunModeNotice: "Тестовый режим",
     titleNotConfigured: "Метод авторизации сейчас не настроен.",
@@ -1190,7 +1190,7 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     oneYear: "1 год",
     serviceRadarrDescription: "Сервис поиска и удаления фильмов.",
     serviceSonarrDescription: "Сервис поиска и удаления сериалов, сезонов и эпизодов.",
-    serviceJellyseerrDescription: "Сервис очистки запросов и обращений.",
+    serviceSeerrDescription: "Сервис очистки запросов и обращений.",
     serviceDownloaderDescription: "Один или несколько torrent-клиентов для поиска владельца и безопасного удаления раздач.",
     serviceJellyfinDescription: "Медиасервер для просмотра библиотеки и немедленного удаления элементов.",
     apiKey: "API-ключ",
@@ -1200,7 +1200,7 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     downloaderUrlHint: "Укажите базовый URL клиента. CleanArr добавит стандартный путь RPC, если он не указан.",
     radarrApiHint: "Radarr → Настройки → Общие → Безопасность → API Key.",
     sonarrApiHint: "Sonarr → Настройки → Общие → Безопасность → API Key.",
-    jellyseerrApiHint: "Jellyseerr → Настройки → Общие → API Key.",
+    seerrApiHint: "Seerr → Настройки → Общие → API Key.",
     downloaderUsernameHint: "Имя пользователя выбранного Web/RPC-интерфейса, если включена аутентификация.",
     downloaderPasswordHint: "Пароль выбранного Web/RPC-интерфейса, если включена аутентификация.",
     qbittorrentApiHint: "API key qBittorrent 5.2+; оставьте поле пустым для username/password.",
@@ -1309,7 +1309,7 @@ function getServiceDescription(family: ServiceFamily, text: UiTextMap): string {
   switch (family) {
     case "radarr": return text.serviceRadarrDescription
     case "sonarr": return text.serviceSonarrDescription
-    case "jellyseerr": return text.serviceJellyseerrDescription
+    case "seerr": return text.serviceSeerrDescription
     case "downloaders": return text.serviceDownloaderDescription
     case "jellyfin_server": return text.serviceJellyfinDescription
   }
@@ -1372,7 +1372,7 @@ function getServiceFieldHint(
   switch (family) {
     case "radarr": return text.radarrApiHint
     case "sonarr": return text.sonarrApiHint
-    case "jellyseerr": return text.jellyseerrApiHint
+    case "seerr": return text.seerrApiHint
     case "jellyfin_server": return text.jellyfinApiHint
     case "downloaders": return text.apiKey
   }
@@ -2335,7 +2335,7 @@ const DOWNSTREAM_META: Partial<Record<string, { icon: LucideIcon; color: string 
   Radarr: { icon: Film, color: "text-yellow-500" },
   Sonarr: { icon: Tv, color: "text-sky-500" },
   Jellyfin: { icon: Play, color: "text-purple-500" },
-  Jellyseerr: { icon: Star, color: "text-orange-500" },
+  Seerr: { icon: Star, color: "text-orange-500" },
   Downloader: { icon: Download, color: "text-emerald-500" },
 }
 
@@ -2344,7 +2344,7 @@ function getDashboardServiceRole(name: string, fallback: string, text: UiTextMap
     case "Radarr": return text.serviceRadarrDescription
     case "Sonarr": return text.serviceSonarrDescription
     case "Jellyfin": return text.serviceJellyfinDescription
-    case "Jellyseerr": return text.serviceJellyseerrDescription
+    case "Seerr": return text.serviceSeerrDescription
     case "Downloader": return text.serviceDownloaderDescription
     default: return fallback
   }
@@ -3592,10 +3592,10 @@ function SetupWizard({
             />
           </Step>
 
-          {/* Step 5: Jellyseerr */}
+          {/* Step 5: Seerr */}
           <Step>
             <WizardServiceStep
-              family="jellyseerr"
+              family="seerr"
               config={config}
               text={text}
               onSave={onSaveService}
@@ -4805,7 +4805,7 @@ function LibrarySeriesTab({
                       {totalBytes > 0 && ` · ${formatBytes(totalBytes)}`}
                     </span>
                   </button>
-                  {(hasDownloadedEpisodes || series.has_jellyseerr_request) && <Button
+                  {(hasDownloadedEpisodes || series.has_seerr_request) && <Button
                     variant="ghost"
                     size="sm"
                     className="ml-2 shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
@@ -4839,7 +4839,7 @@ function LibrarySeriesTab({
                             {season.episode_file_count}/{season.episode_count} {text.episodes}
                             {season.size_bytes > 0 && ` · ${formatBytes(season.size_bytes)}`}
                           </span>
-                          {(season.episode_file_count > 0 || season.has_jellyseerr_request) && <Button
+                          {(season.episode_file_count > 0 || season.has_seerr_request) && <Button
                             variant="outline"
                             size="sm"
                             className="shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
@@ -4947,7 +4947,7 @@ function LibraryMoviesTab({
                       : text.onDisk
                     : text.noFile}
                 </span>
-                {(movie.has_file || movie.has_jellyseerr_request) && <Button
+                {(movie.has_file || movie.has_seerr_request) && <Button
                   variant="ghost"
                   size="sm"
                   className="ml-2 shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
@@ -5270,7 +5270,7 @@ function getServices(config: RuntimeConfigPayload | null, family: ServiceFamily)
   switch (family) {
     case "radarr": return config.radarr
     case "sonarr": return config.sonarr
-    case "jellyseerr": return config.jellyseerr
+    case "seerr": return config.seerr
     case "downloaders": return config.downloaders
     case "jellyfin_server": return config.jellyfin
   }
@@ -5328,7 +5328,7 @@ function buildServicePayload(family: ServiceFamily, draft: ServiceDraft) {
   switch (family) {
     case "radarr":
     case "sonarr":
-    case "jellyseerr":
+    case "seerr":
     case "jellyfin_server":
       return { ...base, api_key: draft.api_key }
     case "downloaders": {
