@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     sso_client_secret: str | None = Field(default=None, alias="SSO_CLIENT_SECRET")
     sso_redirect_uri: str | None = Field(default=None, alias="SSO_REDIRECT_URI")
     sso_scopes: str = Field(default="openid profile email", alias="SSO_SCOPES")
+    sso_allowed_users: str = Field(default="", alias="SSO_ALLOWED_USERS")
+    sso_allowed_groups: str = Field(default="", alias="SSO_ALLOWED_GROUPS")
+    sso_group_claim: str = Field(default="groups", alias="SSO_GROUP_CLAIM")
+    sso_required_claim: str | None = Field(default=None, alias="SSO_REQUIRED_CLAIM")
+    sso_required_value: str | None = Field(default=None, alias="SSO_REQUIRED_VALUE")
+    session_cookie_secure: bool | None = Field(default=None, alias="SESSION_COOKIE_SECURE")
 
     radarr_url: str | None = Field(default=None, alias="RADARR_URL")
     radarr_api_key: str | None = Field(default=None, alias="RADARR_API_KEY")

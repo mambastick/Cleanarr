@@ -1,8 +1,14 @@
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
+
+const repositoryBackend = path.resolve(__dirname, '../backend/src')
+const backendSource = existsSync(repositoryBackend)
+  ? repositoryBackend
+  : path.resolve(__dirname, '../src')
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -20,7 +26,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: '../src/cleanarr/ui/static',
+    outDir: path.join(backendSource, 'cleanarr/ui/static'),
     emptyOutDir: true,
   },
 })

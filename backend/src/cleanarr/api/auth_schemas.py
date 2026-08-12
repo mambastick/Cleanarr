@@ -15,6 +15,7 @@ class AuthStatusResponse(BaseModel):
     requires_registration: bool
     authenticated: bool
     username: str | None = None
+    csrf_token: str | None = None
     sso_enabled: bool
     sso_mode: SSOAuthMode
     sso_configured: bool
@@ -34,7 +35,6 @@ class SSOLoginResponse(BaseModel):
     """Information for redirecting the browser into the provider."""
 
     authorize_url: str
-    state: str
 
 
 class AdminCredentialsRequest(BaseModel):
@@ -45,11 +45,11 @@ class AdminCredentialsRequest(BaseModel):
 
 
 class AuthSessionResponse(BaseModel):
-    """Session-bearing auth response."""
+    """Authenticated browser response without exposing the session identifier."""
 
     username: str
-    token: str
+    csrf_token: str
 
     @classmethod
     def from_domain(cls, session: AuthSession) -> AuthSessionResponse:
-        return cls.model_validate(session.__dict__)
+        return cls(username=session.username, csrf_token=session.csrf_token)

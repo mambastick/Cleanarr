@@ -15,6 +15,11 @@ export interface GeneralConfig {
   sso_client_secret: string | null
   sso_redirect_uri: string | null
   sso_scopes: string
+  sso_allowed_users: string[]
+  sso_allowed_groups: string[]
+  sso_group_claim: string
+  sso_required_claim: string | null
+  sso_required_value: string | null
 }
 
 export interface BaseServiceConfig {

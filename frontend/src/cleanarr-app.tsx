@@ -200,28 +200,6 @@ type SetupStepMeta = {
 }
 
 
-// ─── Cookie auth ─────────────────────────────────────────────────────────────
-
-const COOKIE_NAME = "cleanarr_session"
-
-function readSessionCookie(): string {
-  if (typeof document === "undefined") return ""
-  const entry = document.cookie
-    .split("; ")
-    .find((row) => row.startsWith(`${COOKIE_NAME}=`))
-  return entry ? entry.split("=").slice(1).join("=") : ""
-}
-
-function writeSessionCookie(token: string): void {
-  if (typeof document === "undefined") return
-  if (token) {
-    const maxAge = 60 * 60 * 24 * 30 // 30 days
-    document.cookie = `${COOKIE_NAME}=${token}; path=/; SameSite=Strict; max-age=${maxAge}`
-  } else {
-    document.cookie = `${COOKIE_NAME}=; path=/; max-age=0`
-  }
-}
-
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const LOG_LEVEL_OPTIONS = ["DEBUG", "INFO", "WARNING", "ERROR"] as const
@@ -607,6 +585,12 @@ type UiTextKey =
   | "ssoClientSecret"
   | "ssoRedirectUri"
   | "ssoScopes"
+  | "ssoAllowedUsers"
+  | "ssoAllowedGroups"
+  | "ssoGroupClaim"
+  | "ssoRequiredClaim"
+  | "ssoRequiredValue"
+  | "ssoAccessPolicyHint"
   | "ssoModePasswordOnly"
   | "ssoModeSsoOnly"
   | "ssoModeBoth"
@@ -886,6 +870,13 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     ssoClientSecret: "Client Secret",
     ssoRedirectUri: "Redirect URI",
     ssoScopes: "Scopes",
+    ssoAllowedUsers: "Allowed users",
+    ssoAllowedGroups: "Allowed groups",
+    ssoGroupClaim: "Group claim",
+    ssoRequiredClaim: "Required claim",
+    ssoRequiredValue: "Required claim value",
+    ssoAccessPolicyHint:
+      "Access fails closed. A user must match an allowed user or group; the required claim is an additional condition. A required claim alone is also a valid policy.",
     ssoModePasswordOnly: "Local credentials only",
     ssoModeSsoOnly: "SSO only",
     ssoModeBoth: "Local + SSO",
@@ -1162,6 +1153,13 @@ const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     ssoClientSecret: "Client Secret",
     ssoRedirectUri: "Redirect URI",
     ssoScopes: "Scopes",
+    ssoAllowedUsers: "Разрешённые пользователи",
+    ssoAllowedGroups: "Разрешённые группы",
+    ssoGroupClaim: "Claim с группами",
+    ssoRequiredClaim: "Обязательный claim",
+    ssoRequiredValue: "Значение обязательного claim",
+    ssoAccessPolicyHint:
+      "Доступ по умолчанию запрещён. Пользователь должен совпасть с разрешённым пользователем или группой; обязательный claim служит дополнительным условием. Можно использовать только обязательный claim.",
     ssoModePasswordOnly: "Только локальные учётные данные",
     ssoModeSsoOnly: "Только SSO",
     ssoModeBoth: "Локально + SSO",
@@ -1478,7 +1476,7 @@ function CleanArrApp() {
   const [ssoError, setSsoError] = useState<string | null>(null)
   const [generalModalOpen, setGeneralModalOpen] = useState(false)
   const [serviceModal, setServiceModal] = useState<ServiceModalState | null>(null)
-  const [sessionToken, setSessionToken] = useState(() => readSessionCookie())
+  const [csrfToken, setCsrfToken] = useState("")
   const hasAutoNavigated = useRef(false)
 
   const [library, setLibrary] = useState<LibrarySeriesResponse | null>(null)
@@ -1510,8 +1508,9 @@ function CleanArrApp() {
       if (init?.body && !headers.has("Content-Type")) {
         headers.set("Content-Type", "application/json")
       }
-      if (sessionToken) {
-        headers.set("Authorization", `Bearer ${sessionToken}`)
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (csrfToken && !["GET", "HEAD", "OPTIONS"].includes(method)) {
+        headers.set("X-CSRF-Token", csrfToken)
       }
 
       const response = await fetch(url, { ...init, headers })
@@ -1521,7 +1520,7 @@ function CleanArrApp() {
           (response.status === 401 || response.status === 403) &&
           url.startsWith("/api/config")
         ) {
-          setSessionToken("")
+          setCsrfToken("")
         }
         let message = response.statusText || `HTTP ${response.status}`
         try {
@@ -1553,7 +1552,7 @@ function CleanArrApp() {
 
       return (await response.json()) as T
     },
-    [sessionToken],
+    [csrfToken],
   )
 
   const loadDashboard = useCallback(
@@ -1578,6 +1577,7 @@ function CleanArrApp() {
     try {
       const payload = await fetchJson<AuthStatusPayload>("/api/auth/status")
       setAuthStatus(payload)
+      setCsrfToken(payload.csrf_token ?? "")
       setAuthMode(payload.requires_registration ? "register" : "login")
       if (!payload.authenticated) {
         setConfig(null)
@@ -1741,10 +1741,15 @@ function CleanArrApp() {
 
   // Auto-polls
   useEffect(() => {
+    if (!authStatus?.authenticated) {
+      setDashboard(null)
+      setIsDashboardLoading(false)
+      return
+    }
     void loadDashboard()
     const id = window.setInterval(() => void loadDashboard(true), 15000)
     return () => window.clearInterval(id)
-  }, [loadDashboard])
+  }, [authStatus?.authenticated, loadDashboard])
 
   useEffect(() => {
     void loadAuth()
@@ -1792,13 +1797,6 @@ function CleanArrApp() {
       void loadLibraryMovies()
     }
   }, [activeTab, authStatus?.authenticated, loadLibrary, loadLibraryMovies])
-
-  // Persist session token to cookie
-  useEffect(() => {
-    if (sessionToken) {
-      writeSessionCookie(sessionToken)
-    }
-  }, [sessionToken])
 
   const setupCompletionCount = useMemo(
     () => SETUP_STEPS.reduce((n, step) => n + (isSetupStepReady(step.id, config) ? 1 : 0), 0),
@@ -1876,9 +1874,10 @@ function CleanArrApp() {
           body: JSON.stringify({ username: authForm.username, password: authForm.password }),
         },
       )
-      setSessionToken(payload.token)
+      setCsrfToken(payload.csrf_token)
       setAuthForm({ username: payload.username, password: "", confirmPassword: "" })
       setActiveTab("dashboard")
+      await loadAuth()
       if (authMode === "register") {
         setShowWizard(true)
       }
@@ -1913,8 +1912,13 @@ function CleanArrApp() {
     } catch {
       // Refresh below will resolve whether the server-side session is still valid.
     }
-    setSessionToken("")
-    setAuthStatus((current) => current ? { ...current, authenticated: false, username: null } : current)
+    setCsrfToken("")
+    setAuthStatus((current) => current ? {
+      ...current,
+      authenticated: false,
+      username: null,
+      csrf_token: null,
+    } : current)
     setSsoError(null)
     setAuthForm({ username: "", password: "", confirmPassword: "" })
     setDeleteJobs([])
@@ -2891,7 +2895,65 @@ function SsoConfigSection({
           />
           <FieldHint text={text.ssoScopesHint} />
         </FormField>
+
+        <FormField label={text.ssoAllowedUsers} htmlFor={`${namespace}-sso-allowed-users`}>
+          <Input
+            id={`${namespace}-sso-allowed-users`}
+            value={draft.sso_allowed_users.join(", ")}
+            disabled={!ssoEnabled}
+            onChange={(e) => onDraftChange({
+              ...draft,
+              sso_allowed_users: e.target.value.split(",").map((value) => value.trim()).filter(Boolean),
+            })}
+            placeholder="admin@example.com, cleanarr-admin"
+          />
+        </FormField>
+
+        <FormField label={text.ssoAllowedGroups} htmlFor={`${namespace}-sso-allowed-groups`}>
+          <Input
+            id={`${namespace}-sso-allowed-groups`}
+            value={draft.sso_allowed_groups.join(", ")}
+            disabled={!ssoEnabled}
+            onChange={(e) => onDraftChange({
+              ...draft,
+              sso_allowed_groups: e.target.value.split(",").map((value) => value.trim()).filter(Boolean),
+            })}
+            placeholder="cleanarr-admins"
+          />
+        </FormField>
+
+        <FormField label={text.ssoGroupClaim} htmlFor={`${namespace}-sso-group-claim`}>
+          <Input
+            id={`${namespace}-sso-group-claim`}
+            value={draft.sso_group_claim}
+            disabled={!ssoEnabled}
+            onChange={(e) => onDraftChange({ ...draft, sso_group_claim: e.target.value })}
+            placeholder="groups"
+          />
+        </FormField>
+
+        <FormField label={text.ssoRequiredClaim} htmlFor={`${namespace}-sso-required-claim`}>
+          <Input
+            id={`${namespace}-sso-required-claim`}
+            value={draft.sso_required_claim ?? ""}
+            disabled={!ssoEnabled}
+            onChange={(e) => onDraftChange({ ...draft, sso_required_claim: e.target.value || null })}
+            placeholder="cleanarr_role"
+          />
+        </FormField>
+
+        <FormField label={text.ssoRequiredValue} htmlFor={`${namespace}-sso-required-value`}>
+          <Input
+            id={`${namespace}-sso-required-value`}
+            value={draft.sso_required_value ?? ""}
+            disabled={!ssoEnabled}
+            onChange={(e) => onDraftChange({ ...draft, sso_required_value: e.target.value || null })}
+            placeholder="administrator"
+          />
+        </FormField>
       </div>
+
+      {ssoEnabled && <FieldHint text={text.ssoAccessPolicyHint} />}
 
       {!ssoEnabled && (
         <p className="text-xs text-muted-foreground">

@@ -5,6 +5,7 @@ export interface AuthStatusPayload {
   requires_registration: boolean
   authenticated: boolean
   username: string | null
+  csrf_token: string | null
   sso_enabled: boolean
   sso_mode: SsoAuthMode
   sso_configured: boolean
@@ -13,10 +14,9 @@ export interface AuthStatusPayload {
 
 export interface AuthSessionPayload {
   username: string
-  token: string
+  csrf_token: string
 }
 
 export interface SSOLoginPayload {
   authorize_url: string
-  state: string
 }

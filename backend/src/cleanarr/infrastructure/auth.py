@@ -48,6 +48,7 @@ class SessionRecord:
     """In-memory admin session."""
 
     username: str
+    csrf_token: str
     expires_at: float
 
 
@@ -64,11 +65,12 @@ class InMemorySessionStore:
         with self._lock:
             self._sessions[token] = SessionRecord(
                 username=username,
+                csrf_token=secrets.token_urlsafe(32),
                 expires_at=time.time() + self._ttl_seconds,
             )
         return token
 
-    def resolve_session(self, token: str) -> str | None:
+    def resolve_session(self, token: str) -> SessionRecord | None:
         with self._lock:
             record = self._sessions.get(token)
             if record is None:
@@ -76,7 +78,7 @@ class InMemorySessionStore:
             if record.expires_at <= time.time():
                 self._sessions.pop(token, None)
                 return None
-            return record.username
+            return record
 
     def revoke_session(self, token: str) -> None:
         with self._lock:

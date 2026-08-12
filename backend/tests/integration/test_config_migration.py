@@ -6,7 +6,11 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from cleanarr.application.configuration import RuntimeConfigurationService
+from cleanarr.domain.config import CURRENT_CONFIG_SCHEMA_VERSION
+from cleanarr.infrastructure.config_migrations import UnsupportedConfigSchemaVersionError
 from cleanarr.infrastructure.config_store import SqliteConfigStore
 from cleanarr.infrastructure.settings import Settings
 
@@ -92,3 +96,73 @@ def test_mixed_upgrade_payload_merges_unique_legacy_and_canonical_profiles(tmp_p
     profiles = service.get_config().seerr
     assert [profile.id for profile in profiles] == ["canonical", "legacy-only"]
     assert profiles[0].name == "Canonical profile"
+
+
+def test_v040_config_upgrade_is_versioned_fail_closed_and_rollback_safe(tmp_path: Path) -> None:
+    db_path = tmp_path / "cleanarr.db"
+    backup_path = tmp_path / "cleanarr-v0.4.0.backup.db"
+    restored_path = tmp_path / "cleanarr-restored.db"
+    store = SqliteConfigStore(str(db_path))
+    stable_payload = {
+        "admin": {
+            "username": "existing-admin",
+            "password_salt": "00" * 16,
+            "password_hash": "11" * 64,
+        },
+        "general": {
+            "dry_run": True,
+            "sso_mode": "both",
+            "sso_issuer_url": "https://id.example/realms/cleanarr",
+            "sso_client_id": "cleanarr",
+            "sso_client_secret": "existing-secret",
+            "sso_redirect_uri": "https://cleanarr.example/api/auth/sso/callback",
+        },
+        "seerr": [],
+    }
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO config (id, config_json) VALUES (1, ?)",
+            (json.dumps(stable_payload),),
+        )
+        connection.commit()
+    with sqlite3.connect(db_path) as source, sqlite3.connect(backup_path) as backup:
+        source.backup(backup)
+    with sqlite3.connect(backup_path) as backup:
+        assert backup.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+
+    service = RuntimeConfigurationService(store=store, settings=Settings.model_construct())
+    config = service.get_config()
+
+    assert config.config_schema_version == CURRENT_CONFIG_SCHEMA_VERSION
+    assert config.admin.username == "existing-admin"
+    assert config.general.sso_client_id == "cleanarr"
+    assert config.general.sso_allowed_users == []
+    assert config.general.sso_allowed_groups == []
+    assert config.general.has_sso_access_policy() is False
+    with sqlite3.connect(db_path) as connection:
+        migrated = json.loads(connection.execute("SELECT config_json FROM config WHERE id = 1").fetchone()[0])
+    assert migrated["config_schema_version"] == CURRENT_CONFIG_SCHEMA_VERSION
+    assert migrated["general"]["sso_client_secret"] == "existing-secret"
+
+    with sqlite3.connect(backup_path) as backup, sqlite3.connect(restored_path) as restored:
+        backup.backup(restored)
+    with sqlite3.connect(restored_path) as restored:
+        restored_payload = json.loads(restored.execute("SELECT config_json FROM config WHERE id = 1").fetchone()[0])
+    assert "config_schema_version" not in restored_payload
+    assert restored_payload["admin"]["username"] == "existing-admin"
+
+
+def test_future_config_schema_is_rejected_without_rewrite(tmp_path: Path) -> None:
+    db_path = tmp_path / "future.db"
+    store = SqliteConfigStore(str(db_path))
+    future_payload = {"config_schema_version": CURRENT_CONFIG_SCHEMA_VERSION + 1, "general": {"dry_run": True}}
+    serialized = json.dumps(future_payload)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("INSERT INTO config (id, config_json) VALUES (1, ?)", (serialized,))
+        connection.commit()
+
+    with pytest.raises(UnsupportedConfigSchemaVersionError, match="newer than supported"):
+        store.load()
+
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute("SELECT config_json FROM config WHERE id = 1").fetchone() == (serialized,)

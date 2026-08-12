@@ -63,6 +63,11 @@ class GeneralConfigRequest(BaseModel):
     sso_client_secret: str | None = None
     sso_redirect_uri: str | None = None
     sso_scopes: str = "openid profile email"
+    sso_allowed_users: list[str] = Field(default_factory=list)
+    sso_allowed_groups: list[str] = Field(default_factory=list)
+    sso_group_claim: str = "groups"
+    sso_required_claim: str | None = None
+    sso_required_value: str | None = None
 
     def to_domain(self) -> GeneralConfig:
         return GeneralConfig.model_validate(self.model_dump())

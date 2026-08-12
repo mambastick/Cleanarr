@@ -103,7 +103,7 @@
 - **Журнал действий** — поиск по названию, системе, действию и результату.
 - **Мастер первого запуска** — последовательное подключение сервисов.
 - **Несколько профилей** — несколько конфигураций каждого типа сервиса с выбором активной.
-- **Локальный вход и SSO** — пароль, OpenID Connect или режим только SSO.
+- **Локальный вход и SSO** — пароль и строгая проверка OpenID Connect с PKCE, nonce и явной политикой users/groups/claims.
 - **Светлая и тёмная темы** — автоматический выбор по настройкам системы.
 
 ---
@@ -200,6 +200,12 @@ kubectl apply -f deploy/k8s/ingress.yaml
 | `SSO_CLIENT_SECRET` | — | Секрет клиента OpenID Connect |
 | `SSO_REDIRECT_URI` | — | Callback, обычно `https://cleanarr.example/api/auth/sso/callback` |
 | `SSO_SCOPES` | `openid profile email` | Запрашиваемые области OpenID Connect |
+| `SSO_ALLOWED_USERS` | — | Разрешённые usernames/email/subject через запятую |
+| `SSO_ALLOWED_GROUPS` | — | Разрешённые значения группы через запятую |
+| `SSO_GROUP_CLAIM` | `groups` | Claim ID token со значениями групп |
+| `SSO_REQUIRED_CLAIM` | — | Необязательный дополнительный claim для доступа |
+| `SSO_REQUIRED_VALUE` | — | Обязательное значение; задаётся вместе с `SSO_REQUIRED_CLAIM` |
+| `SESSION_COOKIE_SECURE` | auto | Принудительный флаг `Secure`; задайте `true`, если TLS завершается на proxy без доверия к forwarded headers |
 
 > **Важно:** `DB_PATH` должен находиться на постоянном хранилище. Иначе после перезапуска будут потеряны настройки сервисов и журнал действий.
 
@@ -207,6 +213,10 @@ kubectl apply -f deploy/k8s/ingress.yaml
 данных преобразуются в каноническую конфигурацию `seerr`. Переменные
 `JELLYSEERR_URL` / `JELLYSEERR_API_KEY` и маршруты `/api/config/jellyseerr`
 остаются совместимыми псевдонимами.
+
+SSO не включается, пока не задан хотя бы один разрешённый пользователь/группа
+либо пара обязательного claim/value. Перед включением `both` или `sso_only`
+прочитайте полное [руководство по OIDC и reverse proxy](docs/SSO_RU.md).
 
 ---
 

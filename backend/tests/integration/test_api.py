@@ -65,14 +65,29 @@ class FakeAuthService:
                 "requires_registration": False,
                 "authenticated": username is not None,
                 "username": username,
+                "csrf_token": "csrf-token" if username else None,
+                "sso_enabled": False,
+                "sso_mode": "password_only",
+                "sso_configured": False,
             },
         )()
 
     def register_admin(self, *, username: str, password: str):  # type: ignore[no-untyped-def]
-        return type("Session", (), {"username": username, "token": "session-token"})()
+        return type(
+            "Session",
+            (),
+            {"username": username, "token": "session-token", "csrf_token": "csrf-token"},
+        )()
 
-    def login(self, *, username: str, password: str):  # type: ignore[no-untyped-def]
-        return type("Session", (), {"username": username, "token": "session-token"})()
+    def login(self, *, username: str, password: str, source: str = "unknown"):  # type: ignore[no-untyped-def]
+        return type(
+            "Session",
+            (),
+            {"username": username, "token": "session-token", "csrf_token": "csrf-token"},
+        )()
+
+    def verify_csrf_token(self, session_token: str | None, csrf_token: str | None) -> bool:
+        return session_token == "session-token" and csrf_token == "csrf-token"
 
     def logout(self, session_token: str | None) -> None:
         return None
@@ -300,7 +315,7 @@ async def test_webhook_endpoint_suppresses_completed_duplicate_delivery(tmp_path
             headers={"X-Webhook-Token": "secret-token"},
             json=payload,
         )
-        dashboard = await client.get("/api/dashboard")
+        dashboard = await client.get("/api/dashboard", headers={"X-Admin-Token": "admin-token"})
 
     assert first.status_code == 200
     assert second.status_code == 200
@@ -327,7 +342,7 @@ async def test_webhook_endpoint_rejects_bad_token(tmp_path: Path) -> None:
                 "tmdb_id": 1,
             },
         )
-        dashboard_response = await client.get("/api/dashboard")
+        dashboard_response = await client.get("/api/dashboard", headers={"X-Admin-Token": "admin-token"})
 
     assert response.status_code == 401
     assert dashboard_response.status_code == 200
@@ -375,7 +390,7 @@ async def test_dashboard_endpoint_exposes_recent_activity(tmp_path: Path) -> Non
                 "episode_number": 1,
             },
         )
-        dashboard_response = await client.get("/api/dashboard")
+        dashboard_response = await client.get("/api/dashboard", headers={"X-Admin-Token": "admin-token"})
 
     assert webhook_response.status_code == 200
     assert dashboard_response.status_code == 200
@@ -449,7 +464,7 @@ async def test_dashboard_endpoint_exposes_invalid_payload_webhook_status(tmp_pat
             headers={"X-Webhook-Token": "secret-token"},
             json={"notification_type": "ItemDeleted"},
         )
-        dashboard_response = await client.get("/api/dashboard")
+        dashboard_response = await client.get("/api/dashboard", headers={"X-Admin-Token": "admin-token"})
 
     assert webhook_response.status_code == 422
     assert dashboard_response.status_code == 200
@@ -850,24 +865,96 @@ async def test_first_run_admin_registration_enables_session_auth(tmp_path: Path)
         status_before = await client.get("/api/auth/status")
         register = await client.post(
             "/api/auth/register",
+            headers={"Origin": "http://test"},
             json={"username": "admin", "password": "super-secret-123"},
         )
-        session_token = register.json()["token"]
-        status_after = await client.get(
-            "/api/auth/status",
-            headers={"Authorization": f"Bearer {session_token}"},
-        )
-        config_response = await client.get(
-            "/api/config",
-            headers={"Authorization": f"Bearer {session_token}"},
-        )
+        status_after = await client.get("/api/auth/status")
+        config_response = await client.get("/api/config")
 
     assert status_before.status_code == 200
     assert status_before.json()["requires_registration"] is True
     assert register.status_code == 200
+    assert "token" not in register.json()
+    assert register.json()["csrf_token"]
+    assert "HttpOnly" in register.headers["set-cookie"]
     assert status_after.status_code == 200
     assert status_after.json()["authenticated"] is True
     assert status_after.json()["username"] == "admin"
     assert config_response.status_code == 200
 
     await container.close()
+
+
+@pytest.mark.asyncio
+async def test_cookie_session_requires_same_origin_csrf_for_mutations(tmp_path: Path) -> None:
+    settings = Settings.model_construct(
+        db_path=str(tmp_path / "cleanarr.db"),
+        config_state_path=str(tmp_path / "runtime-config.json"),
+        admin_shared_token=None,
+        log_level="INFO",
+        dry_run=True,
+        webhook_shared_token="secret-token",
+        http_timeout_seconds=5.0,
+        radarr_url=None,
+        radarr_api_key=None,
+        sonarr_url=None,
+        sonarr_api_key=None,
+        seerr_url=None,
+        seerr_api_key=None,
+        downloader_kind="qbittorrent",
+        qbittorrent_url=None,
+        qbittorrent_username=None,
+        qbittorrent_password=None,
+    )
+    container = ServiceContainer.from_settings(settings)
+    app = create_app(container=container)
+
+    async with app_client(app) as client:
+        register = await client.post(
+            "/api/auth/register",
+            headers={"Origin": "http://test"},
+            json={"username": "admin", "password": "super-secret-123"},
+        )
+        csrf_token = register.json()["csrf_token"]
+        missing_csrf = await client.post(
+            "/api/auth/logout",
+            headers={"Origin": "http://test"},
+        )
+        wrong_origin = await client.post(
+            "/api/auth/logout",
+            headers={"Origin": "https://attacker.example", "X-CSRF-Token": csrf_token},
+        )
+        logout = await client.post(
+            "/api/auth/logout",
+            headers={"Origin": "http://test", "X-CSRF-Token": csrf_token},
+        )
+        status_after = await client.get("/api/auth/status")
+
+    set_cookie = register.headers["set-cookie"]
+    assert "HttpOnly" in set_cookie
+    assert "SameSite=strict" in set_cookie
+    assert "Max-Age=604800" in set_cookie
+    assert missing_csrf.status_code == 403
+    assert missing_csrf.json()["detail"] == "Invalid CSRF token"
+    assert wrong_origin.status_code == 403
+    assert wrong_origin.json()["detail"] == "Same-origin browser request required"
+    assert logout.status_code == 204
+    assert "cleanarr_session=" in logout.headers["set-cookie"]
+    assert "Max-Age=0" in logout.headers["set-cookie"]
+    assert status_after.json()["authenticated"] is False
+    assert status_after.headers["content-security-policy"].startswith("default-src 'self'")
+    assert "style-src 'self' 'unsafe-inline'" in status_after.headers["content-security-policy"]
+    assert "script-src 'self'" in status_after.headers["content-security-policy"]
+    assert status_after.headers["x-frame-options"] == "DENY"
+
+    await container.close()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_requires_admin_authentication(tmp_path: Path) -> None:
+    app = create_app(container=FakeContainer(FakeService(results=[]), db_path=tmp_path / "cleanarr.db"))
+
+    async with app_client(app) as client:
+        response = await client.get("/api/dashboard")
+
+    assert response.status_code == 403

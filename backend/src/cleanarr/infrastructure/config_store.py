@@ -8,6 +8,7 @@ from pathlib import Path
 from threading import Lock
 
 from cleanarr.domain.config import RuntimeConfig
+from cleanarr.infrastructure.config_migrations import migrate_config_payload
 from cleanarr.infrastructure.database import migrate_database
 
 
@@ -25,7 +26,7 @@ class FileConfigStore:
             if not self._path.exists():
                 return None
             payload = json.loads(self._path.read_text(encoding="utf-8"))
-            return RuntimeConfig.model_validate(payload)
+            return RuntimeConfig.model_validate(migrate_config_payload(payload))
 
     def save(self, config: RuntimeConfig) -> None:
         """Persist the current configuration atomically."""
@@ -61,11 +62,12 @@ class SqliteConfigStore:
             with sqlite3.connect(self._db_path) as conn:
                 row = conn.execute("SELECT config_json FROM config WHERE id = 1").fetchone()
             if row:
-                return RuntimeConfig.model_validate_json(row[0])
+                payload = json.loads(row[0])
+                return RuntimeConfig.model_validate(migrate_config_payload(payload))
             # First run: migrate from legacy JSON file when present.
             if self._migrate_from and self._migrate_from.exists():
                 payload = json.loads(self._migrate_from.read_text(encoding="utf-8"))
-                config = RuntimeConfig.model_validate(payload)
+                config = RuntimeConfig.model_validate(migrate_config_payload(payload))
                 self._save_locked(config)
                 return config
             return None

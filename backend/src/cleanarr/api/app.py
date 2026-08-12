@@ -3,21 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
-import json
 import logging
+import secrets
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlsplit
 from uuid import UUID
 
-import httpx
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, ValidationError
+from starlette.middleware.base import RequestResponseEndpoint
 
 from cleanarr.api.auth_schemas import (
     AdminCredentialsRequest,
@@ -68,6 +67,7 @@ from cleanarr.api.library_schemas import (
     SeriesSummary,
 )
 from cleanarr.api.schemas import JellyfinWebhookPayload, ProcessingResultResponse, WebhookBatchResponse
+from cleanarr.application.authentication import LoginThrottledError
 from cleanarr.application.results import observe_actions
 from cleanarr.application.service import CascadeDeletionService
 from cleanarr.domain import (
@@ -83,11 +83,21 @@ from cleanarr.domain import (
 )
 from cleanarr.domain.config import BaseServiceConfig, GeneralConfig, ServiceKind
 from cleanarr.infrastructure.container import ServiceContainer
+from cleanarr.infrastructure.oidc import (
+    OIDCError,
+    create_pkce_challenge,
+    discover_oidc_provider,
+    exchange_authorization_code,
+    fetch_jwks,
+    validate_id_token,
+)
 from cleanarr.infrastructure.settings import Settings
 
 _logger = logging.getLogger("cleanarr")
 _COOKIE_NAME = "cleanarr_session"
-_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
+_SSO_STATE_COOKIE_NAME = "cleanarr_sso_state"
+_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 7
+_SSO_STATE_MAX_AGE_SECONDS = 60 * 5
 _SSO_ERROR_PREFIX = "/?sso_error="
 _HTTP_UNPROCESSABLE_CONTENT = 422
 
@@ -143,7 +153,13 @@ def _extract_token(authorization: str | None, header_token: str | None) -> str |
     return None
 
 
+def _cookie_secure(request: Request) -> bool:
+    secure_override = getattr(request.app.state.container.settings, "session_cookie_secure", None)
+    return request.url.scheme == "https" if secure_override is None else bool(secure_override)
+
+
 def _set_session_cookie(response: Response, request: Request, token: str | None) -> None:
+    secure = _cookie_secure(request)
     if token:
         response.set_cookie(
             key=_COOKIE_NAME,
@@ -151,11 +167,39 @@ def _set_session_cookie(response: Response, request: Request, token: str | None)
             httponly=True,
             max_age=_COOKIE_MAX_AGE_SECONDS,
             samesite="strict",
-            secure=request.url.scheme == "https",
+            secure=secure,
             path="/",
         )
     else:
-        response.delete_cookie(_COOKIE_NAME, path="/")
+        response.delete_cookie(
+            _COOKIE_NAME,
+            path="/",
+            httponly=True,
+            samesite="strict",
+            secure=secure,
+        )
+
+
+def _set_sso_state_cookie(response: Response, request: Request, state: str | None) -> None:
+    secure = _cookie_secure(request)
+    if state:
+        response.set_cookie(
+            key=_SSO_STATE_COOKIE_NAME,
+            value=state,
+            httponly=True,
+            max_age=_SSO_STATE_MAX_AGE_SECONDS,
+            samesite="lax",
+            secure=secure,
+            path="/api/auth/sso/callback",
+        )
+    else:
+        response.delete_cookie(
+            _SSO_STATE_COOKIE_NAME,
+            path="/api/auth/sso/callback",
+            httponly=True,
+            samesite="lax",
+            secure=secure,
+        )
 
 
 def _sso_redirect_uri(request: Request, general: GeneralConfig) -> str:
@@ -168,39 +212,38 @@ def _sso_error_target(message: str) -> str:
     return f"{_SSO_ERROR_PREFIX}{quote(message)}"
 
 
-def _pick_username_from_token_payload(payload: dict[str, Any]) -> str | None:
-    for key in ("preferred_username", "name", "email", "upn", "sub"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
+def _sso_redirect_response(request: Request, target: str) -> RedirectResponse:
+    response = RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
+    _set_sso_state_cookie(response, request, None)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
-def _decode_jwt_payload(raw: str | None) -> dict[str, Any]:
-    if not raw:
-        return {}
-    segments = raw.split(".")
-    if len(segments) < 2:
-        return {}
-    payload = segments[1]
-    pad = "=" * (-len(payload) % 4)
-    try:
-        decoded = json.loads(base64.urlsafe_b64decode(payload + pad).decode("utf-8"))
-    except Exception:
-        return {}
-    if not isinstance(decoded, dict) or not all(isinstance(key, str) for key in decoded):
-        return {}
-    return decoded
+def _constant_time_equal(expected: str, provided: str) -> bool:
+    return secrets.compare_digest(expected.encode("utf-8"), provided.encode("utf-8"))
 
 
-async def _fetch_oidc_metadata(issuer_url: str) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.get(f"{issuer_url.rstrip('/')}/.well-known/openid-configuration")
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise ValueError("Invalid OpenID discovery payload.")
-        return payload
+def _is_same_origin_browser_request(request: Request) -> bool:
+    source = request.headers.get("origin") or request.headers.get("referer")
+    if not source:
+        return False
+    parsed = urlsplit(source)
+    expected_host = request.headers.get("host", "").casefold()
+    return (
+        parsed.scheme in {"http", "https"}
+        and bool(parsed.netloc)
+        and parsed.netloc.casefold() == expected_host
+        and not parsed.username
+        and not parsed.password
+    )
+
+
+def _require_same_origin_browser_request(request: Request) -> None:
+    if not _is_same_origin_browser_request(request):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Same-origin browser request required",
+        )
 
 
 async def require_webhook_token(
@@ -214,7 +257,7 @@ async def require_webhook_token(
     if not expected:
         return
     provided = _extract_token(authorization, x_webhook_token)
-    if provided != expected:
+    if provided is None or not _constant_time_equal(expected, provided):
         request.app.state.webhook_attempt_store.record(
             outcome="rejected_auth",
             http_status=status.HTTP_401_UNAUTHORIZED,
@@ -230,17 +273,27 @@ async def require_admin_token(
     request: Request,
     authorization: str | None = Header(default=None),
     x_admin_token: str | None = Header(default=None),
+    x_csrf_token: str | None = Header(default=None),
     cleanarr_session: str | None = Cookie(default=None, alias=_COOKIE_NAME),
 ) -> None:
     """Validate admin access via session token or fallback static token."""
 
-    provided = _extract_token(authorization, x_admin_token) or cleanarr_session
     container = request.app.state.container
-    if container.auth_service.resolve_session(provided):
-        return
-
-    expected = container.admin_shared_token
-    if expected and provided == expected:
+    header_token = _extract_token(authorization, x_admin_token)
+    if header_token:
+        if container.auth_service.resolve_session(header_token):
+            return
+        expected = container.admin_shared_token
+        if expected and _constant_time_equal(expected, header_token):
+            return
+    elif cleanarr_session and container.auth_service.resolve_session(cleanarr_session):
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            _require_same_origin_browser_request(request)
+            if not container.auth_service.verify_csrf_token(cleanarr_session, x_csrf_token):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Invalid CSRF token",
+                )
         return
 
     if not container.config.admin.configured:
@@ -521,6 +574,23 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     app.state.deletion_jobs = deletion_jobs
     app.state.execution_coordinator = execution_coordinator
 
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; "
+            "object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; "
+            "img-src 'self' data:; connect-src 'self'",
+        )
+        if request.url.path.startswith("/api/auth/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
     @app.get("/health/live")
     async def health_live() -> dict[str, str]:
         return {"status": "ok"}
@@ -529,7 +599,11 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     async def health_ready() -> dict[str, str]:
         return {"status": "ready"}
 
-    @app.get("/api/dashboard", response_model=DashboardResponse)
+    @app.get(
+        "/api/dashboard",
+        response_model=DashboardResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
     async def dashboard(request: Request) -> DashboardResponse:
         return await build_dashboard_response(
             config=request.app.state.container.config,
@@ -556,7 +630,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         )
 
     @app.get("/api/auth/sso/start", response_model=SSOLoginResponse)
-    async def sso_start(request: Request) -> SSOLoginResponse:
+    async def sso_start(request: Request, response: Response) -> SSOLoginResponse:
         container = request.app.state.container
         general = container.config.general
         if not container.auth_service.is_sso_auth_enabled(
@@ -568,31 +642,29 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
             )
 
         try:
-            metadata = await _fetch_oidc_metadata(general.sso_issuer_url)
-        except Exception as exc:
+            metadata = await discover_oidc_provider(general.sso_issuer_url)
+        except OIDCError as exc:
             _logger.exception("Failed to fetch OIDC discovery for %s", general.sso_issuer_url)
             raise HTTPException(
                 status_code=_HTTP_UNPROCESSABLE_CONTENT,
                 detail="Could not fetch OpenID discovery data.",
             ) from exc
 
-        authorization_endpoint = metadata.get("authorization_endpoint")
-        if not isinstance(authorization_endpoint, str) or not authorization_endpoint:
-            raise HTTPException(
-                status_code=_HTTP_UNPROCESSABLE_CONTENT,
-                detail="OpenID provider does not expose authorization_endpoint.",
-            )
-
-        state = container.auth_service.create_sso_state()
+        state, authorization = container.auth_service.create_sso_state()
         params = {
             "response_type": "code",
             "client_id": general.sso_client_id,
             "redirect_uri": _sso_redirect_uri(request, general),
             "scope": general.sso_scopes,
             "state": state,
+            "nonce": authorization.nonce,
+            "code_challenge": create_pkce_challenge(authorization.code_verifier),
+            "code_challenge_method": "S256",
         }
-        authorize_url = f"{authorization_endpoint}?{urlencode(params)}"
-        return SSOLoginResponse(authorize_url=authorize_url, state=state)
+        authorize_url = f"{metadata.authorization_endpoint}?{urlencode(params)}"
+        _set_sso_state_cookie(response, request, state)
+        response.headers["Cache-Control"] = "no-store"
+        return SSOLoginResponse(authorize_url=authorize_url)
 
     @app.get("/api/auth/sso/callback", name="sso_callback")
     async def sso_callback(
@@ -600,69 +672,62 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         code: str | None = Query(default=None),
         state: str | None = Query(default=None),
         error: str | None = Query(default=None),
-        error_description: str | None = Query(default=None),
+        cleanarr_sso_state: str | None = Cookie(default=None, alias=_SSO_STATE_COOKIE_NAME),
     ) -> Response:
+        if not state or not cleanarr_sso_state or not _constant_time_equal(state, cleanarr_sso_state):
+            return _sso_redirect_response(request, _sso_error_target("Invalid or expired SSO browser state."))
+
+        authorization = request.app.state.container.auth_service.consume_sso_state(state)
+        if authorization is None:
+            return _sso_redirect_response(request, _sso_error_target("Invalid or expired SSO state."))
+
         if error:
-            message = error_description or error
-            return RedirectResponse(_sso_error_target(message))
+            return _sso_redirect_response(request, _sso_error_target("Identity provider denied authentication."))
 
         container = request.app.state.container
         general = container.config.general
         if not container.auth_service.is_sso_auth_enabled(
             general,
         ) or not container.auth_service.is_sso_configured(general):
-            return RedirectResponse(_sso_error_target("SSO is not configured."))
-
-        if not container.auth_service.consume_sso_state(state):
-            return RedirectResponse(_sso_error_target("Invalid or expired SSO state."))
+            return _sso_redirect_response(request, _sso_error_target("SSO is not configured."))
 
         if not code:
-            return RedirectResponse(_sso_error_target("Missing authorization code from provider."))
+            return _sso_redirect_response(request, _sso_error_target("Missing authorization code from provider."))
 
         try:
-            metadata = await _fetch_oidc_metadata(general.sso_issuer_url)
-            token_endpoint = metadata.get("token_endpoint")
-        except Exception:
-            _logger.exception("Failed to fetch token endpoint from %s", general.sso_issuer_url)
-            return RedirectResponse(_sso_error_target("Could not read token endpoint from identity provider."))
-
-        if not isinstance(token_endpoint, str) or not token_endpoint:
-            return RedirectResponse(_sso_error_target("Identity provider does not expose token_endpoint."))
-
-        token_payload_data = {
-            "grant_type": "authorization_code",
-            "code": code,
-            "client_id": general.sso_client_id,
-            "client_secret": general.sso_client_secret,
-            "redirect_uri": _sso_redirect_uri(request, general),
-        }
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            token_response = await client.post(
-                token_endpoint,
-                data=token_payload_data,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            metadata = await discover_oidc_provider(general.sso_issuer_url)
+            token_payload = await exchange_authorization_code(
+                metadata,
+                code=code,
+                client_id=general.sso_client_id,
+                client_secret=general.sso_client_secret,
+                redirect_uri=_sso_redirect_uri(request, general),
+                code_verifier=authorization.code_verifier,
             )
-            if token_response.status_code >= 400:
-                return RedirectResponse(_sso_error_target("Token exchange failed."))
-            token_payload = token_response.json()
+            jwks = await fetch_jwks(metadata)
+            id_payload = validate_id_token(
+                token_payload.get("id_token"),
+                jwks=jwks,
+                metadata=metadata,
+                client_id=general.sso_client_id,
+                expected_nonce=authorization.nonce,
+            )
+            username = container.auth_service.authorize_sso_identity(general, id_payload)
+        except (OIDCError, PermissionError) as exc:
+            _logger.warning("SSO callback rejected: %s", exc)
+            return _sso_redirect_response(
+                request,
+                _sso_error_target("SSO token validation or access policy failed."),
+            )
 
-        if not isinstance(token_payload, dict):
-            return RedirectResponse(_sso_error_target("Invalid token response."))
-
-        id_payload = _decode_jwt_payload(token_payload.get("id_token"))
-        if not id_payload:
-            id_payload = _decode_jwt_payload(token_payload.get("access_token"))
-        username = _pick_username_from_token_payload(id_payload)
-        if not username:
-            return RedirectResponse(_sso_error_target("ID token does not include user identity."))
-
-        session_token = container.auth_service.create_session_for_user(username)
+        session = container.auth_service.create_session_for_user(username)
         redirect_response = RedirectResponse(
             url="/",
             status_code=status.HTTP_303_SEE_OTHER,
         )
-        _set_session_cookie(redirect_response, request, session_token)
+        _set_session_cookie(redirect_response, request, session.token)
+        _set_sso_state_cookie(redirect_response, request, None)
+        redirect_response.headers["Cache-Control"] = "no-store"
         return redirect_response
 
     @app.post("/api/auth/register", response_model=AuthSessionResponse)
@@ -671,6 +736,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         response: Response,
         payload: AdminCredentialsRequest,
     ) -> AuthSessionResponse:
+        _require_same_origin_browser_request(request)
         try:
             session = request.app.state.container.auth_service.register_admin(
                 username=payload.username,
@@ -687,6 +753,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                 detail=str(exc),
             ) from exc
         _set_session_cookie(response, request, session.token)
+        response.headers["Cache-Control"] = "no-store"
         return AuthSessionResponse.from_domain(session)
 
     @app.post("/api/auth/login", response_model=AuthSessionResponse)
@@ -695,11 +762,19 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         response: Response,
         payload: AdminCredentialsRequest,
     ) -> AuthSessionResponse:
+        _require_same_origin_browser_request(request)
         try:
             session = request.app.state.container.auth_service.login(
                 username=payload.username,
                 password=payload.password,
+                source=request.client.host if request.client else "unknown",
             )
+        except LoginThrottledError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=str(exc),
+                headers={"Retry-After": str(exc.retry_after_seconds)},
+            ) from exc
         except LookupError as exc:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -711,6 +786,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                 detail=str(exc),
             ) from exc
         _set_session_cookie(response, request, session.token)
+        response.headers["Cache-Control"] = "no-store"
         return AuthSessionResponse.from_domain(session)
 
     @app.post(
@@ -720,15 +796,15 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     )
     async def logout_admin(
         request: Request,
-        response: Response,
         authorization: str | None = Header(default=None),
         x_admin_token: str | None = Header(default=None),
         cleanarr_session: str | None = Cookie(default=None, alias=_COOKIE_NAME),
     ) -> Response:
         token = _extract_token(authorization, x_admin_token) or cleanarr_session
         request.app.state.container.auth_service.logout(token)
-        _set_session_cookie(response, request, None)
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
+        logout_response = Response(status_code=status.HTTP_204_NO_CONTENT)
+        _set_session_cookie(logout_response, request, None)
+        return logout_response
 
     @app.get(
         "/api/config",

@@ -285,6 +285,11 @@ class RuntimeConfigurationService:
                 sso_client_secret=settings.sso_client_secret,
                 sso_redirect_uri=settings.sso_redirect_uri,
                 sso_scopes=settings.sso_scopes,
+                sso_allowed_users=_split_comma_separated(settings.sso_allowed_users),
+                sso_allowed_groups=_split_comma_separated(settings.sso_allowed_groups),
+                sso_group_claim=settings.sso_group_claim,
+                sso_required_claim=settings.sso_required_claim,
+                sso_required_value=settings.sso_required_value,
             )
         )
 
@@ -345,6 +350,10 @@ DOWNLOADER_SERVICE_KINDS = {
     ServiceKind.DELUGE,
     ServiceKind.RTORRENT,
 }
+
+
+def _split_comma_separated(value: str) -> list[str]:
+    return [entry.strip() for entry in value.replace("\n", ",").split(",") if entry.strip()]
 
 
 def _is_downloader_payload(kind: ServiceKind, payload: AnyServiceConfig) -> bool:

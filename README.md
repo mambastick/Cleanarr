@@ -103,7 +103,7 @@ Pack torrents, shared files, and anything that can't be safely attributed are al
 - **Activity log** — every processed event is stored with full action breakdown; searchable by title, system, action, or status
 - **Guided setup wizard** — first-run wizard walks you through connecting each service step by step
 - **Multi-profile** — save multiple service definitions per type, pick one as the active runtime target
-- **Local and SSO authentication** — local password login, OpenID Connect SSO, or SSO-only mode
+- **Local and SSO authentication** — local password login plus strict OpenID Connect validation, PKCE, nonce, and explicit user/group/claim access policies
 - **Dark / light mode** — follows system preference
 
 ---
@@ -200,6 +200,12 @@ All settings can be changed at runtime from the **Settings** tab. Environment va
 | `SSO_CLIENT_SECRET` | — | OpenID Connect client secret |
 | `SSO_REDIRECT_URI` | — | Callback URL, usually `https://cleanarr.example/api/auth/sso/callback` |
 | `SSO_SCOPES` | `openid profile email` | OpenID Connect scopes |
+| `SSO_ALLOWED_USERS` | — | Comma-separated usernames/emails/subjects allowed to sign in |
+| `SSO_ALLOWED_GROUPS` | — | Comma-separated group values allowed to sign in |
+| `SSO_GROUP_CLAIM` | `groups` | ID-token claim containing group values |
+| `SSO_REQUIRED_CLAIM` | — | Optional additional ID-token claim required for access |
+| `SSO_REQUIRED_VALUE` | — | Required value; configure together with `SSO_REQUIRED_CLAIM` |
+| `SESSION_COOKIE_SECURE` | auto | Force `Secure` on/off; set `true` when TLS terminates at a reverse proxy not trusted for forwarded headers |
 
 > **Important:** `DB_PATH` must point to a persistent volume. Without it, all service configurations and activity history are lost on restart.
 
@@ -207,6 +213,10 @@ Existing `jellyseerr` profiles are migrated in place to the canonical `seerr`
 configuration on startup. The legacy `JELLYSEERR_URL` /
 `JELLYSEERR_API_KEY` variables and `/api/config/jellyseerr` routes remain
 backward-compatible aliases.
+
+SSO remains disabled until at least one explicit user/group allowlist or a
+required claim/value pair is configured. See the complete [OIDC and reverse
+proxy guide](docs/SSO.md) before enabling `both` or `sso_only` mode.
 
 ---
 

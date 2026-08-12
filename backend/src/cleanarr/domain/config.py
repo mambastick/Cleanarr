@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
+CURRENT_CONFIG_SCHEMA_VERSION: Literal[2] = 2
+
 
 class ServiceKind(StrEnum):
     """Supported downstream service kinds."""
@@ -82,6 +84,11 @@ class GeneralConfig(BaseModel):
     sso_client_secret: str | None = None
     sso_redirect_uri: str | None = None
     sso_scopes: str = "openid profile email"
+    sso_allowed_users: list[str] = Field(default_factory=list)
+    sso_allowed_groups: list[str] = Field(default_factory=list)
+    sso_group_claim: str = "groups"
+    sso_required_claim: str | None = None
+    sso_required_value: str | None = None
 
     @field_validator("log_level", mode="before")
     @classmethod
@@ -120,6 +127,39 @@ class GeneralConfig(BaseModel):
         scopes = " ".join(part.strip() for part in str(value).split() if part.strip())
         return scopes or "openid profile email"
 
+    @field_validator("sso_allowed_users", "sso_allowed_groups", mode="before")
+    @classmethod
+    def normalize_sso_allowlist(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            entries = value.replace("\n", ",").split(",")
+        elif isinstance(value, (list, tuple, set)):
+            entries = list(value)
+        else:
+            raise ValueError("SSO allowlists must be a list or comma-separated string.")
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for entry in entries:
+            candidate = str(entry).strip()
+            folded = candidate.casefold()
+            if not candidate or folded in seen:
+                continue
+            seen.add(folded)
+            normalized.append(candidate)
+        return normalized
+
+    @field_validator("sso_group_claim", mode="before")
+    @classmethod
+    def normalize_sso_group_claim(cls, value: str | None) -> str:
+        return str(value or "groups").strip() or "groups"
+
+    @field_validator("sso_required_claim", "sso_required_value", mode="before")
+    @classmethod
+    def normalize_optional_sso_policy_value(cls, value: str | None) -> str | None:
+        candidate = str(value).strip() if value is not None else ""
+        return candidate or None
+
     @model_validator(mode="before")
     @classmethod
     def normalize_sso_fields(cls, values: object) -> object:
@@ -137,11 +177,20 @@ class GeneralConfig(BaseModel):
         values["sso_enabled"] = normalized_mode is not SSOAuthMode.PASSWORD_ONLY
         return values
 
+    @model_validator(mode="after")
+    def validate_sso_access_policy(self) -> GeneralConfig:
+        if bool(self.sso_required_claim) != bool(self.sso_required_value):
+            raise ValueError("SSO required claim and value must be configured together.")
+        return self
+
     def local_auth_enabled(self) -> bool:
         return self.sso_mode in (SSOAuthMode.PASSWORD_ONLY, SSOAuthMode.BOTH)
 
     def sso_auth_enabled(self) -> bool:
         return self.sso_mode in (SSOAuthMode.SSO_ONLY, SSOAuthMode.BOTH)
+
+    def has_sso_access_policy(self) -> bool:
+        return bool(self.sso_allowed_users or self.sso_allowed_groups or self.sso_required_claim)
 
 
 class AdminAccountConfig(BaseModel):
@@ -302,6 +351,7 @@ class JellyfinServiceConfig(BaseServiceConfig):
 class RuntimeConfig(BaseModel):
     """Complete persisted CleanArr runtime configuration."""
 
+    config_schema_version: Literal[2] = CURRENT_CONFIG_SCHEMA_VERSION
     admin: AdminAccountConfig = Field(default_factory=AdminAccountConfig)
     general: GeneralConfig = Field(default_factory=GeneralConfig)
     radarr: list[RadarrServiceConfig] = Field(default_factory=list)
