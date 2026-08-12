@@ -192,6 +192,38 @@ CleanArr 1.0 — стабильный и безопасный оркестрат
   манифеста —
   `sha256:5425c1f73ecc4abd6434e9db750a6cc5ddc8f4426d1df028118e97a8fa9e13ca`.
 
+### v0.9.0 — завершён 2026-08-12
+
+- Опубликованы двуязычная compatibility matrix и policy
+  compatibility/deprecation 1.x с точными digest-pinned версиями qBittorrent
+  5.2.3, Transmission 4.0.6 и 4.1.3, Deluge 2.2.0, rTorrent 0.16.17, Radarr
+  6.3.0.10514, Sonarr 4.0.19.2979, Seerr 3.4.1 и Jellyfin 10.11.11. ruTorrent и
+  Flood корректно остаются frontend.
+- Real-service suite создаёт детерминированную раздачу через каждый Tier 1
+  native API и доказывает version/authentication, отказ неверных credentials,
+  dry-run, удаление только записи, удаление вместе с данными и идемпотентное
+  отсутствие. Стенд обнаружил и позволил исправить сохранение регистра hash в
+  Deluge, target argument `execute.throw` rTorrent и прежний health probe
+  Jellyfin, проверявший только публичный endpoint.
+- Release candidate обновлён из реальных опубликованных контейнеров v0.2.11 и
+  v0.5.0 с подготовленными config/activity, после чего выполнен rollback через
+  byte-verified backup и успешный запуск каждой исходной версии. Чистый hosted
+  [compatibility run](https://github.com/mambastick/Cleanarr/actions/runs/31588845484)
+  независимо повторил полный pinned stack и обе репетиции.
+- Коммит реализации `1c5547d` и portability fix hosted runner `d215261`
+  проверены 118 backend-тестами, Ruff format/lint, strict mypy, frontend
+  lint/build, dependency и source/container scans, actionlint, container smoke,
+  установочными smoke-тестами DEB/RPM и семью real-service contracts.
+- Проверенный [релиз v0.9.0](https://github.com/mambastick/Cleanarr/releases/tag/v0.9.0)
+  опубликован из коммита `d215261`; его [release workflow](https://github.com/mambastick/Cleanarr/actions/runs/31589090793)
+  повторил все обязательные quality и compatibility gates до публикации native
+  packages, multi-architecture image, SPDX SBOM, provenance и подписанных
+  artifact attestations.
+- После публикации скачаны все release files, проверены каждый checksum и file
+  attestation, а также GHCR attestation. Digest image manifest для
+  `linux/amd64` и `linux/arm64` —
+  `sha256:c77bffd72ca49279b95a5c1b82e3b20938d702d7016ab759ce11fc39be29de67`.
+
 ## Обязательный scope 1.0
 
 ### 1. Torrent-клиенты и маршрутизация

@@ -191,6 +191,38 @@ issue, pull request, or release decision.
   `linux/amd64` and `linux/arm64` manifest digest is
   `sha256:5425c1f73ecc4abd6434e9db750a6cc5ddc8f4426d1df028118e97a8fa9e13ca`.
 
+### v0.9.0 — completed 2026-08-12
+
+- Published a bilingual compatibility matrix and 1.x
+  compatibility/deprecation policy with exact digest-pinned versions for
+  qBittorrent 5.2.3, Transmission 4.0.6 and 4.1.3, Deluge 2.2.0, rTorrent
+  0.16.17, Radarr 6.3.0.10514, Sonarr 4.0.19.2979, Seerr 3.4.1, and Jellyfin
+  10.11.11. ruTorrent and Flood remain correctly classified as frontends.
+- The real-service suite creates a deterministic torrent through every Tier 1
+  native API and proves version/authentication, invalid-credential rejection,
+  dry-run, entry-only deletion, with-data deletion, and idempotent absence. It
+  exposed and fixed Deluge hash-case preservation, the rTorrent
+  `execute.throw` target argument, and Jellyfin's formerly public-only health
+  probe.
+- The release candidate was upgraded from real published v0.2.11 and v0.5.0
+  containers with seeded config/activity state, then rolled back through a
+  byte-verified backup and successfully restarted on each source version. The
+  clean hosted [compatibility run](https://github.com/mambastick/Cleanarr/actions/runs/31588845484)
+  independently repeated the full pinned stack and both rehearsals.
+- Implementation commit `1c5547d` and hosted-runner portability fix `d215261`
+  are verified by 118 backend tests, Ruff format/lint, strict mypy, frontend
+  lint/build, dependency and source/container scans, actionlint, container
+  smoke, installed DEB/RPM smoke tests, and the seven real-service contracts.
+- Published the verified [v0.9.0 release](https://github.com/mambastick/Cleanarr/releases/tag/v0.9.0)
+  from commit `d215261`; its [release workflow](https://github.com/mambastick/Cleanarr/actions/runs/31589090793)
+  repeated all required quality and compatibility gates before publishing
+  native packages, the multi-architecture image, SPDX SBOMs, provenance, and
+  signed artifact attestations.
+- Post-publication verification downloaded all release files, validated every
+  checksum and file attestation, and verified the GHCR attestation. The
+  `linux/amd64` and `linux/arm64` image manifest digest is
+  `sha256:c77bffd72ca49279b95a5c1b82e3b20938d702d7016ab759ce11fc39be29de67`.
+
 ## Required 1.0 scope
 
 ### 1. Download clients and routing
