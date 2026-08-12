@@ -235,6 +235,10 @@ def _rehearse(source: SourceRelease, candidate_image: str, work_dir: Path) -> No
         _start_container(source_name, source.image, state_dir)
         _remove_container(source_name)
         database = state_dir / "cleanarr.db"
+        # Released images create the database as their container UID, which is
+        # not guaranteed to match the hosted runner UID. This directory is an
+        # isolated disposable fixture; allow the runner to seed its test state.
+        os.chmod(database, 0o666)
         _seed_source_data(source, database)
         _assert_source_state(source, database)
 
