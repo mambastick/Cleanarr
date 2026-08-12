@@ -223,6 +223,44 @@ issue, pull request, or release decision.
   `linux/amd64` and `linux/arm64` image manifest digest is
   `sha256:c77bffd72ca49279b95a5c1b82e3b20938d702d7016ab759ce11fc39be29de67`.
 
+### v1.0.0 — completed 2026-08-12
+
+- The package and API version were finalized at 1.0.0 in release commit
+  `d8a63c2`, establishing the documented safety-first contract for Jellyfin,
+  Seerr, simultaneous Radarr/Sonarr instances, and all four Tier 1 torrent
+  engines. Ambiguous ownership and incomplete destructive evidence remain
+  fail-closed, and a new installation remains in dry-run mode by default.
+- The final commit's [quality run](https://github.com/mambastick/Cleanarr/actions/runs/31590801294)
+  passed the backend suite (118 passed, 7 live-service tests skipped in the
+  ordinary suite), Ruff format/lint, strict mypy, frontend lint/build, runtime
+  dependency audit, source/secret/configuration and installed-image scans,
+  container smoke, and installed DEB/RPM smoke tests. The corresponding local
+  Trivy scans reported zero fixable high/critical findings.
+- Three isolated candidate installations — a local temporary stack, the clean
+  hosted [release-candidate run](https://github.com/mambastick/Cleanarr/actions/runs/31591012707),
+  and the tag release's clean hosted stack — each created the full pinned
+  service matrix. They passed all seven real-service contracts across
+  qBittorrent, both Transmission generations, Deluge, rTorrent, Radarr,
+  Sonarr, Seerr, and Jellyfin; the normal scenario suite additionally covers
+  simultaneous multi-Arr and multi-client routing.
+- The same local and hosted gates upgraded seeded installations from published
+  v0.2.11 and v0.9.0 images to the final candidate, preserved configuration,
+  schema and activity data, restored a byte-identical verified backup, and
+  successfully restarted each original release after rollback.
+- The final blocker audit found no open GitHub issues, no red required checks,
+  and no security scan findings at the release threshold. There are no known
+  unresolved data-loss, security-critical, or P0/P1 defects at publication.
+- The verified [v1.0.0 stable release](https://github.com/mambastick/Cleanarr/releases/tag/v1.0.0)
+  was published from `d8a63c2`. Its [release workflow](https://github.com/mambastick/Cleanarr/actions/runs/31591298566)
+  repeated every required quality and compatibility gate before publishing
+  amd64/arm64 DEB and RPM packages, three SPDX SBOMs, checksums, signed file
+  attestations, and the multi-architecture GHCR image.
+- Independent post-publication verification downloaded all eight release
+  assets, validated every recorded checksum and GitHub file attestation, and
+  verified the OCI provenance. The `linux/amd64` and `linux/arm64` image index
+  digest is
+  `sha256:fd039528eed3326ad0c16d8f36630a4dc5b67962e3c93d3687a768e206979dc5`.
+
 ## Required 1.0 scope
 
 ### 1. Download clients and routing
@@ -348,21 +386,21 @@ update this roadmap explicitly.
 | 0.4.0 | Complete deletion/Seerr behavior, idempotency, durable retries, and safety scenarios |
 | 0.5.0 | Versioned migrations, backup/restore, security baseline, metrics, and support tooling |
 | 0.9.0 | Feature freeze, compatibility matrix, migration rehearsal, and public release candidates |
-| 1.0.0 | Stable contract after all exit criteria below are satisfied |
+| 1.0.0 | Published stable contract with all exit criteria below satisfied |
 
 Version boundaries may move, but the 1.0 exit criteria may not be silently
 weakened.
 
 ## 1.0 exit criteria
 
-- All required CI checks pass from a clean checkout.
-- Every Tier 1 client and documented dependency version passes its contract and
+- [x] All required CI checks pass from a clean checkout.
+- [x] Every Tier 1 client and documented dependency version passes its contract and
   end-to-end scenarios.
-- Upgrade from v0.2.11/latest 0.x and rollback from a 1.0 release candidate are
+- [x] Upgrade from v0.2.11/latest 0.x and rollback from a 1.0 release candidate are
   demonstrated with a real backup and restored data.
-- No unresolved data-loss defect, security-critical defect, or P0/P1 release
+- [x] No unresolved data-loss defect, security-critical defect, or P0/P1 release
   blocker remains.
-- At least one release candidate is exercised by independent installations
+- [x] At least one release candidate is exercised by independent installations
   covering all Tier 1 clients and common multi-instance layouts.
-- Documentation, compatibility matrix, checksums, SBOM, and signed release
+- [x] Documentation, compatibility matrix, checksums, SBOM, and signed release
   artifacts are published together.

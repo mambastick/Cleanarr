@@ -224,6 +224,46 @@ CleanArr 1.0 — стабильный и безопасный оркестрат
   `linux/amd64` и `linux/arm64` —
   `sha256:c77bffd72ca49279b95a5c1b82e3b20938d702d7016ab759ce11fc39be29de67`.
 
+### v1.0.0 — завершён 2026-08-12
+
+- Версии package и API зафиксированы как 1.0.0 в release-коммите `d8a63c2`.
+  Этим установлен документированный safety-first контракт для Jellyfin, Seerr,
+  одновременно работающих экземпляров Radarr/Sonarr и всех четырёх Tier 1
+  torrent-движков. Неоднозначное владение и неполные доказательства для
+  destructive action по-прежнему дают fail-closed, а новая установка по
+  умолчанию остаётся в dry-run.
+- [Quality run](https://github.com/mambastick/Cleanarr/actions/runs/31590801294)
+  финального коммита успешно завершил backend suite (118 passed, 7 live-service
+  тестов пропущены в обычном suite), Ruff format/lint, strict mypy, frontend
+  lint/build, audit runtime dependencies, scans исходников, secrets,
+  конфигурации и установленного image, container smoke и установочные
+  smoke-тесты DEB/RPM. Соответствующие локальные Trivy-сканы не обнаружили
+  исправимых high/critical findings.
+- Три изолированные установки candidate — локальный временный stack, чистый
+  hosted [release-candidate run](https://github.com/mambastick/Cleanarr/actions/runs/31591012707)
+  и чистый hosted stack tag release — независимо создали полную pinned-матрицу.
+  Во всех прошли семь real-service contracts для qBittorrent, обоих поколений
+  Transmission, Deluge, rTorrent, Radarr, Sonarr, Seerr и Jellyfin; обычный
+  scenario suite дополнительно покрывает одновременную multi-Arr и multi-client
+  маршрутизацию.
+- Те же локальные и hosted gates обновили заполненные установки из
+  опубликованных image v0.2.11 и v0.9.0 до финального candidate, сохранили
+  config, schema и activity data, восстановили byte-identical проверенный
+  backup и успешно запустили каждую исходную версию после rollback.
+- Финальный blocker audit не обнаружил открытых GitHub issues, красных
+  обязательных checks или findings на release-пороге security scans. На момент
+  публикации нет известных незакрытых data-loss, security-critical или P0/P1
+  дефектов.
+- Проверенный стабильный [релиз v1.0.0](https://github.com/mambastick/Cleanarr/releases/tag/v1.0.0)
+  опубликован из `d8a63c2`. Его [release workflow](https://github.com/mambastick/Cleanarr/actions/runs/31591298566)
+  повторил все обязательные quality и compatibility gates до публикации
+  DEB/RPM для amd64/arm64, трёх SPDX SBOM, checksums, подписанных file
+  attestations и multi-architecture GHCR image.
+- Независимая проверка после публикации скачала все восемь release assets,
+  подтвердила каждый записанный checksum и GitHub file attestation, а также OCI
+  provenance. Digest image index для `linux/amd64` и `linux/arm64` —
+  `sha256:fd039528eed3326ad0c16d8f36630a4dc5b67962e3c93d3687a768e206979dc5`.
+
 ## Обязательный scope 1.0
 
 ### 1. Torrent-клиенты и маршрутизация
@@ -346,20 +386,20 @@ Tier 1:
 | 0.4.0 | Полные deletion/Seerr сценарии, idempotency, durable retry и safety tests |
 | 0.5.0 | Версионированные миграции, backup/restore, security baseline, метрики и support tooling |
 | 0.9.0 | Feature freeze, compatibility matrix, репетиция миграции и публичные release candidates |
-| 1.0.0 | Стабильный контракт после выполнения всех критериев ниже |
+| 1.0.0 | Опубликованный стабильный контракт со всеми выполненными критериями ниже |
 
 Границы промежуточных версий могут меняться, но критерии 1.0 нельзя молча
 ослаблять.
 
 ## Критерии выпуска 1.0
 
-- Все обязательные CI checks проходят из чистого checkout.
-- Каждый Tier 1 клиент и каждая заявленная версия dependency проходят contract
+- [x] Все обязательные CI checks проходят из чистого checkout.
+- [x] Каждый Tier 1 клиент и каждая заявленная версия dependency проходят contract
   и end-to-end сценарии.
-- Обновление с v0.2.11/latest 0.x и rollback с release candidate 1.0 доказаны на
+- [x] Обновление с v0.2.11/latest 0.x и rollback с release candidate 1.0 доказаны на
   реальном backup с восстановлением данных.
-- Нет незакрытых data-loss defects, security-critical defects и P0/P1 blockers.
-- Хотя бы один release candidate проверен независимыми установками, вместе
+- [x] Нет незакрытых data-loss defects, security-critical defects и P0/P1 blockers.
+- [x] Хотя бы один release candidate проверен независимыми установками, вместе
   покрывающими все Tier 1 клиенты и распространённые multi-instance схемы.
-- Документация, compatibility matrix, checksums, SBOM и подписанные release
+- [x] Документация, compatibility matrix, checksums, SBOM и подписанные release
   artifacts опубликованы одновременно.
