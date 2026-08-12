@@ -45,6 +45,7 @@ class FailureReason(StrEnum):
     PACK_TORRENT = "pack_torrent"
     SHARED_FILE = "shared_file"
     NO_PARTIAL_REQUEST_CLEANUP = "no_partial_request_cleanup"
+    PARTIAL_REQUEST_RETAINED = "partial_request_retained"
     DOWNSTREAM_ERROR = "downstream_error"
     AUTHENTICATION_FAILED = "authentication_failed"
     UNSUPPORTED_EVENT = "unsupported_event"

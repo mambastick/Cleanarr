@@ -484,10 +484,10 @@ def _build_rules() -> list[DashboardRuleResponse]:
             item_type=ItemType.SEASON,
             matching_order=tv_matching,
             cleanup_steps=[
-                "Resolve the parent series in Sonarr and Jellyseerr.",
+                "Resolve the parent series in Sonarr and Seerr.",
                 "Unmonitor episodes in the target season.",
                 "Delete only fully covered episode files and downloader hashes.",
-                "Update or delete matching Jellyseerr season requests.",
+                "Update or delete matching Seerr season requests.",
             ],
             guardrails=[
                 "Shared files across seasons are never removed.",
@@ -498,14 +498,16 @@ def _build_rules() -> list[DashboardRuleResponse]:
             item_type=ItemType.EPISODE,
             matching_order=tv_matching,
             cleanup_steps=[
-                "Resolve the parent series in Sonarr.",
+                "Resolve the parent series in Sonarr and Seerr.",
                 "Unmonitor only the target episode range.",
                 "Delete episode files and hashes only when the scope is fully isolated.",
-                "Leave Jellyseerr requests unchanged in v1.",
+                "Delete matching Seerr issues and update its season-scoped request only when "
+                "the complete season is covered.",
             ],
             guardrails=[
                 "Multi-episode files are skipped if they exceed the requested scope.",
                 "Pack torrents generate safety notes instead of destructive mutations.",
+                "A season-scoped Seerr request is retained for partial episode ranges.",
             ],
         ),
     ]

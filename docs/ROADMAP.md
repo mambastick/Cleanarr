@@ -87,6 +87,17 @@ issue, pull request, or release decision.
 The next active milestone is **v0.4.0**: complete deletion/Seerr flows,
 idempotent webhook handling, and durable retry scheduling.
 
+### v0.4.0 — implementation in progress
+
+- Episode deletion now removes only matching Seerr issues. Because Seerr
+  requests are season-scoped, CleanArr retains the request with the structured
+  `partial_request_retained` reason unless the event and Sonarr inventory prove
+  that the complete season is covered; only then is the season removed from the
+  request or the empty request deleted.
+- Remaining milestone work includes canonical Seerr configuration migration,
+  exact persisted preflight plans, duplicate-event suppression, serialized
+  ownership locks, and durable retry/resume across process restarts.
+
 ## Required 1.0 scope
 
 ### 1. Download clients and routing
@@ -118,8 +129,10 @@ instead of relying on one default target.
 
 ### 2. Complete deletion behavior and Seerr
 
-- Complete movie, series, season, and episode flows, including partial request
-  updates for episode ranges.
+- Complete movie, series, season, and episode flows. For episode ranges, remove
+  matching Seerr issues and update a season-scoped request only when the event
+  provably covers the complete season; otherwise retain it with an explicit
+  safety reason because Seerr has no episode-scoped request model.
 - Use **Seerr** as the current product name while accepting and migrating legacy
   Jellyseerr configuration.
 - Keep destructive matching strict and expose the reason for every skip.

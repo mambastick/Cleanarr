@@ -232,28 +232,29 @@ The easiest way is to use **Auto-configure** in the Jellyfin service editor (cli
 2. Collect torrent hashes from Radarr download history
 3. Delete safe hashes in every owning torrent client, optionally together with local data
 4. Delete the Radarr entry
-5. Delete matching Jellyseerr requests, issues, and media records
+5. Delete matching Seerr requests, issues, and media records
 
 ### Series deletion
 
 1. Resolve in Sonarr by `tvdb_id → tmdb_id → imdb_id → path`
 2. Delete torrent hashes exclusively owned by the series
 3. Delete the Sonarr series entry
-4. Delete all Jellyseerr requests, issues, and media for the series
+4. Delete all Seerr requests, issues, and media for the series
 
 ### Season deletion
 
 1. Resolve parent series in Sonarr
 2. Unmonitor all episodes in the target season
 3. Delete only episode files and hashes fully covered by the season scope
-4. Update or remove matching Jellyseerr season requests
+4. Update or remove matching Seerr season requests
 
 ### Episode deletion
 
 1. Resolve parent series in Sonarr
 2. Unmonitor the target episode range
 3. Delete episode file and hash only when fully isolated
-4. Jellyseerr partial-request cleanup skipped in v1
+4. Delete matching Seerr episode issues; retain a season-scoped request unless
+   the event provably covers the complete season, then update or remove it
 
 **Guardrails:** pack torrents (multiple series/seasons in one archive) and shared files are never deleted — CleanArr logs the reason and skips destructive actions.
 

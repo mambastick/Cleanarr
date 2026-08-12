@@ -328,13 +328,44 @@ async def test_episode_delete_removes_single_safe_file_and_hash() -> None:
                     has_file=True,
                     monitored=True,
                 ),
+                SonarrEpisode(
+                    id=302,
+                    series_id=9,
+                    season_number=3,
+                    episode_number=5,
+                    episode_file_id=502,
+                    has_file=True,
+                    monitored=True,
+                ),
             ]
         },
         episode_files_by_series={9: []},
     )
+    jellyseerr = FakeJellyseerrClient(
+        media=[JellyseerrMedia(id=90, media_type="tv", tmdb_id=901, tvdb_id=900, imdb_id=None, jellyfin_media_id=None)],
+        requests=[
+            JellyseerrRequest(
+                id=91,
+                media_id=90,
+                media_type="tv",
+                season_numbers=(3,),
+                is_4k=False,
+                server_id=0,
+                profile_id=1,
+                root_folder="/data/show",
+                language_profile_id=None,
+                requested_by_id=1,
+                tags=(),
+            )
+        ],
+        issues=[
+            JellyseerrIssue(id=92, media_id=90, problem_season=3, problem_episode=4),
+            JellyseerrIssue(id=93, media_id=90, problem_season=3, problem_episode=5),
+        ],
+    )
     service = build_service(
         sonarr=sonarr,
-        jellyseerr=FakeJellyseerrClient(media=[], requests=[], issues=[]),
+        jellyseerr=jellyseerr,
         downloader=FakeDownloaderClient(existing_hashes={"EPHASH"}),
     )
 
@@ -353,7 +384,98 @@ async def test_episode_delete_removes_single_safe_file_and_hash() -> None:
     assert result.status.value == "success"
     assert sonarr.unmonitored_episode_ids == [301]
     assert sonarr.deleted_episode_file_ids == [501]
-    assert any(action.status == ActionStatus.IGNORED for action in result.actions if action.system == "jellyseerr")
+    assert jellyseerr.updated_requests == {}
+    assert jellyseerr.deleted_request_ids == []
+    assert jellyseerr.deleted_issue_ids == [92]
+    assert [issue.id for issue in jellyseerr.issues] == [93]
+    retained = next(action for action in result.actions if action.action == "retain_request")
+    assert retained.status is ActionStatus.SKIPPED
+    assert retained.reason is not None and retained.reason.value == "partial_request_retained"
+
+
+@pytest.mark.asyncio
+async def test_episode_range_updates_seerr_request_only_when_complete_season_is_covered() -> None:
+    sonarr = FakeSonarrClient(
+        series=[SonarrSeries(id=11, title="Show", path="/data/show", tvdb_id=1100, tmdb_id=1101, imdb_id=None)],
+        history_by_series={11: []},
+        episodes_by_series={
+            11: [
+                SonarrEpisode(
+                    id=501,
+                    series_id=11,
+                    season_number=1,
+                    episode_number=1,
+                    episode_file_id=None,
+                    has_file=False,
+                    monitored=True,
+                ),
+                SonarrEpisode(
+                    id=502,
+                    series_id=11,
+                    season_number=1,
+                    episode_number=2,
+                    episode_file_id=None,
+                    has_file=False,
+                    monitored=True,
+                ),
+                SonarrEpisode(
+                    id=601,
+                    series_id=11,
+                    season_number=2,
+                    episode_number=1,
+                    episode_file_id=None,
+                    has_file=False,
+                    monitored=True,
+                ),
+            ]
+        },
+        episode_files_by_series={11: []},
+    )
+    jellyseerr = FakeJellyseerrClient(
+        media=[
+            JellyseerrMedia(id=110, media_type="tv", tmdb_id=1101, tvdb_id=1100, imdb_id=None, jellyfin_media_id=None)
+        ],
+        requests=[
+            JellyseerrRequest(
+                id=111,
+                media_id=110,
+                media_type="tv",
+                season_numbers=(1, 2),
+                is_4k=False,
+                server_id=0,
+                profile_id=1,
+                root_folder="/data/show",
+                language_profile_id=None,
+                requested_by_id=1,
+                tags=(),
+            )
+        ],
+        issues=[
+            JellyseerrIssue(id=112, media_id=110, problem_season=1, problem_episode=1),
+            JellyseerrIssue(id=113, media_id=110, problem_season=1, problem_episode=2),
+            JellyseerrIssue(id=114, media_id=110, problem_season=2, problem_episode=1),
+        ],
+    )
+    service = build_service(sonarr=sonarr, jellyseerr=jellyseerr)
+
+    result = await service.process(
+        MediaDeletionEvent(
+            notification_type="ItemDeleted",
+            item_type=ItemType.EPISODE,
+            item_id="episode-range",
+            name="Episodes 1-2",
+            fingerprint=MediaFingerprint(tvdb_id=1100, tmdb_id=1101),
+            season_number=1,
+            episode_number=1,
+            episode_end_number=2,
+        )
+    )
+
+    assert result.status.value == "success"
+    assert sonarr.unmonitored_episode_ids == [501, 502]
+    assert jellyseerr.updated_requests == {111: [2]}
+    assert jellyseerr.deleted_issue_ids == [112, 113]
+    assert [issue.id for issue in jellyseerr.issues] == [114]
 
 
 @pytest.mark.asyncio

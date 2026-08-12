@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 
 from cleanarr.application.ports import (
     DownloaderClientPort,
@@ -30,6 +30,7 @@ from cleanarr.domain import (
     MediaDeletionEvent,
     ProcessingResult,
     ResourceNotFoundError,
+    SonarrEpisode,
 )
 
 Mutation = Callable[[], Awaitable[object | None]]
@@ -377,6 +378,89 @@ class BaseDeletionStrategy(ABC):
                 season_number=event.season_number,
             )
 
+    async def _cleanup_jellyseerr_episode(
+        self,
+        event: MediaDeletionEvent,
+        collector: ActionCollector,
+        *,
+        episodes: Sequence[SonarrEpisode],
+    ) -> None:
+        media = await self._resolve_jellyseerr_media(event, media_type="tv", collector=collector)
+        if media is None or event.season_number is None or not event.episode_numbers:
+            return
+
+        requests = await self._list_requests_for_media(media.id)
+        issues = await self._list_issues_for_media(media.id)
+        season_number = event.season_number
+        episode_numbers = event.episode_numbers
+        known_season_episodes = {
+            episode.episode_number for episode in episodes if episode.season_number == season_number
+        }
+        covers_complete_season = bool(known_season_episodes) and known_season_episodes <= episode_numbers
+
+        for request in requests:
+            if season_number not in request.season_numbers:
+                continue
+            if not covers_complete_season:
+                collector.add(
+                    "seerr",
+                    "retain_request",
+                    ActionStatus.SKIPPED,
+                    "Retained the Seerr request because Seerr requests are season-scoped and the event does not "
+                    "safely cover the complete season.",
+                    reason=FailureReason.PARTIAL_REQUEST_RETAINED,
+                    request_id=request.id,
+                    season_number=season_number,
+                    episode_numbers=sorted(episode_numbers),
+                    known_season_episode_numbers=sorted(known_season_episodes),
+                )
+                continue
+
+            remaining_seasons = [number for number in request.season_numbers if number != season_number]
+            if remaining_seasons:
+                await self._run_mutation(
+                    collector,
+                    system="seerr",
+                    action="update_request",
+                    message=f"Removed fully deleted season {season_number} from Seerr request {request.id}.",
+                    mutation=bind_async(
+                        self._jellyseerr.update_request_seasons,
+                        request,
+                        season_numbers=remaining_seasons,
+                    ),
+                    request_id=request.id,
+                    season_number=season_number,
+                    episode_numbers=sorted(episode_numbers),
+                )
+                continue
+            await self._run_mutation(
+                collector,
+                system="seerr",
+                action="delete_request",
+                message=f"Deleted Seerr request {request.id} after the complete requested season was deleted.",
+                mutation=bind_async(self._jellyseerr.delete_request, request.id),
+                request_id=request.id,
+                season_number=season_number,
+                episode_numbers=sorted(episode_numbers),
+            )
+
+        matching_issues = [
+            issue
+            for issue in issues
+            if issue.problem_season == season_number and issue.problem_episode in episode_numbers
+        ]
+        for issue in matching_issues:
+            await self._run_mutation(
+                collector,
+                system="seerr",
+                action="delete_issue",
+                message=f"Deleted Seerr issue {issue.id} for a deleted episode.",
+                mutation=bind_async(self._jellyseerr.delete_issue, issue.id),
+                issue_id=issue.id,
+                season_number=season_number,
+                episode_number=issue.problem_episode,
+            )
+
     def _record_sonarr_match_failure(
         self,
         collector: ActionCollector,
@@ -639,13 +723,7 @@ class EpisodeDeletionStrategy(BaseDeletionStrategy):
         series = decision.candidate
         if series is None:
             self._record_sonarr_match_failure(collector, decision.reason)
-            collector.add(
-                "jellyseerr",
-                "partial_request_cleanup",
-                ActionStatus.IGNORED,
-                "Episode-level Jellyseerr cleanup is intentionally skipped in v1.",
-                reason=FailureReason.NO_PARTIAL_REQUEST_CLEANUP,
-            )
+            await self._cleanup_jellyseerr_episode(event, collector, episodes=())
             return collector.build()
 
         history_records = list(await self._sonarr.list_series_history(series.id))
@@ -691,13 +769,7 @@ class EpisodeDeletionStrategy(BaseDeletionStrategy):
                 episode_file_id=episode_file_id,
             )
 
-        collector.add(
-            "jellyseerr",
-            "partial_request_cleanup",
-            ActionStatus.IGNORED,
-            "Episode-level Jellyseerr cleanup is intentionally skipped in v1.",
-            reason=FailureReason.NO_PARTIAL_REQUEST_CLEANUP,
-        )
+        await self._cleanup_jellyseerr_episode(event, collector, episodes=episodes)
         return collector.build()
 
 
