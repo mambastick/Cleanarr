@@ -83,10 +83,7 @@ CleanArr 1.0 — стабильный и безопасный оркестрат
   опубликован из коммита `894b393`; его [release workflow](https://github.com/mambastick/Cleanarr/actions/runs/31550224512)
   успешно завершён с DEB/RPM и GHCR-образом для `linux/amd64` и `linux/arm64`.
 
-Следующий активный этап — **v0.4.0**: завершение deletion/Seerr flows,
-идемпотентная обработка webhook и durable retry scheduling.
-
-### v0.4.0 — реализация продолжается
+### v0.4.0 — завершён 2026-08-12
 
 - Удаление эпизода теперь очищает только связанные проблемы Seerr. Поскольку
   запросы Seerr относятся ко всему сезону, CleanArr сохраняет запрос с
@@ -130,9 +127,18 @@ CleanArr 1.0 — стабильный и безопасный оркестрат
   старый синхронный endpoint. Консервативный single-instance дизайн исключает
   пересечение работы с одним media entity, torrent hash или path;
   PostgreSQL/HA не входит в границы продукта 1.0.
-- Срез duplicate/serialization локально проверен 96 backend-тестами, Ruff
-  format/lint, strict mypy, ESLint и production build frontend. После этого
-  implementation scope v0.4 завершён; остаётся выпустить проверенный v0.4.0.
+- Финальный implementation-коммит `76e5b71` проверен 96 backend-тестами, Ruff
+  format/lint, strict mypy, ESLint, production build frontend, а также
+  smoke-тестами контейнера и установленных пакетов. Его
+  [quality run](https://github.com/mambastick/Cleanarr/actions/runs/31559810076)
+  успешно завершил все обязательные jobs.
+- Проверенный [релиз v0.4.0](https://github.com/mambastick/Cleanarr/releases/tag/v0.4.0)
+  опубликован из коммита `8f032f4`; его [release workflow](https://github.com/mambastick/Cleanarr/actions/runs/31560298020)
+  успешно завершён с checksums, DEB/RPM для amd64 и arm64 и публичным GHCR-
+  манифестом для `linux/amd64` и `linux/arm64`.
+
+Следующий активный этап — **v0.5.0**: завершение data lifecycle и security
+baseline, затем добавление метрик и безопасного support tooling.
 
 ## Обязательный scope 1.0
 

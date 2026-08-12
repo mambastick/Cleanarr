@@ -84,10 +84,7 @@ issue, pull request, or release decision.
   completed successfully with DEB/RPM assets and a GHCR image for
   `linux/amd64` and `linux/arm64`.
 
-The next active milestone is **v0.4.0**: complete deletion/Seerr flows,
-idempotent webhook handling, and durable retry scheduling.
-
-### v0.4.0 — implementation in progress
+### v0.4.0 — completed 2026-08-12
 
 - Episode deletion now removes only matching Seerr issues. Because Seerr
   requests are season-scoped, CleanArr retains the request with the structured
@@ -132,10 +129,18 @@ idempotent webhook handling, and durable retry scheduling.
   synchronous mutations. This conservative single-instance design prevents
   overlap for the same media entity, torrent hash, or path; PostgreSQL/HA is
   outside the 1.0 product boundary.
-- The duplicate/serialization slice is locally verified by 96 backend tests,
-  Ruff format/lint, strict mypy, ESLint, and the frontend production build.
-  With this slice, v0.4 implementation scope is complete; the remaining step is
-  the verified v0.4.0 release itself.
+- Final implementation commit `76e5b71` is verified by 96 backend tests, Ruff
+  format/lint, strict mypy, ESLint, the frontend production build, and
+  container/installed-package smoke tests. Its
+  [quality run](https://github.com/mambastick/Cleanarr/actions/runs/31559810076)
+  completed all required jobs successfully.
+- Published the verified [v0.4.0 release](https://github.com/mambastick/Cleanarr/releases/tag/v0.4.0)
+  from commit `8f032f4`; its [release workflow](https://github.com/mambastick/Cleanarr/actions/runs/31560298020)
+  completed successfully with checksums, amd64/arm64 DEB and RPM assets, and a
+  public GHCR manifest for `linux/amd64` and `linux/arm64`.
+
+The next active milestone is **v0.5.0**: complete the data lifecycle and
+security baseline, then add metrics and redacted support tooling.
 
 ## Required 1.0 scope
 
