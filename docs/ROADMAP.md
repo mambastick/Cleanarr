@@ -139,7 +139,7 @@ issue, pull request, or release decision.
   completed successfully with checksums, amd64/arm64 DEB and RPM assets, and a
   public GHCR manifest for `linux/amd64` and `linux/arm64`.
 
-### v0.5.0 — release candidate
+### v0.5.0 — completed 2026-08-12
 
 - Persisted runtime configuration now has an ordered schema chain from the
   unversioned v0.4 format through versions 1 and 2. Upgrade tests preserve the
@@ -180,10 +180,16 @@ issue, pull request, or release decision.
   source/container scans, actionlint, container smoke, and installed DEB/RPM
   smoke tests. Its [quality run](https://github.com/mambastick/Cleanarr/actions/runs/31565040954)
   completed all required jobs successfully.
-
-The v0.5 implementation gates are complete. Publication and verification of the
-tagged multi-architecture artifacts, SBOMs, checksums, and attestations remain
-before this milestone can be marked completed.
+- Published the verified [v0.5.0 release](https://github.com/mambastick/Cleanarr/releases/tag/v0.5.0)
+  from commit `04d4db8`; its [release workflow](https://github.com/mambastick/Cleanarr/actions/runs/31565556759)
+  completed all required quality, native-package, multi-architecture image,
+  SBOM, provenance, and publication jobs successfully.
+- Post-publication verification downloaded all four DEB/RPM packages and three
+  SPDX 2.3 SBOMs, validated every checksum, and verified each GitHub artifact
+  attestation against the tag, source commit, signer workflow, and hosted-runner
+  policy. The GHCR image build and SBOM attestations also verify; its
+  `linux/amd64` and `linux/arm64` manifest digest is
+  `sha256:5425c1f73ecc4abd6434e9db750a6cc5ddc8f4426d1df028118e97a8fa9e13ca`.
 
 ## Required 1.0 scope
 

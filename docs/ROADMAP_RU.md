@@ -137,7 +137,7 @@ CleanArr 1.0 — стабильный и безопасный оркестрат
   успешно завершён с checksums, DEB/RPM для amd64 и arm64 и публичным GHCR-
   манифестом для `linux/amd64` и `linux/arm64`.
 
-### v0.5.0 — release candidate
+### v0.5.0 — завершён 2026-08-12
 
 - Persisted runtime config получил упорядоченную цепочку схем от
   неверсионированного формата v0.4 через версии 1 и 2. Upgrade-тесты сохраняют
@@ -181,10 +181,16 @@ CleanArr 1.0 — стабильный и безопасный оркестрат
   и контейнера, actionlint, container smoke и установочными smoke-тестами
   DEB/RPM. Его [quality run](https://github.com/mambastick/Cleanarr/actions/runs/31565040954)
   успешно завершил все обязательные jobs.
-
-Implementation gates v0.5 завершены. До отметки milestone как completed остаётся
-опубликовать и проверить tagged multi-architecture artifacts, SBOM, checksums и
-attestations.
+- Проверенный [релиз v0.5.0](https://github.com/mambastick/Cleanarr/releases/tag/v0.5.0)
+  опубликован из коммита `04d4db8`; его [release workflow](https://github.com/mambastick/Cleanarr/actions/runs/31565556759)
+  успешно завершил все обязательные quality, native-package,
+  multi-architecture image, SBOM, provenance и publication jobs.
+- После публикации скачаны все четыре DEB/RPM и три SPDX 2.3 SBOM, проверены все
+  checksums и каждая GitHub artifact attestation относительно тега, исходного
+  коммита, signer workflow и hosted-runner policy. Build и SBOM attestations
+  GHCR-образа также проверены; digest его `linux/amd64` и `linux/arm64`
+  манифеста —
+  `sha256:5425c1f73ecc4abd6434e9db750a6cc5ddc8f4426d1df028118e97a8fa9e13ca`.
 
 ## Обязательный scope 1.0
 
