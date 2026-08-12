@@ -85,6 +85,13 @@ class RuntimeConfigurationService:
         self._persist()
         return self.get_config()
 
+    def replace_config(self, config: RuntimeConfig) -> RuntimeConfig:
+        """Persist a fully validated configuration assembled by a trusted workflow."""
+
+        self._config = config
+        self._persist()
+        return self.get_config()
+
     def set_admin_credentials(
         self,
         *,

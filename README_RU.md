@@ -18,6 +18,7 @@
   <a href="#как-это-работает"><strong>Как это работает</strong></a> ·
   <a href="#настройка"><strong>Настройка</strong></a> ·
   <a href="docs/TORRENT_CLIENTS_RU.md"><strong>Torrent-клиенты</strong></a> ·
+  <a href="docs/OPERATIONS_RU.md"><strong>Эксплуатация</strong></a> ·
   <a href="docs/ROADMAP_RU.md"><strong>Roadmap</strong></a> ·
   <a href="CONTRIBUTING_RU.md"><strong>Участие в разработке</strong></a>
 </p>
@@ -296,7 +297,11 @@ SSO не включается, пока не задан хотя бы один �
 | `POST` | `/webhook/jellyfin` | `X-Webhook-Token` | Основной webhook |
 | `GET` | `/api/dashboard` | сессия | Состояние панели управления |
 | `GET` | `/api/config` | сессия | Текущая конфигурация |
-| `POST` | `/api/config/general` | сессия | Изменение общих настроек |
+| `PUT` | `/api/config/general` | сессия | Изменение общих настроек |
+| `GET` | `/api/config/export` | сессия | Экспорт конфигурации без credentials |
+| `POST` | `/api/config/import` | сессия | Fail-safe merge редактированной конфигурации |
+| `GET` | `/api/support/bundle` | сессия | Редактированный operational snapshot |
+| `GET` | `/metrics` | сессия или admin token | Privacy-safe метрики Prometheus |
 | `POST` | `/api/config/jellyfin/setup-webhook` | сессия | Автонастройка Jellyfin Webhook |
 | `POST` | `/api/auth/login` | — | Локальный вход |
 | `GET` | `/api/auth/status` | — | Возможности входа и состояние сессии |

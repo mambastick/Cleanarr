@@ -116,7 +116,11 @@ class BaseDeletionStrategy(ABC):
         except Exception as exc:  # noqa: BLE001
             self._logger.exception(
                 "Downstream mutation failed",
-                extra={"system": system, "action": action},
+                extra={
+                    "system": system,
+                    "action": action,
+                    "correlation_id": collector.correlation_id,
+                },
             )
             collector.add(
                 system,
@@ -149,7 +153,10 @@ class BaseDeletionStrategy(ABC):
                 dry_run=self._dry_run,
             )
         except Exception as exc:  # noqa: BLE001
-            self._logger.exception("Downloader removal failed")
+            self._logger.exception(
+                "Downloader removal failed",
+                extra={"correlation_id": collector.correlation_id},
+            )
             collector.add(
                 "downloader",
                 "delete_hashes",

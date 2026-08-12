@@ -18,6 +18,7 @@
   <a href="#how-it-works"><strong>How it works</strong></a> ·
   <a href="#configuration"><strong>Configuration</strong></a> ·
   <a href="docs/TORRENT_CLIENTS.md"><strong>Torrent clients</strong></a> ·
+  <a href="docs/OPERATIONS.md"><strong>Operations</strong></a> ·
   <a href="docs/ROADMAP.md"><strong>Roadmap</strong></a> ·
   <a href="CONTRIBUTING.md"><strong>Contributing</strong></a>
 </p>
@@ -296,7 +297,11 @@ The easiest way is to use **Auto-configure** in the Jellyfin service editor (cli
 | `POST` | `/webhook/jellyfin` | `X-Webhook-Token` header | Main ingestion endpoint |
 | `GET` | `/api/dashboard` | session | Dashboard snapshot for the SPA |
 | `GET` | `/api/config` | session | Runtime configuration |
-| `POST` | `/api/config/general` | session | Update general settings |
+| `PUT` | `/api/config/general` | session | Update general settings |
+| `GET` | `/api/config/export` | session | Export a credential-free configuration document |
+| `POST` | `/api/config/import` | session | Merge a redacted configuration in fail-safe mode |
+| `GET` | `/api/support/bundle` | session | Redacted operational support snapshot |
+| `GET` | `/metrics` | session or admin token | Privacy-safe Prometheus metrics |
 | `POST` | `/api/config/jellyfin/setup-webhook` | session | Auto-configure the Jellyfin Webhook plugin |
 | `POST` | `/api/auth/login` | — | Admin login |
 | `GET` | `/api/auth/status` | — | Current authentication capabilities and session state |
@@ -325,6 +330,7 @@ cleanarr/
 ├── packaging/                  # DEB/RPM metadata, systemd unit, build scripts
 └── docs/
     ├── LINUX_PACKAGES.md       # Native Linux package guide
+    ├── OPERATIONS.md           # Metrics, support bundle, config transfer
     ├── RELEASING.md            # Bilingual release policy
     └── screenshots/
 ```

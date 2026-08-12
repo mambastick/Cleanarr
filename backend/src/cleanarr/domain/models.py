@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
+from uuid import uuid4
 
 
 class ItemType(StrEnum):
@@ -118,6 +119,7 @@ class ProcessingResult:
     event: MediaDeletionEvent
     status: OverallStatus
     actions: tuple[ActionResult, ...]
+    correlation_id: str = field(default_factory=lambda: uuid4().hex)
 
 
 @dataclass(frozen=True)

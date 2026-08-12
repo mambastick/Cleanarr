@@ -38,7 +38,27 @@ git push origin main vX.Y.Z
 - builds and publishes GHCR images for `linux/amd64` and `linux/arm64`;
 - builds DEB and RPM packages for `amd64` and `arm64` on native runners;
 - creates or updates the GitHub Release with `docs/releases/vX.Y.Z.md`;
-- uploads packages and `SHA256SUMS`.
+- uploads packages, SPDX JSON SBOMs, and `SHA256SUMS`;
+- creates signed GitHub artifact attestations for release files and build/SBOM
+  attestations for the GHCR image digest.
+
+The required quality workflow fails on fixable high/critical dependency or
+container vulnerabilities, committed secrets, and high/critical deployment
+misconfiguration findings reported by Trivy. A release must not bypass a red
+scan.
+
+## Verify downloaded artifacts
+
+```bash
+sha256sum --check SHA256SUMS
+gh attestation verify cleanarr_X.Y.Z_amd64.deb -R mambastick/Cleanarr
+gh attestation verify oci://ghcr.io/mambastick/cleanarr:X.Y.Z -R mambastick/Cleanarr
+```
+
+The checksum proves that a download matches the release manifest. The
+attestation additionally binds the artifact or image digest to this repository,
+commit, and GitHub Actions build identity. SPDX JSON files in the release assets
+describe the container and native-package dependency sets.
 
 Do not move or recreate a published tag. If artifact publication must be recovered, use the manual workflow with the existing tag and confirm that the source version matches it.
 
@@ -50,4 +70,7 @@ gh workflow run docker-release.yml \
   -f publish=true
 ```
 
-This rebuilds native packages from the current default branch. Use it only when that branch still contains the exact tagged application version.
+This rebuilds native packages from the current default branch. Use it only when
+that branch still contains the exact tagged application version. Manual recovery
+does not republish the container image; preserve and verify its original
+digest-bound attestations.

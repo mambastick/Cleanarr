@@ -26,6 +26,7 @@ from cleanarr.api.library_schemas import (
 from cleanarr.api.schemas import JellyfinWebhookPayload, ProcessingResultResponse
 from cleanarr.domain import MediaDeletionEvent, OverallStatus
 from cleanarr.infrastructure.database import migrate_database
+from cleanarr.redaction import redact_sensitive_text
 
 DeletionProgressReporter = Callable[[ManualDeleteJobPhase, int, str, str | None], None]
 ManualDeleteResolver = Callable[[ManualDeleteRequest], Awaitable[MediaDeletionEvent]]
@@ -281,6 +282,7 @@ class ManualDeletionJobStore:
             self._save_job_sync(job)
 
     def _retry_or_fail(self, job: _DeletionJob, message: str) -> None:
+        message = redact_sensitive_text(message)
         job.error = message
         if job.attempt_count >= job.max_attempts:
             self._mark_failed(job, message)
@@ -305,7 +307,7 @@ class ManualDeletionJobStore:
         job.phase = ManualDeleteJobPhase.FAILED
         job.progress_percent = 100
         job.message = "Deletion failed after all safe attempts."
-        job.error = message
+        job.error = redact_sensitive_text(message)
         job.completed_at = datetime.now(UTC)
         job.next_retry_at = None
 
@@ -433,7 +435,7 @@ class ManualDeletionJobStore:
             status=ManualDeleteJobStatus(str(row[4])),
             phase=ManualDeleteJobPhase(str(row[5])),
             progress_percent=int(str(row[6])),
-            message=str(row[7]),
+            message=redact_sensitive_text(str(row[7])),
             item_name=str(row[8]) if row[8] is not None else None,
             created_at=datetime.fromisoformat(str(row[9])),
             started_at=_datetime_from_value(row[10]),
@@ -442,7 +444,7 @@ class ManualDeletionJobStore:
             attempt_count=int(str(row[13])),
             max_attempts=int(str(row[14])),
             result=ProcessingResultResponse.model_validate_json(str(result_json)) if result_json is not None else None,
-            error=str(row[16]) if row[16] is not None else None,
+            error=redact_sensitive_text(str(row[16])) if row[16] is not None else None,
         )
 
     @staticmethod
@@ -481,7 +483,7 @@ def _datetime_from_value(value: object) -> datetime | None:
 
 def _plan_hash(plan: ProcessingResultResponse) -> str:
     payload = json.dumps(
-        plan.model_dump(mode="json"),
+        plan.model_dump(mode="json", exclude={"correlation_id"}),
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,

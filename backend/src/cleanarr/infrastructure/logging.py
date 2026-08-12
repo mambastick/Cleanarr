@@ -7,6 +7,8 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from cleanarr.redaction import redact_sensitive_text
+
 
 class JsonFormatter(logging.Formatter):
     """Very small JSON formatter for homelab-friendly logs."""
@@ -16,14 +18,14 @@ class JsonFormatter(logging.Formatter):
             "timestamp": datetime.now(UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": redact_sensitive_text(record.getMessage()),
         }
-        for key in ("system", "action"):
+        for key in ("system", "action", "correlation_id"):
             value = getattr(record, key, None)
             if value is not None:
-                payload[key] = value
+                payload[key] = redact_sensitive_text(str(value))
         if record.exc_info:
-            payload["exception"] = self.formatException(record.exc_info)
+            payload["exception"] = redact_sensitive_text(self.formatException(record.exc_info))
         return json.dumps(payload, ensure_ascii=True)
 
 

@@ -28,6 +28,9 @@ class ManagedFakeRadarr(FakeRadarrClient):
     async def ping(self) -> None:
         return None
 
+    async def get_version(self) -> str:
+        return "test"
+
 
 class ManagedFakeSonarr(FakeSonarrClient):
     async def close(self) -> None:
@@ -35,6 +38,9 @@ class ManagedFakeSonarr(FakeSonarrClient):
 
     async def ping(self) -> None:
         return None
+
+    async def get_version(self) -> str:
+        return "test"
 
 
 class ManagedFakeDownloader(FakeDownloaderClient):

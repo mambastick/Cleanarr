@@ -18,6 +18,7 @@ from cleanarr.application.strategies import DeletionStrategyFactory
 from cleanarr.domain import (
     ActionResult,
     ActionStatus,
+    FailureReason,
     ItemType,
     MediaDeletionEvent,
     MediaFingerprint,
@@ -26,7 +27,7 @@ from cleanarr.domain import (
     RadarrHistoryRecord,
     RadarrMovie,
 )
-from cleanarr.domain.config import GeneralConfig, RuntimeConfig
+from cleanarr.domain.config import GeneralConfig, RadarrServiceConfig, RuntimeConfig
 from cleanarr.infrastructure.container import ServiceContainer
 from cleanarr.infrastructure.settings import Settings
 from tests.fakes import (
@@ -135,6 +136,96 @@ class FakeContainer:
 
 
 @pytest.mark.asyncio
+async def test_operational_endpoints_are_authenticated_and_privacy_safe(tmp_path: Path) -> None:
+    container = FakeContainer(FakeService(results=[]), db_path=tmp_path / "cleanarr.db")
+    container.config = RuntimeConfig(
+        general=GeneralConfig(
+            dry_run=True,
+            webhook_shared_token="webhook-super-secret",
+        ),
+        radarr=[
+            RadarrServiceConfig(
+                name="Private Radarr Name",
+                url="https://url-user:url-password@radarr.private/api/v3?api_key=query-secret",
+                api_key="radarr-super-secret",
+            )
+        ],
+    )
+    app = create_app(container=container)
+    result = ProcessingResult(
+        event=MediaDeletionEvent(
+            notification_type="ItemDeleted",
+            item_type=ItemType.MOVIE,
+            item_id="private-media-id",
+            name="Top Secret Movie",
+            fingerprint=MediaFingerprint(path="/private/media/top-secret.mkv"),
+        ),
+        status=OverallStatus.PARTIAL_FAILURE,
+        actions=(
+            ActionResult(
+                system="radarr",
+                action="delete_movie",
+                status=ActionStatus.FAILED,
+                message="Failure mentions radarr-super-secret",
+                reason=FailureReason.DOWNSTREAM_ERROR,
+                details={"url": "https://radarr.private", "api_key": "detail-super-secret"},
+            ),
+        ),
+        correlation_id="0123456789abcdef0123456789abcdef",
+    )
+
+    async with app_client(app) as client:
+        await app.state.activity_store.record(result)
+        app.state.webhook_attempt_store.record(
+            outcome="failed",
+            http_status=502,
+            message="Top Secret Movie failed with webhook-super-secret",
+            item_name="Top Secret Movie",
+        )
+        app.state.health_probe_store.update("Radarr", "healthy", version="5.0.0 secret-version-payload")
+        app.state.health_probe_store.update(
+            "Attacker supplied service name",
+            "healthy",
+            version="secret-version-payload",
+        )
+        unauthorized_metrics = await client.get("/metrics")
+        metrics = await client.get("/metrics", headers={"X-Admin-Token": "admin-token"})
+        support = await client.get("/api/support/bundle", headers={"X-Admin-Token": "admin-token"})
+
+    assert unauthorized_metrics.status_code in {401, 403}
+    assert metrics.status_code == 200
+    assert metrics.headers["content-type"].startswith("text/plain; version=0.0.4")
+    assert 'cleanarr_configured_services{service="radarr"} 1' in metrics.text
+    assert 'cleanarr_retained_operations{item_type="Movie",status="partial_failure"} 1' in metrics.text
+    assert support.status_code == 200
+    assert support.json()["recent_errors"][0]["correlation_id"] == "0123456789abcdef0123456789abcdef"
+    assert support.json()["recent_errors"][0]["actions"] == [
+        {
+            "system": "radarr",
+            "action": "delete_movie",
+            "status": "failed",
+            "reason": "downstream_error",
+        }
+    ]
+    combined = metrics.text + support.text
+    for sensitive_value in (
+        "Top Secret Movie",
+        "private-media-id",
+        "/private/media/top-secret.mkv",
+        "Private Radarr Name",
+        "radarr.private",
+        "url-password",
+        "query-secret",
+        "radarr-super-secret",
+        "webhook-super-secret",
+        "detail-super-secret",
+        "Attacker supplied service name",
+        "secret-version-payload",
+    ):
+        assert sensitive_value not in combined
+
+
+@pytest.mark.asyncio
 async def test_manual_delete_requires_and_persists_exact_preflight(tmp_path: Path) -> None:
     service = FakeService(results=[])
     container = FakeContainer(service, db_path=tmp_path / "cleanarr.db")
@@ -225,7 +316,12 @@ async def test_manual_delete_requires_and_persists_exact_preflight(tmp_path: Pat
     assert unconfirmed_legacy.status_code == 409
     assert queued.status_code == 202
     assert job.json()["attempt_count"] == 1
-    assert job.json()["preflight"] == preview.json()["plan"]
+    persisted_preflight = job.json()["preflight"]
+    original_plan = preview.json()["plan"]
+    assert {key: value for key, value in persisted_preflight.items() if key != "correlation_id"} == {
+        key: value for key, value in original_plan.items() if key != "correlation_id"
+    }
+    assert persisted_preflight["correlation_id"]
     assert radarr.deleted_movie_ids == []
     assert downloader.deleted_hashes == []
 
@@ -691,6 +787,59 @@ async def test_first_run_config_does_not_seed_integrations_from_env(tmp_path: Pa
     assert response.json()["seerr"] == []
     assert response.json()["downloaders"] == []
     assert response.json()["general"]["webhook_shared_token"] == "secret-token"
+
+    await container.close()
+
+
+@pytest.mark.asyncio
+async def test_redacted_config_export_import_endpoint_is_fail_safe(tmp_path: Path) -> None:
+    settings = Settings.model_construct(
+        db_path=str(tmp_path / "cleanarr.db"),
+        config_state_path=str(tmp_path / "runtime-config.json"),
+        admin_shared_token="admin-token",
+        log_level="INFO",
+        dry_run=False,
+        webhook_shared_token="webhook-secret",
+        http_timeout_seconds=5.0,
+        downloader_kind="qbittorrent",
+    )
+    container = ServiceContainer.from_settings(settings)
+    app = create_app(container=container)
+    headers = {"X-Admin-Token": "admin-token"}
+
+    async with app_client(app) as client:
+        exported = await client.get("/api/config/export", headers=headers)
+        document = exported.json()
+        document["services"].append(
+            {
+                "id": "imported-radarr",
+                "kind": "radarr",
+                "name": "Imported Radarr",
+                "url": "https://url-user:url-password@radarr.example/api/v3?api_key=query-secret",
+                "enabled": True,
+                "is_default": True,
+            }
+        )
+        imported = await client.post("/api/config/import", headers=headers, json=document)
+        saved = await client.get("/api/config", headers=headers)
+
+    assert exported.status_code == 200
+    assert "webhook-secret" not in exported.text
+    assert imported.status_code == 200
+    assert imported.json()["dry_run"] is True
+    assert saved.json()["general"]["dry_run"] is True
+    assert saved.json()["general"]["webhook_shared_token"] == "webhook-secret"
+    assert saved.json()["radarr"] == [
+        {
+            "id": "imported-radarr",
+            "kind": "radarr",
+            "name": "Imported Radarr",
+            "url": "https://radarr.example/api/v3",
+            "enabled": False,
+            "is_default": True,
+            "api_key": "",
+        }
+    ]
 
     await container.close()
 

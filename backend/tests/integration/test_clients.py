@@ -7,7 +7,35 @@ import respx
 
 from cleanarr.domain import AuthenticationError, ExternalServiceError, SeerrRequest
 from cleanarr.domain.config import TorrentRemovalPolicy
-from cleanarr.infrastructure.clients import QbittorrentClient, RadarrClient, SeerrClient, SonarrClient
+from cleanarr.infrastructure.clients import (
+    JellyfinServerClient,
+    QbittorrentClient,
+    RadarrClient,
+    SeerrClient,
+    SonarrClient,
+)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_service_clients_report_versions_from_documented_status_contracts() -> None:
+    respx.get("http://radarr/api/v3/system/status").respond(json={"version": "5.1.0"})
+    respx.get("http://sonarr/api/v3/system/status").respond(json={"version": "4.2.0"})
+    respx.get("http://seerr/api/v1/status").respond(json={"version": "2.7.0"})
+    respx.get("http://jellyfin/System/Info").respond(json={"Version": "10.11.0"})
+    clients = [
+        RadarrClient(base_url="http://radarr/api/v3", api_key="key", timeout_seconds=5),
+        SonarrClient(base_url="http://sonarr/api/v3", api_key="key", timeout_seconds=5),
+        SeerrClient(base_url="http://seerr/api/v1", api_key="key", timeout_seconds=5),
+        JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5),
+    ]
+    try:
+        versions = [await client.get_version() for client in clients]
+    finally:
+        for client in clients:
+            await client.close()
+
+    assert versions == ["5.1.0", "4.2.0", "2.7.0", "10.11.0"]
 
 
 @pytest.mark.asyncio
@@ -299,7 +327,7 @@ async def test_seerr_client_reports_mutation_forbidden_as_downstream_error() -> 
 
     client = SeerrClient(base_url="http://seerr/api/v1", api_key="key", timeout_seconds=5)
     try:
-        with pytest.raises(ExternalServiceError, match="invalid csrf token") as exc_info:
+        with pytest.raises(ExternalServiceError, match="unexpected status 403") as exc_info:
             await client.delete_request(2)
     finally:
         await client.close()

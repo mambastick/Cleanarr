@@ -78,7 +78,9 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     permissions:
+      attestations: write
       contents: read
+      id-token: write
       packages: write
 
     steps:
@@ -98,17 +100,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Normalize image name
+        id: image
+        shell: bash
+        run: echo "name=${REGISTRY}/${IMAGE_NAME,,}" >> "${GITHUB_OUTPUT}"
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ steps.image.outputs.name }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
 
       - name: Build and push
+        id: push
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -119,6 +127,38 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Generate container SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ steps.image.outputs.name }}@${{ steps.push.outputs.digest }}
+          artifact-name: cleanarr-container-sbom
+          output-file: cleanarr-container.spdx.json
+          format: spdx-json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Upload container SBOM
+        uses: actions/upload-artifact@v7
+        with:
+          name: cleanarr-container-sbom
+          path: cleanarr-container.spdx.json
+          if-no-files-found: error
+
+      - name: Attest container build provenance
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest container SBOM
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: cleanarr-container.spdx.json
+          push-to-registry: true
 
   native-packages:
     name: Native packages (${{ matrix.arch }})
@@ -168,6 +208,16 @@ jobs:
           PYTHON_BIN: python
         run: bash packaging/build-linux-packages.sh "${{ needs.validate-release.outputs.package-version }}" "${{ matrix.arch }}" dist
 
+      - name: Generate package SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: dist
+          artifact-name: cleanarr-packages-${{ matrix.arch }}-sbom
+          output-file: dist/cleanarr-packages-${{ matrix.arch }}.spdx.json
+          format: spdx-json
+          upload-artifact: false
+          upload-release-assets: false
+
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -189,7 +239,9 @@ jobs:
           && (github.event_name == 'push' || inputs.publish) }}
     runs-on: ubuntu-24.04
     permissions:
+      attestations: write
       contents: write
+      id-token: write
     env:
       RELEASE_TAG: ${{ needs.validate-release.outputs.release-tag }}
       PACKAGE_VERSION: ${{ needs.validate-release.outputs.package-version }}
@@ -205,11 +257,23 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - name: Download container SBOM
+        if: needs.build-and-push.result == 'success'
+        uses: actions/download-artifact@v8
+        with:
+          name: cleanarr-container-sbom
+          path: release-assets
+
       - name: Create checksums
         shell: bash
         run: |
           cd release-assets
-          sha256sum ./*.deb ./*.rpm | sort -k2 > SHA256SUMS
+          sha256sum ./*.deb ./*.rpm ./*.spdx.json | sort -k2 > SHA256SUMS
+
+      - name: Attest release artifacts
+        uses: actions/attest@v4
+        with:
+          subject-path: release-assets/*
 
       - name: Create or update release
         env:

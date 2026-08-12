@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -17,6 +18,7 @@ from cleanarr.domain import (
     OverallStatus,
     ProcessingResult,
 )
+from cleanarr.redaction import redact_sensitive_mapping, redact_sensitive_text
 
 
 class JellyfinWebhookPayload(BaseModel):
@@ -131,6 +133,18 @@ class ActionResultResponse(BaseModel):
     reason: FailureReason | None = None
     details: dict[str, Any]
 
+    @field_validator("message", mode="before")
+    @classmethod
+    def redact_message(cls, value: object) -> str:
+        return redact_sensitive_text(str(value))
+
+    @field_validator("details", mode="before")
+    @classmethod
+    def redact_details(cls, value: object) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("Action details must be an object.")
+        return redact_sensitive_mapping(value)
+
     @classmethod
     def from_domain(cls, action: ActionResult) -> ActionResultResponse:
         return cls(
@@ -156,6 +170,7 @@ class ProcessingResultResponse(BaseModel):
     """Serialized per-event result."""
 
     item_type: ItemType
+    correlation_id: str | None = None
     item_id: str
     name: str
     status: OverallStatus
@@ -169,6 +184,7 @@ class ProcessingResultResponse(BaseModel):
     def from_domain(cls, result: ProcessingResult) -> ProcessingResultResponse:
         return cls(
             item_type=result.event.item_type,
+            correlation_id=result.correlation_id,
             item_id=result.event.item_id,
             name=result.event.name,
             status=result.status,
@@ -201,6 +217,7 @@ class ProcessingResultResponse(BaseModel):
                 )
                 for action in self.actions
             ),
+            correlation_id=self.correlation_id or uuid4().hex,
         )
 
 

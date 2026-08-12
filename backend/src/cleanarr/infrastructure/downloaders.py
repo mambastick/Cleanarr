@@ -43,7 +43,12 @@ class MultiDownloaderClient:
 
     async def get_version(self) -> str:
         versions = await asyncio.gather(*(target.client.get_version() for target in self._targets))
-        return ", ".join(f"{target.name}={version}" for target, version in zip(self._targets, versions, strict=True))
+        return ", ".join(
+            f"{kind}={version}"
+            for kind, version in sorted(
+                {(target.kind, version) for target, version in zip(self._targets, versions, strict=True)}
+            )
+        )
 
     async def delete_hashes(
         self,
@@ -236,8 +241,8 @@ class TransmissionClient:
             if isinstance(error, dict):
                 message = str(error.get("message") or "unknown JSON-RPC error")
                 if error.get("code") == -32601 or "method" in message.casefold():
-                    raise _UnsupportedTransmissionRpc(message)
-                raise ExternalServiceError(self._system, f"Transmission RPC failed: {message}")
+                    raise _UnsupportedTransmissionRpc("unsupported RPC generation")
+                raise ExternalServiceError(self._system, "Transmission RPC failed.")
             result = body.get("result")
             if not isinstance(result, dict):
                 raise _UnsupportedTransmissionRpc("Transmission did not accept JSON-RPC 2.0.")
@@ -245,8 +250,7 @@ class TransmissionClient:
 
         rpc_result = body.get("result")
         if rpc_result != "success":
-            message = str(rpc_result or "unknown legacy RPC error")
-            raise ExternalServiceError(self._system, f"Transmission RPC failed: {message}")
+            raise ExternalServiceError(self._system, "Transmission RPC failed.")
         arguments = body.get("arguments", {})
         if not isinstance(arguments, dict):
             raise ExternalServiceError(self._system, "Transmission returned invalid legacy RPC arguments.")
@@ -267,14 +271,17 @@ class TransmissionClient:
                     headers={"X-Transmission-Session-Id": session_id},
                 )
         except httpx.HTTPError as exc:
-            raise ExternalServiceError(self._system, f"Transmission request failed: {exc}") from exc
+            raise ExternalServiceError(
+                self._system,
+                f"Transmission request failed ({exc.__class__.__name__}).",
+            ) from exc
 
         if response.status_code in {401, 403}:
             raise AuthenticationError(self._system, "Transmission rejected the configured credentials.")
         if response.status_code >= 400:
             raise ExternalServiceError(
                 self._system,
-                f"Transmission returned unexpected status {response.status_code}: {response.text}",
+                f"Transmission returned unexpected status {response.status_code}.",
             )
         return response
 
@@ -389,7 +396,7 @@ class DelugeClient:
         if removable and not dry_run:
             errors = await self._rpc("core.remove_torrents", [sorted(removable), delete_files])
             if errors:
-                raise ExternalServiceError(self._system, f"Deluge failed to remove torrents: {errors}")
+                raise ExternalServiceError(self._system, "Deluge failed to remove one or more torrents.")
         return [
             self._result(
                 hash_value,
@@ -416,14 +423,17 @@ class DelugeClient:
                 json={"method": method, "params": params, "id": self._request_id},
             )
         except httpx.HTTPError as exc:
-            raise ExternalServiceError(self._system, f"Deluge request failed: {exc}") from exc
+            raise ExternalServiceError(
+                self._system,
+                f"Deluge request failed ({exc.__class__.__name__}).",
+            ) from exc
 
         if response.status_code in {401, 403}:
             raise AuthenticationError(self._system, "Deluge rejected the configured credentials.")
         if response.status_code >= 400:
             raise ExternalServiceError(
                 self._system,
-                f"Deluge returned unexpected status {response.status_code}: {response.text}",
+                f"Deluge returned unexpected status {response.status_code}.",
             )
         try:
             body = response.json()
@@ -436,7 +446,7 @@ class DelugeClient:
             if not allow_unauthenticated and "Not authenticated" in str(error):
                 self._authenticated = False
                 raise AuthenticationError(self._system, "Deluge Web session is not authenticated.")
-            raise ExternalServiceError(self._system, f"Deluge RPC failed: {error}")
+            raise ExternalServiceError(self._system, "Deluge RPC failed.")
         return body.get("result")
 
     def _skip_reason(self, status: TorrentSeedingStatus) -> str | None:
@@ -590,19 +600,22 @@ class RTorrentClient:
                 headers={"Content-Type": "text/xml"},
             )
         except httpx.HTTPError as exc:
-            raise ExternalServiceError(self._system, f"rTorrent request failed: {exc}") from exc
+            raise ExternalServiceError(
+                self._system,
+                f"rTorrent request failed ({exc.__class__.__name__}).",
+            ) from exc
 
         if response.status_code in {401, 403}:
             raise AuthenticationError(self._system, "rTorrent rejected the configured credentials.")
         if response.status_code >= 400:
             raise ExternalServiceError(
                 self._system,
-                f"rTorrent returned unexpected status {response.status_code}: {response.text}",
+                f"rTorrent returned unexpected status {response.status_code}.",
             )
         try:
             values, _ = loads(response.content)
         except Fault as exc:
-            raise ExternalServiceError(self._system, f"rTorrent RPC failed: {exc.faultString}") from exc
+            raise ExternalServiceError(self._system, "rTorrent RPC failed.") from exc
         except Exception as exc:
             raise ExternalServiceError(self._system, "rTorrent returned an invalid XML-RPC response.") from exc
         return values[0] if values else None

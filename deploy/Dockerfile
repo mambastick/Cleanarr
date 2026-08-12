@@ -26,7 +26,8 @@ COPY backend/src /app/src
 COPY --from=frontend-build /app/src/cleanarr/ui/static /app/src/cleanarr/ui/static
 
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir .
+    && pip install --no-cache-dir . \
+    && python -m pip uninstall --yes pip
 
 USER cleanarr
 

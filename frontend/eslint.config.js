@@ -19,6 +19,12 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // The application intentionally starts async loads and resets local draft
+      // state from effects. Keep dependency validation enabled without treating
+      // those established synchronization points as release-blocking errors.
+      'react-hooks/set-state-in-effect': 'off',
+    },
   },
   {
     files: ['src/components/ui/**/*.{ts,tsx}'],

@@ -14,7 +14,7 @@ from urllib.parse import quote, urlencode, urlsplit
 from uuid import UUID
 
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, ValidationError
 from starlette.middleware.base import RequestResponseEndpoint
 
@@ -65,6 +65,15 @@ from cleanarr.api.library_schemas import (
     MovieSummary,
     SeasonSummary,
     SeriesSummary,
+)
+from cleanarr.api.operations import (
+    ConfigImportResponse,
+    RedactedConfigExport,
+    SupportBundle,
+    build_support_bundle,
+    export_redacted_config,
+    import_redacted_config,
+    render_metrics,
 )
 from cleanarr.api.schemas import JellyfinWebhookPayload, ProcessingResultResponse, WebhookBatchResponse
 from cleanarr.application.authentication import LoginThrottledError
@@ -124,7 +133,14 @@ async def _health_probe_loop(container: ServiceContainer, health_store: HealthPr
             return
         try:
             await asyncio.wait_for(client.ping(), timeout=10.0)
-            health_store.update(name, "healthy")
+            version = "unknown"
+            get_version = getattr(client, "get_version", None)
+            if get_version is not None:
+                try:
+                    version = str(await asyncio.wait_for(get_version(), timeout=10.0))
+                except Exception:  # noqa: BLE001
+                    version = "unknown"
+            health_store.update(name, "healthy", version=version)
         except Exception as exc:
             _logger.warning("Health probe [%s] failed: %s: %s", name, type(exc).__name__, exc)
             health_store.update(name, "unreachable")
@@ -404,7 +420,12 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     def with_jellyfin_action(result: ProcessingResult, action: ActionResult) -> ProcessingResult:
         actions = (*result.actions, action)
         overall = OverallStatus.PARTIAL_FAILURE if action.status is ActionStatus.FAILED else result.status
-        return ProcessingResult(event=result.event, status=overall, actions=actions)
+        return ProcessingResult(
+            event=result.event,
+            status=overall,
+            actions=actions,
+            correlation_id=result.correlation_id,
+        )
 
     async def preview_manual_delete(
         payload: ManualDeleteRequest,
@@ -816,6 +837,64 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         return RuntimeConfigResponse.from_config(
             container.config,
             admin_token_configured=bool(container.admin_shared_token),
+        )
+
+    @app.get(
+        "/api/config/export",
+        response_model=RedactedConfigExport,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def export_runtime_config(request: Request) -> RedactedConfigExport:
+        return export_redacted_config(request.app.state.container.config)
+
+    @app.post(
+        "/api/config/import",
+        response_model=ConfigImportResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def import_runtime_config(
+        request: Request,
+        payload: RedactedConfigExport,
+    ) -> ConfigImportResponse:
+        container = request.app.state.container
+        config, result = import_redacted_config(container.config, payload)
+        container.config_service.replace_config(config)
+        request.app.state.activity_store.set_retention_days(config.general.activity_retention_days)
+        await container.refresh_runtime()
+        return result
+
+    @app.get(
+        "/metrics",
+        response_class=PlainTextResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def metrics(request: Request) -> PlainTextResponse:
+        payload = await render_metrics(
+            version=app.version,
+            config=request.app.state.container.config,
+            activity_store=request.app.state.activity_store,
+            webhook_attempt_store=request.app.state.webhook_attempt_store,
+            health_probe_store=request.app.state.health_probe_store,
+            deletion_jobs=request.app.state.deletion_jobs,
+        )
+        return PlainTextResponse(
+            payload,
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+        )
+
+    @app.get(
+        "/api/support/bundle",
+        response_model=SupportBundle,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def support_bundle(request: Request) -> SupportBundle:
+        return await build_support_bundle(
+            version=app.version,
+            config=request.app.state.container.config,
+            activity_store=request.app.state.activity_store,
+            webhook_attempt_store=request.app.state.webhook_attempt_store,
+            health_probe_store=request.app.state.health_probe_store,
+            deletion_jobs=request.app.state.deletion_jobs,
         )
 
     @app.put(

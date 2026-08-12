@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from uuid import uuid4
 
 from cleanarr.domain import (
     ActionResult,
@@ -36,9 +37,10 @@ def observe_actions(observer: ActionObserver) -> Iterator[None]:
 class ActionCollector:
     """Mutable builder for per-event action results."""
 
-    def __init__(self, event: MediaDeletionEvent) -> None:
+    def __init__(self, event: MediaDeletionEvent, *, correlation_id: str | None = None) -> None:
         self._event = event
         self._actions: list[ActionResult] = []
+        self._correlation_id = correlation_id or uuid4().hex
 
     def add(
         self,
@@ -63,6 +65,12 @@ class ActionCollector:
         if observer is not None:
             observer(result)
 
+    @property
+    def correlation_id(self) -> str:
+        """Stable identifier shared by all actions in this cascade."""
+
+        return self._correlation_id
+
     def build(self) -> ProcessingResult:
         statuses = {action.status for action in self._actions}
         if ActionStatus.FAILED in statuses:
@@ -75,4 +83,9 @@ class ActionCollector:
             overall = OverallStatus.IGNORED
         else:
             overall = OverallStatus.SUCCESS
-        return ProcessingResult(event=self._event, status=overall, actions=tuple(self._actions))
+        return ProcessingResult(
+            event=self._event,
+            status=overall,
+            actions=tuple(self._actions),
+            correlation_id=self._correlation_id,
+        )

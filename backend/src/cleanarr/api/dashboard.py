@@ -119,6 +119,22 @@ class ActivityStore:
     async def snapshot(self, limit: int = 200) -> list[ActivityRecord]:
         return await asyncio.to_thread(self._snapshot_sync, limit)
 
+    def _metric_counts_sync(self) -> Counter[tuple[str, str]]:
+        with sqlite3.connect(self._db_path) as conn:
+            rows = conn.execute(
+                "SELECT json_extract(result_json, '$.item_type'),"
+                " json_extract(result_json, '$.status'), COUNT(*)"
+                " FROM activity GROUP BY 1, 2"
+            ).fetchall()
+        return Counter(
+            {(str(item_type), str(status)): int(count) for item_type, status, count in rows if item_type and status}
+        )
+
+    async def metric_counts(self) -> Counter[tuple[str, str]]:
+        """Count every valid retained result without exposing its identifiers."""
+
+        return await asyncio.to_thread(self._metric_counts_sync)
+
     def set_retention_days(self, days: int) -> None:
         self._retention_days = days
 
@@ -230,15 +246,26 @@ class HealthProbeStore:
 
     def __init__(self) -> None:
         self._results: dict[str, str] = {name: "unconfigured" for name in self._SERVICES}
+        self._versions: dict[str, str] = {name: "unknown" for name in self._SERVICES}
         self._lock = Lock()
 
-    def update(self, service: str, status: str) -> None:
+    def update(self, service: str, status: str, *, version: str | None = None) -> None:
         with self._lock:
             self._results[service] = status
+            if status == "unconfigured":
+                self._versions[service] = "not configured"
+            elif version is not None:
+                self._versions[service] = version
 
     def snapshot(self) -> dict[str, str]:
         with self._lock:
             return dict(self._results)
+
+    def version_snapshot(self) -> dict[str, str]:
+        """Return bounded downstream version strings for support diagnostics."""
+
+        with self._lock:
+            return dict(self._versions)
 
 
 class DashboardDownstreamResponse(BaseModel):
@@ -337,7 +364,7 @@ async def build_dashboard_response(
                 method="GET",
                 path="/api/dashboard",
                 description="Returns the current dashboard snapshot used by the SPA.",
-                auth="none",
+                auth="admin session or token",
             ),
             DashboardEndpointResponse(
                 method="GET",
@@ -509,7 +536,14 @@ def _sanitize_url(raw_url: str) -> str:
     if not raw_url:
         return ""
     parsed = urlsplit(raw_url)
-    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+    hostname = parsed.hostname or ""
+    if ":" in hostname and not hostname.startswith("["):
+        hostname = f"[{hostname}]"
+    try:
+        port = f":{parsed.port}" if parsed.port is not None else ""
+    except ValueError:
+        port = ""
+    return urlunsplit((parsed.scheme, f"{hostname}{port}", parsed.path, "", ""))
 
 
 def _pick_active_url(services: Sequence[BaseModel]) -> str:

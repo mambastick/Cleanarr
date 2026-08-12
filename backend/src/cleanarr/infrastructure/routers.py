@@ -27,6 +27,8 @@ class ManagedRadarrClientPort(RadarrClientPort, Protocol):
 
     async def ping(self) -> None: ...
 
+    async def get_version(self) -> str: ...
+
 
 class ManagedSonarrClientPort(SonarrClientPort, Protocol):
     """Sonarr operations plus runtime lifecycle methods."""
@@ -34,6 +36,8 @@ class ManagedSonarrClientPort(SonarrClientPort, Protocol):
     async def close(self) -> None: ...
 
     async def ping(self) -> None: ...
+
+    async def get_version(self) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -61,6 +65,10 @@ class MultiRadarrClient:
 
     async def ping(self) -> None:
         await asyncio.gather(*(target.client.ping() for target in self._targets))
+
+    async def get_version(self) -> str:
+        versions = await asyncio.gather(*(target.client.get_version() for target in self._targets))
+        return ", ".join(sorted(set(versions)))
 
     async def list_movies(self) -> Sequence[RadarrMovie]:
         catalogs = await asyncio.gather(*(target.client.list_movies() for target in self._targets))
@@ -113,6 +121,10 @@ class MultiSonarrClient:
 
     async def ping(self) -> None:
         await asyncio.gather(*(target.client.ping() for target in self._targets))
+
+    async def get_version(self) -> str:
+        versions = await asyncio.gather(*(target.client.get_version() for target in self._targets))
+        return ", ".join(sorted(set(versions)))
 
     async def list_series(self) -> Sequence[SonarrSeries]:
         catalogs = await asyncio.gather(*(target.client.list_series() for target in self._targets))

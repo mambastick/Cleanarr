@@ -5,17 +5,17 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
-const repositoryBackend = path.resolve(__dirname, '../backend/src')
+const repositoryBackend = path.resolve(import.meta.dirname, '../backend/src')
 const backendSource = existsSync(repositoryBackend)
   ? repositoryBackend
-  : path.resolve(__dirname, '../src')
+  : path.resolve(import.meta.dirname, '../src')
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(import.meta.dirname, './src'),
     },
   },
   server: {

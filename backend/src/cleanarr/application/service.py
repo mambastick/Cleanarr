@@ -43,6 +43,7 @@ class CascadeDeletionService:
                 event=result.event,
                 status=OverallStatus.IGNORED,
                 actions=result.actions,
+                correlation_id=result.correlation_id,
             )
 
         source_guard_result = await self._confirm_source_absent(event)
@@ -70,6 +71,7 @@ class CascadeDeletionService:
                 event=result.event,
                 status=OverallStatus.PARTIAL_FAILURE,
                 actions=result.actions,
+                correlation_id=result.correlation_id,
             )
 
     async def _confirm_source_absent(self, event: MediaDeletionEvent) -> ProcessingResult | None:
@@ -95,6 +97,7 @@ class CascadeDeletionService:
                 event=result.event,
                 status=OverallStatus.PARTIAL_FAILURE,
                 actions=result.actions,
+                correlation_id=result.correlation_id,
             )
 
         current_item = next((item for item in items if self._matches_event(event, item)), None)
@@ -116,6 +119,7 @@ class CascadeDeletionService:
             event=result.event,
             status=OverallStatus.IGNORED,
             actions=result.actions,
+            correlation_id=result.correlation_id,
         )
 
     @staticmethod

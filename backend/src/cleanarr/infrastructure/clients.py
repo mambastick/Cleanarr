@@ -85,10 +85,9 @@ class JsonServiceClient:
         except httpx.TimeoutException as exc:
             raise ExternalServiceError(self._system, f"{self._system} request timed out") from exc
         except httpx.HTTPError as exc:
-            detail = str(exc).strip() or exc.__class__.__name__
             raise ExternalServiceError(
                 self._system,
-                f"{self._system} request failed: {detail}",
+                f"{self._system} request failed ({exc.__class__.__name__}).",
             ) from exc
 
         if response.status_code == 401 or (response.status_code == 403 and treat_forbidden_as_authentication):
@@ -102,17 +101,9 @@ class JsonServiceClient:
                 f"{self._system} resource was already absent.",
             )
         if response.status_code not in expected:
-            location = response.headers.get("location")
-            body = response.text.strip()
-            if location and not body:
-                detail = f"redirected to {location}"
-            elif body:
-                detail = body
-            else:
-                detail = "empty response body"
             raise ExternalServiceError(
                 self._system,
-                f"{self._system} returned unexpected status {response.status_code}: {detail}",
+                f"{self._system} returned unexpected status {response.status_code}.",
             )
         if response.status_code == 204 or not response.content:
             return None
@@ -133,6 +124,10 @@ class RadarrClient(JsonServiceClient):
     async def ping(self) -> None:
         """Verify Radarr connectivity."""
         await self._request("GET", "/system/status")
+
+    async def get_version(self) -> str:
+        payload = await self._request("GET", "/system/status")
+        return str(payload.get("version") or "unknown") if isinstance(payload, dict) else "unknown"
 
     async def list_movies(self) -> Sequence[RadarrMovie]:
         payload = await self._request("GET", "/movie")
@@ -194,6 +189,9 @@ class NullRadarrClient:
     async def ping(self) -> None:
         return None
 
+    async def get_version(self) -> str:
+        return "not configured"
+
     async def list_movies(self) -> Sequence[RadarrMovie]:
         return []
 
@@ -224,6 +222,10 @@ class SonarrClient(JsonServiceClient):
     async def ping(self) -> None:
         """Verify Sonarr connectivity."""
         await self._request("GET", "/system/status")
+
+    async def get_version(self) -> str:
+        payload = await self._request("GET", "/system/status")
+        return str(payload.get("version") or "unknown") if isinstance(payload, dict) else "unknown"
 
     async def list_series(self) -> Sequence[SonarrSeries]:
         payload = await self._request("GET", "/series")
@@ -340,6 +342,9 @@ class NullSonarrClient:
     async def ping(self) -> None:
         return None
 
+    async def get_version(self) -> str:
+        return "not configured"
+
     async def list_series(self) -> Sequence[SonarrSeries]:
         return []
 
@@ -388,6 +393,10 @@ class SeerrClient(JsonServiceClient):
         await self._request("GET", "/auth/me")
         self._build_xsrf_headers()
 
+    async def get_version(self) -> str:
+        payload = await self._request("GET", "/status")
+        return str(payload.get("version") or "unknown") if isinstance(payload, dict) else "unknown"
+
     def _build_xsrf_headers(self, response_cookies: httpx.Cookies | None = None) -> dict[str, str]:
         """Build the complete cookie/header pair required by Seerr's CSRF middleware."""
 
@@ -435,10 +444,9 @@ class SeerrClient(JsonServiceClient):
         except httpx.TimeoutException as exc:
             raise ExternalServiceError(self._system, f"{self._system} request timed out") from exc
         except httpx.HTTPError as exc:
-            detail = str(exc).strip() or exc.__class__.__name__
             raise ExternalServiceError(
                 self._system,
-                f"{self._system} request failed: {detail}",
+                f"{self._system} request failed ({exc.__class__.__name__}).",
             ) from exc
 
         if response.status_code in {401, 403}:
@@ -611,6 +619,9 @@ class NullSeerrClient:
     async def ping(self) -> None:
         return None
 
+    async def get_version(self) -> str:
+        return "not configured"
+
     async def list_media(self) -> Sequence[SeerrMedia]:
         return []
 
@@ -686,7 +697,10 @@ class QbittorrentClient:
                 data={"username": self._username, "password": self._password},
             )
         except httpx.HTTPError as exc:
-            raise ExternalServiceError(self._system, f"qBittorrent login failed: {exc}") from exc
+            raise ExternalServiceError(
+                self._system,
+                f"qBittorrent login failed ({exc.__class__.__name__}).",
+            ) from exc
 
         if response.status_code == 204:
             return
@@ -705,14 +719,17 @@ class QbittorrentClient:
         try:
             response = await self._client.get("/api/v2/app/version")
         except httpx.HTTPError as exc:
-            raise ExternalServiceError(self._system, f"qBittorrent ping failed: {exc}") from exc
+            raise ExternalServiceError(
+                self._system,
+                f"qBittorrent ping failed ({exc.__class__.__name__}).",
+            ) from exc
 
         if response.status_code in {401, 403}:
             raise AuthenticationError(self._system, "qBittorrent rejected the configured credentials.")
         if response.status_code >= 400:
             raise ExternalServiceError(
                 self._system,
-                f"qBittorrent returned unexpected status {response.status_code}: {response.text}",
+                f"qBittorrent returned unexpected status {response.status_code}.",
             )
         return response.text.strip() or "unknown"
 
@@ -767,14 +784,17 @@ class QbittorrentClient:
                 params={"hashes": "|".join(hashes)},
             )
         except httpx.HTTPError as exc:
-            raise ExternalServiceError(self._system, f"qBittorrent torrent lookup failed: {exc}") from exc
+            raise ExternalServiceError(
+                self._system,
+                f"qBittorrent torrent lookup failed ({exc.__class__.__name__}).",
+            ) from exc
 
         if response.status_code in {401, 403}:
             raise AuthenticationError(self._system, "qBittorrent rejected the configured credentials.")
         if response.status_code >= 400:
             raise ExternalServiceError(
                 self._system,
-                f"qBittorrent returned unexpected status {response.status_code}: {response.text}",
+                f"qBittorrent returned unexpected status {response.status_code}.",
             )
         try:
             payload = response.json()
@@ -808,14 +828,17 @@ class QbittorrentClient:
                 data={"hashes": "|".join(sorted(hashes)), "deleteFiles": str(delete_files).lower()},
             )
         except httpx.HTTPError as exc:
-            raise ExternalServiceError(self._system, f"qBittorrent delete failed: {exc}") from exc
+            raise ExternalServiceError(
+                self._system,
+                f"qBittorrent delete failed ({exc.__class__.__name__}).",
+            ) from exc
 
         if response.status_code in {401, 403}:
             raise AuthenticationError(self._system, "qBittorrent rejected the configured credentials.")
         if response.status_code >= 400:
             raise ExternalServiceError(
                 self._system,
-                f"qBittorrent returned unexpected status {response.status_code}: {response.text}",
+                f"qBittorrent returned unexpected status {response.status_code}.",
             )
 
     def _result(
@@ -853,6 +876,10 @@ class JellyfinServerClient(JsonServiceClient):
     async def ping(self) -> None:
         """Verify Jellyfin connectivity."""
         await self._request("GET", "/System/Ping", expected_statuses={200, 204})
+
+    async def get_version(self) -> str:
+        payload = await self._request("GET", "/System/Info")
+        return str(payload.get("Version") or "unknown") if isinstance(payload, dict) else "unknown"
 
     async def list_items(
         self,
@@ -994,6 +1021,9 @@ class NullJellyfinServerClient:
 
     async def ping(self) -> None:
         return None
+
+    async def get_version(self) -> str:
+        return "not configured"
 
     async def list_items(
         self,

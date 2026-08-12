@@ -38,7 +38,27 @@ git push origin main vX.Y.Z
 - собирает и публикует GHCR-образ для `linux/amd64` и `linux/arm64`;
 - собирает DEB и RPM для `amd64` и `arm64` на нативных runner-ах;
 - создаёт или обновляет GitHub Release из `docs/releases/vX.Y.Z.md`;
-- прикладывает пакеты и `SHA256SUMS`.
+- прикладывает пакеты, SPDX JSON SBOM и `SHA256SUMS`;
+- создаёт подписанные GitHub artifact attestations для release files и
+  build/SBOM attestations для digest GHCR-образа.
+
+Обязательный quality workflow завершается ошибкой при исправимых high/critical
+уязвимостях dependencies или container, committed secrets и high/critical
+ошибках deployment configuration, обнаруженных Trivy. Релиз нельзя публиковать
+в обход красного scan.
+
+## Проверка скачанных артефактов
+
+```bash
+sha256sum --check SHA256SUMS
+gh attestation verify cleanarr_X.Y.Z_amd64.deb -R mambastick/Cleanarr
+gh attestation verify oci://ghcr.io/mambastick/cleanarr:X.Y.Z -R mambastick/Cleanarr
+```
+
+Checksum подтверждает соответствие файла release manifest. Attestation
+дополнительно связывает digest артефакта или образа с этим репозиторием,
+коммитом и build identity GitHub Actions. SPDX JSON files в release assets
+описывают dependency sets контейнера и native packages.
 
 Не переносите и не пересоздавайте опубликованный тег. Для восстановления публикации артефактов используйте ручной запуск с существующим тегом и предварительно убедитесь, что версия исходного кода совпадает.
 
@@ -50,4 +70,7 @@ gh workflow run docker-release.yml \
   -f publish=true
 ```
 
-Команда собирает нативные пакеты из текущей default-ветки. Используйте её только если ветка всё ещё содержит точную версию приложения из тега.
+Команда собирает нативные пакеты из текущей default-ветки. Используйте её только
+если ветка всё ещё содержит точную версию приложения из тега. Manual recovery
+не публикует контейнер повторно; сохраните и проверьте исходные attestations,
+привязанные к его digest.
