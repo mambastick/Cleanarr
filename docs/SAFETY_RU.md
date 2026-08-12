@@ -85,4 +85,3 @@ volume; horizontal scaling и PostgreSQL/HA не входят в контрак�
 [Torrent-клиенты](TORRENT_CLIENTS_RU.md), [Эксплуатация](OPERATIONS_RU.md),
 [Диагностика](TROUBLESHOOTING_RU.md) и
 [Матрица совместимости](COMPATIBILITY_RU.md).
-

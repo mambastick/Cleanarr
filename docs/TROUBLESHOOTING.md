@@ -88,4 +88,3 @@ secret pasted into a free-form name or external error.
 
 Never attach the live database, environment file, tokens, cookies, private
 service URLs, or an unreviewed debug log to a public issue.
-

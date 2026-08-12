@@ -81,4 +81,3 @@ Before enabling mutations:
 See [Torrent clients](TORRENT_CLIENTS.md), [Operations](OPERATIONS.md),
 [Troubleshooting](TROUBLESHOOTING.md), and the
 [compatibility matrix](COMPATIBILITY.md) for the concrete service contracts.
-

@@ -91,4 +91,3 @@ CleanArr/dependencies, health summary, structured error code, correlation ID,
 
 Никогда не прикладывайте к публичному issue рабочую БД, environment file,
 tokens, cookies, приватные service URLs или непроверенный debug log.
-
