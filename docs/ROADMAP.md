@@ -79,6 +79,10 @@ issue, pull request, or release decision.
 - Verified commit `b2b5ae2` with 73 backend tests, Ruff format/lint, strict
   mypy, ESLint, frontend production build, package/container smoke tests, and a
   browser walkthrough of mixed downloader configuration.
+- Published the verified [v0.3.0 release](https://github.com/mambastick/Cleanarr/releases/tag/v0.3.0)
+  from commit `894b393`; its [release workflow](https://github.com/mambastick/Cleanarr/actions/runs/31550224512)
+  completed successfully with DEB/RPM assets and a GHCR image for
+  `linux/amd64` and `linux/arm64`.
 
 The next active milestone is **v0.4.0**: complete deletion/Seerr flows,
 idempotent webhook handling, and durable retry scheduling.

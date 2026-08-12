@@ -79,6 +79,9 @@ CleanArr 1.0 — стабильный и безопасный оркестрат
 - Коммит `b2b5ae2` проверен 73 backend-тестами, Ruff format/lint, strict mypy,
   ESLint, production build frontend, package/container smoke-тестами и
   browser-проходом настройки смешанного набора downloader-клиентов.
+- Проверенный [релиз v0.3.0](https://github.com/mambastick/Cleanarr/releases/tag/v0.3.0)
+  опубликован из коммита `894b393`; его [release workflow](https://github.com/mambastick/Cleanarr/actions/runs/31550224512)
+  успешно завершён с DEB/RPM и GHCR-образом для `linux/amd64` и `linux/arm64`.
 
 Следующий активный этап — **v0.4.0**: завершение deletion/Seerr flows,
 идемпотентная обработка webhook и durable retry scheduling.
