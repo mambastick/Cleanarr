@@ -10,7 +10,7 @@ import logging
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote, urlencode
 from uuid import UUID
 
@@ -69,6 +69,7 @@ from cleanarr.api.library_schemas import (
 )
 from cleanarr.api.schemas import JellyfinWebhookPayload, ProcessingResultResponse, WebhookBatchResponse
 from cleanarr.application.results import observe_actions
+from cleanarr.application.service import CascadeDeletionService
 from cleanarr.domain import (
     ActionResult,
     ActionStatus,
@@ -1275,7 +1276,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                 detail="Invalid Jellyfin webhook payload",
             ) from exc
 
-        service = request.app.state.container.service
+        service = cast(CascadeDeletionService, request.app.state.container.service)
 
         async def process_and_record(event: MediaDeletionEvent) -> ProcessingResult:
             result = await service.process(event)
