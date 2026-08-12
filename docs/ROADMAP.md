@@ -64,10 +64,7 @@ issue, pull request, or release decision.
   from commit `9782504`; its [release workflow](https://github.com/mambastick/Cleanarr/actions/runs/31510458986)
   completed successfully for `linux/amd64` and `linux/arm64`.
 
-The next active milestone is **v0.3.0**: the Tier 1 torrent adapter contract,
-Transmission/Deluge/rTorrent support, and simultaneous multi-instance routing.
-
-### v0.3.0 — implementation in progress
+### v0.3.0 — completed 2026-08-12
 
 - Added qBittorrent, Transmission legacy/JSON-RPC 2.0, Deluge Web JSON-RPC, and
   rTorrent XML-RPC adapters behind one removal contract.
@@ -79,6 +76,12 @@ Transmission/Deluge/rTorrent support, and simultaneous multi-instance routing.
 - Added full service inventory/configuration UI and protocol-level automated
   contract coverage. Real-service compatibility certification remains a v0.9
   release-candidate gate.
+- Verified commit `b2b5ae2` with 73 backend tests, Ruff format/lint, strict
+  mypy, ESLint, frontend production build, package/container smoke tests, and a
+  browser walkthrough of mixed downloader configuration.
+
+The next active milestone is **v0.4.0**: complete deletion/Seerr flows,
+idempotent webhook handling, and durable retry scheduling.
 
 ## Required 1.0 scope
 

@@ -65,11 +65,7 @@ CleanArr 1.0 — стабильный и безопасный оркестрат
   опубликован из коммита `9782504`; его [release workflow](https://github.com/mambastick/Cleanarr/actions/runs/31510458986)
   успешно завершён для `linux/amd64` и `linux/arm64`.
 
-Следующий активный этап — **v0.3.0**: контракт Tier 1 torrent adapters,
-поддержка Transmission/Deluge/rTorrent и одновременная multi-instance
-маршрутизация.
-
-### v0.3.0 — реализация продолжается
+### v0.3.0 — завершён 2026-08-12
 
 - Добавлены адаптеры qBittorrent, Transmission legacy/JSON-RPC 2.0, Deluge Web
   JSON-RPC и rTorrent XML-RPC за единым контрактом удаления.
@@ -80,6 +76,12 @@ CleanArr 1.0 — стабильный и безопасный оркестрат
   этапа v0.4.0.
 - Добавлены полный UI настройки профилей и автоматизированные protocol contract
   tests. Сертификация на реальных версиях сервисов остаётся gate этапа v0.9.
+- Коммит `b2b5ae2` проверен 73 backend-тестами, Ruff format/lint, strict mypy,
+  ESLint, production build frontend, package/container smoke-тестами и
+  browser-проходом настройки смешанного набора downloader-клиентов.
+
+Следующий активный этап — **v0.4.0**: завершение deletion/Seerr flows,
+идемпотентная обработка webhook и durable retry scheduling.
 
 ## Обязательный scope 1.0
 
