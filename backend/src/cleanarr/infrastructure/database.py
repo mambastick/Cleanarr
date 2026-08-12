@@ -48,6 +48,19 @@ MIGRATIONS = (
             ")",
         ),
     ),
+    DatabaseMigration(
+        version=2,
+        statements=(
+            "CREATE TABLE IF NOT EXISTS processed_webhook_events ("
+            " event_key TEXT PRIMARY KEY,"
+            " received_at TEXT NOT NULL,"
+            " completed_at TEXT,"
+            " event_json TEXT NOT NULL,"
+            " result_json TEXT"
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_webhook_event_completed_at ON processed_webhook_events(completed_at)",
+        ),
+    ),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

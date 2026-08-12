@@ -117,12 +117,22 @@ CleanArr 1.0 — стабильный и безопасный оркестрат
   БД v0.3. Автотесты проверяют обновление, повторный запуск, отклонение более
   новой схемы, проверенный backup и restore без потери config/activity; команды
   rollback для контейнера и нативных пакетов документированы на двух языках.
-- Срез preflight/durable jobs локально проверен 87 backend-тестами, Ruff
-  format/lint, strict mypy, ESLint, production build frontend, container и
-  установленными DEB/RPM smoke-тестами, а также browser-проходом просмотра
-  плана и отправки с его hash.
-- В этапе остаются подавление duplicate events и сериализованные ownership locks
-  для media entities, torrent hashes и paths.
+- Коммит `c1ed854` проверен 87 backend-тестами, Ruff format/lint, strict mypy,
+  ESLint, production build frontend, container и установленными DEB/RPM
+  smoke-тестами, а также browser-проходом просмотра плана и отправки с его
+  hash. Его [quality run](https://github.com/mambastick/Cleanarr/actions/runs/31559076267)
+  успешно завершил все обязательные jobs.
+- Версия 2 схемы SQLite добавляет персистентный ledger webhook events. Успешное
+  событие подавляется семь дней в памяти и после рестарта; partial failure и
+  ignored намеренно не завершаются, потому что состояние source/downstream
+  может измениться. Новый source timestamp создаёт новый event key.
+- Единый process-wide safety lock сериализует webhook, фоновые ручные задания и
+  старый синхронный endpoint. Консервативный single-instance дизайн исключает
+  пересечение работы с одним media entity, torrent hash или path;
+  PostgreSQL/HA не входит в границы продукта 1.0.
+- Срез duplicate/serialization локально проверен 96 backend-тестами, Ruff
+  format/lint, strict mypy, ESLint и production build frontend. После этого
+  implementation scope v0.4 завершён; остаётся выпустить проверенный v0.4.0.
 
 ## Обязательный scope 1.0
 

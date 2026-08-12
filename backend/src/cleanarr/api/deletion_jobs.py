@@ -90,6 +90,7 @@ class ManualDeletionJobStore:
         history_limit: int = 50,
         max_attempts: int = 3,
         retry_delays_seconds: Sequence[float] = (5.0, 30.0),
+        execution_lock: asyncio.Lock | None = None,
     ) -> None:
         self._resolver = resolver
         self._previewer = previewer
@@ -98,6 +99,7 @@ class ManualDeletionJobStore:
         self._history_limit = history_limit
         self._max_attempts = max(1, max_attempts)
         self._retry_delays_seconds = tuple(max(0.0, delay) for delay in retry_delays_seconds) or (0.0,)
+        self._execution_lock = execution_lock or asyncio.Lock()
         self._jobs: dict[UUID, _DeletionJob] = {}
         self._queue: asyncio.Queue[UUID] = asyncio.Queue()
         self._scheduled: set[UUID] = set()
@@ -243,18 +245,19 @@ class ManualDeletionJobStore:
             self._save_job_sync(job)
 
         try:
-            current_plan = await self._previewer(job.request, job.event)
-            if first_attempt and _plan_hash(current_plan) != _plan_hash(job.preflight):
-                self._mark_failed(
-                    job,
-                    "The deletion plan changed while the job was queued. Preview it and confirm again.",
-                )
+            async with self._execution_lock:
+                current_plan = await self._previewer(job.request, job.event)
+                if first_attempt and _plan_hash(current_plan) != _plan_hash(job.preflight):
+                    self._mark_failed(
+                        job,
+                        "The deletion plan changed while the job was queued. Preview it and confirm again.",
+                    )
+                    self._save_job_sync(job)
+                    return
+                job.progress_percent = max(job.progress_percent, 20)
+                job.message = "Preflight verified; starting cleanup."
                 self._save_job_sync(job)
-                return
-            job.progress_percent = max(job.progress_percent, 20)
-            job.message = "Preflight verified; starting cleanup."
-            self._save_job_sync(job)
-            result = await self._runner(job.request, job.event, report)
+                result = await self._runner(job.request, job.event, report)
         except asyncio.CancelledError:
             raise
         except HTTPException as exc:
@@ -465,22 +468,7 @@ class ManualDeletionJobStore:
 
 
 def _event_to_json(event: MediaDeletionEvent) -> str:
-    return JellyfinWebhookPayload(
-        notification_type=event.notification_type,
-        item_type=event.item_type,
-        item_id=event.item_id,
-        name=event.name,
-        path=event.fingerprint.path,
-        tmdb_id=event.fingerprint.tmdb_id,
-        tvdb_id=event.fingerprint.tvdb_id,
-        imdb_id=event.fingerprint.imdb_id,
-        series_name=event.series_name,
-        series_id=event.series_id,
-        season_number=event.season_number,
-        episode_number=event.episode_number,
-        episode_end_number=event.episode_end_number,
-        occurred_at=event.occurred_at,
-    ).model_dump_json()
+    return JellyfinWebhookPayload.from_domain(event).model_dump_json()
 
 
 def _datetime_to_text(value: datetime | None) -> str | None:

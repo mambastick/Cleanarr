@@ -97,6 +97,7 @@ Pack torrents, shared files, and anything that can't be safely attributed are al
 - **Conservative guardrails** — pack torrents and files shared between items are never deleted; CleanArr logs the reason and skips
 - **Confirmed preflight** — enabled before every manual deletion; shows exact media IDs, Arr instance, torrent client/hash/path, downstream mutations, and safety skips
 - **Durable background cleanup** — manual jobs, partial results, and retry state survive process restarts and report live step-by-step progress
+- **Idempotent execution** — completed Jellyfin deliveries are suppressed for seven days, partial failures remain retryable, and one safety lock serializes all destructive work in a CleanArr instance
 - **Live health monitoring** — probes all connected services every 30 s; status visible on the dashboard
 - **Webhook auto-configure** — one-click setup of the Jellyfin Webhook plugin directly from the UI
 - **Activity log** — every processed event is stored with full action breakdown; searchable by title, system, action, or status

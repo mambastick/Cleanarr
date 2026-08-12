@@ -228,6 +228,42 @@ async def test_partial_failure_replans_and_retries_to_completion(tmp_path: Path)
 
 
 @pytest.mark.asyncio
+async def test_manual_job_uses_shared_execution_lock(tmp_path: Path) -> None:
+    execution_lock = asyncio.Lock()
+    await execution_lock.acquire()
+    runner_started = asyncio.Event()
+
+    async def runner(payload, event, report):  # type: ignore[no-untyped-def]
+        runner_started.set()
+        return _result(event)
+
+    store = ManualDeletionJobStore(
+        _resolver,
+        _previewer,
+        runner,
+        db_path=tmp_path / "cleanarr.db",
+        execution_lock=execution_lock,
+    )
+    request = await _confirmed_request(
+        store,
+        ManualDeleteRequest(item_type=ItemType.MOVIE, radarr_movie_id=1),
+    )
+    queued = await store.submit(request)
+
+    try:
+        await _wait_for_status(store, queued.id, ManualDeleteJobStatus.RUNNING)
+        await asyncio.sleep(0.02)
+        assert runner_started.is_set() is False
+        execution_lock.release()
+        await _wait_for_status(store, queued.id, ManualDeleteJobStatus.COMPLETED)
+        assert runner_started.is_set() is True
+    finally:
+        if execution_lock.locked():
+            execution_lock.release()
+        await store.stop()
+
+
+@pytest.mark.asyncio
 async def test_process_restart_resumes_from_persisted_event(tmp_path: Path) -> None:
     db_path = tmp_path / "cleanarr.db"
     runner_started = asyncio.Event()

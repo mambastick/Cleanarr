@@ -259,6 +259,58 @@ async def test_webhook_endpoint_accepts_array_payloads(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_webhook_endpoint_suppresses_completed_duplicate_delivery(tmp_path: Path) -> None:
+    result = ProcessingResult(
+        event=MediaDeletionEvent(
+            notification_type="ItemDeleted",
+            item_type=ItemType.MOVIE,
+            item_id="duplicate-movie",
+            name="Duplicate Movie",
+            fingerprint=MediaFingerprint(tmdb_id=77),
+        ),
+        status=OverallStatus.SUCCESS,
+        actions=(
+            ActionResult(
+                system="radarr",
+                action="delete_movie",
+                status=ActionStatus.DELETED,
+                message="ok",
+            ),
+        ),
+    )
+    service = FakeService(results=[result])
+    app = create_app(container=FakeContainer(service, db_path=tmp_path / "cleanarr.db"))
+    payload = {
+        "notification_type": "ItemDeleted",
+        "item_type": "Movie",
+        "item_id": "duplicate-movie",
+        "name": "Duplicate Movie",
+        "tmdb_id": 77,
+        "occurred_at": "2026-08-12T03:00:00Z",
+    }
+
+    async with app_client(app) as client:
+        first = await client.post(
+            "/webhook/jellyfin",
+            headers={"X-Webhook-Token": "secret-token"},
+            json=payload,
+        )
+        second = await client.post(
+            "/webhook/jellyfin",
+            headers={"X-Webhook-Token": "secret-token"},
+            json=payload,
+        )
+        dashboard = await client.get("/api/dashboard")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    assert len(service.seen_events) == 1
+    assert len(dashboard.json()["recent_activity"]) == 1
+    assert "suppressed 1 completed duplicate" in dashboard.json()["webhook_status"]["message"]
+
+
+@pytest.mark.asyncio
 async def test_webhook_endpoint_rejects_bad_token(tmp_path: Path) -> None:
     service = FakeService(results=[])
     app = create_app(container=FakeContainer(service, db_path=tmp_path / "cleanarr.db"))

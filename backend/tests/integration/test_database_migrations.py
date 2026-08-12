@@ -9,6 +9,7 @@ import pytest
 
 from cleanarr.infrastructure.database import (
     LATEST_SCHEMA_VERSION,
+    MIGRATIONS,
     UnsupportedDatabaseVersionError,
     migrate_database,
 )
@@ -88,3 +89,24 @@ def test_newer_schema_is_rejected_without_mutation(tmp_path: Path) -> None:
 
     with sqlite3.connect(db_path) as connection:
         assert connection.execute("PRAGMA user_version").fetchone() == (LATEST_SCHEMA_VERSION + 1,)
+
+
+def test_v1_manual_job_schema_upgrades_to_event_ledger_without_data_loss(tmp_path: Path) -> None:
+    db_path = tmp_path / "v1.db"
+    with sqlite3.connect(db_path) as connection:
+        for statement in MIGRATIONS[0].statements:
+            connection.execute(statement)
+        connection.execute("PRAGMA user_version = 1")
+        connection.execute(
+            "INSERT INTO config (id, config_json) VALUES (1, ?)",
+            ('{"general":{"dry_run":true}}',),
+        )
+        connection.commit()
+
+    assert migrate_database(db_path) == LATEST_SCHEMA_VERSION
+
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute("SELECT config_json FROM config WHERE id = 1").fetchone() == (
+            '{"general":{"dry_run":true}}',
+        )
+    assert {"manual_delete_jobs", "processed_webhook_events"} <= _table_names(db_path)

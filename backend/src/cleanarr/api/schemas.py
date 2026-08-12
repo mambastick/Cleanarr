@@ -99,6 +99,27 @@ class JellyfinWebhookPayload(BaseModel):
             occurred_at=self.occurred_at,
         )
 
+    @classmethod
+    def from_domain(cls, event: MediaDeletionEvent) -> JellyfinWebhookPayload:
+        """Serialize a domain event without losing idempotency fields."""
+
+        return cls(
+            notification_type=event.notification_type,
+            item_type=event.item_type,
+            item_id=event.item_id,
+            name=event.name,
+            path=event.fingerprint.path,
+            tmdb_id=event.fingerprint.tmdb_id,
+            tvdb_id=event.fingerprint.tvdb_id,
+            imdb_id=event.fingerprint.imdb_id,
+            series_name=event.series_name,
+            series_id=event.series_id,
+            season_number=event.season_number,
+            episode_number=event.episode_number,
+            episode_end_number=event.episode_end_number,
+            occurred_at=event.occurred_at,
+        )
+
 
 class ActionResultResponse(BaseModel):
     """Serialized action result."""
@@ -161,6 +182,25 @@ class ProcessingResultResponse(BaseModel):
             episode_number=result.event.episode_number,
             episode_end_number=result.event.episode_end_number,
             actions=[ActionResultResponse.from_domain(action) for action in result.actions],
+        )
+
+    def to_domain(self, event: MediaDeletionEvent) -> ProcessingResult:
+        """Restore a cached result for its persisted source event."""
+
+        return ProcessingResult(
+            event=event,
+            status=self.status,
+            actions=tuple(
+                ActionResult(
+                    system=action.system,
+                    action=action.action,
+                    status=action.status,
+                    message=action.message,
+                    reason=action.reason,
+                    details=action.details,
+                )
+                for action in self.actions
+            ),
         )
 
 

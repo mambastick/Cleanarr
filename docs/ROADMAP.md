@@ -118,12 +118,24 @@ idempotent webhook handling, and durable retry scheduling.
   v0.3 database. Automated upgrade, idempotent re-run, newer-schema rejection,
   verified backup, and restore tests protect existing config/activity data;
   container and native rollback commands are documented in both languages.
-- The preflight/durable-job slice is locally verified by 87 backend tests,
-  Ruff format/lint, strict mypy, ESLint, the frontend production build,
-  container and installed DEB/RPM smoke tests, plus a browser walkthrough of
-  plan review and hash-bound submission.
-- Remaining milestone work is duplicate-event suppression and serialized
-  ownership locks for media entities, torrent hashes, and paths.
+- Commit `c1ed854` is verified by 87 backend tests, Ruff format/lint, strict
+  mypy, ESLint, the frontend production build, container and installed DEB/RPM
+  smoke tests, plus a browser walkthrough of plan review and hash-bound
+  submission. Its [quality run](https://github.com/mambastick/Cleanarr/actions/runs/31559076267)
+  completed all required jobs successfully.
+- SQLite schema version 2 adds a persistent webhook event ledger. A successful
+  delivery is suppressed for seven days in memory and across restarts; partial
+  failures and ignored outcomes are deliberately not completed because their
+  source/downstream state may change. A new source timestamp produces a new
+  event key.
+- One process-wide safety lock now serializes webhook, queued manual, and legacy
+  synchronous mutations. This conservative single-instance design prevents
+  overlap for the same media entity, torrent hash, or path; PostgreSQL/HA is
+  outside the 1.0 product boundary.
+- The duplicate/serialization slice is locally verified by 96 backend tests,
+  Ruff format/lint, strict mypy, ESLint, and the frontend production build.
+  With this slice, v0.4 implementation scope is complete; the remaining step is
+  the verified v0.4.0 release itself.
 
 ## Required 1.0 scope
 

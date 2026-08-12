@@ -54,6 +54,7 @@ from cleanarr.api.deletion_jobs import (
     ManualDeletionJobStore,
     validate_plan_confirmation,
 )
+from cleanarr.api.event_processing import DeletionExecutionCoordinator
 from cleanarr.api.library_schemas import (
     LibraryMoviesResponse,
     LibrarySeriesResponse,
@@ -275,6 +276,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     )
     webhook_attempt_store = WebhookAttemptStore()
     health_probe_store = HealthProbeStore()
+    execution_coordinator = DeletionExecutionCoordinator(Path(settings.db_path))
     static_dir = Path(__file__).resolve().parents[1] / "ui" / "static"
 
     async def resolve_manual_delete(payload: ManualDeleteRequest) -> MediaDeletionEvent:
@@ -485,16 +487,19 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         preview_manual_delete,
         execute_manual_delete,
         db_path=Path(settings.db_path),
+        execution_lock=execution_coordinator.lock,
     )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> Any:
+        await execution_coordinator.initialize()
         await activity_store.initialize()
         app.state.container = resolved_container
         app.state.activity_store = activity_store
         app.state.webhook_attempt_store = webhook_attempt_store
         app.state.health_probe_store = health_probe_store
         app.state.deletion_jobs = deletion_jobs
+        app.state.execution_coordinator = execution_coordinator
         await deletion_jobs.start()
         probe_task = asyncio.create_task(_health_probe_loop(resolved_container, health_probe_store))
         try:
@@ -513,6 +518,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     app.state.webhook_attempt_store = webhook_attempt_store
     app.state.health_probe_store = health_probe_store
     app.state.deletion_jobs = deletion_jobs
+    app.state.execution_coordinator = execution_coordinator
 
     @app.get("/health/live")
     async def health_live() -> dict[str, str]:
@@ -1270,15 +1276,31 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
             ) from exc
 
         service = request.app.state.container.service
-        results = [await service.process(item.to_domain()) for item in webhook_payloads]
-        for result in results:
+
+        async def process_and_record(event: MediaDeletionEvent) -> ProcessingResult:
+            result = await service.process(event)
             await request.app.state.activity_store.record(result)
+            return result
+
+        results: list[ProcessingResult] = []
+        duplicate_count = 0
+        for item in webhook_payloads:
+            result, duplicate = await execution_coordinator.process_webhook(
+                item.to_domain(),
+                process_and_record,
+            )
+            results.append(result)
+            if duplicate:
+                duplicate_count += 1
         batch_response = WebhookBatchResponse.from_results(results)
         first_payload = webhook_payloads[0]
         request.app.state.webhook_attempt_store.record(
             outcome="processed",
             http_status=status.HTTP_200_OK,
-            message=f"Processed {len(results)} Jellyfin event(s). Overall status: {batch_response.status}.",
+            message=(
+                f"Processed {len(results)} Jellyfin event(s); suppressed {duplicate_count} completed duplicate(s). "
+                f"Overall status: {batch_response.status}."
+            ),
             payload_event_count=len(payload_list),
             notification_type=first_payload.notification_type,
             item_type=first_payload.item_type,
@@ -1592,16 +1614,17 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         include_in_schema=False,
     )
     async def manual_delete(payload: ManualDeleteRequest) -> ProcessingResultResponse:
-        event = await resolve_manual_delete(payload)
-        plan = await preview_manual_delete(payload, event)
-        try:
-            validate_plan_confirmation(payload, plan)
-        except DeletionPreflightError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=str(exc),
-            ) from exc
-        return await execute_manual_delete(payload, event)
+        async with execution_coordinator.lock:
+            event = await resolve_manual_delete(payload)
+            plan = await preview_manual_delete(payload, event)
+            try:
+                validate_plan_confirmation(payload, plan)
+            except DeletionPreflightError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=str(exc),
+                ) from exc
+            return await execute_manual_delete(payload, event)
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa(full_path: str) -> FileResponse:
