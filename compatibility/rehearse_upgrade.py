@@ -157,7 +157,7 @@ def _remove_container(name: str) -> None:
     )
 
 
-def _seed_source_data(source: SourceRelease, database: Path) -> None:
+def _seed_source_data(container_name: str, source: SourceRelease) -> None:
     activity = {
         "correlation_id": f"upgrade-activity-{source.version}",
         "item_type": "Movie",
@@ -166,17 +166,30 @@ def _seed_source_data(source: SourceRelease, database: Path) -> None:
         "ignored_reason": "upgrade rehearsal fixture",
         "actions": [],
     }
-    with sqlite3.connect(database) as connection:
-        connection.execute(
-            "INSERT INTO config (id, config_json) VALUES (1, ?) "
-            "ON CONFLICT(id) DO UPDATE SET config_json = excluded.config_json",
-            (json.dumps(source.config, separators=(",", ":")),),
-        )
-        connection.execute(
-            "INSERT INTO activity (processed_at, result_json) VALUES (?, ?)",
-            ("2026-08-12T00:00:00+00:00", json.dumps(activity, separators=(",", ":"))),
-        )
-        connection.commit()
+    script = (
+        "import os,sqlite3,sys;"
+        "database='/config/cleanarr.db';"
+        "connection=sqlite3.connect(database);"
+        "connection.execute("
+        '"INSERT INTO config (id, config_json) VALUES (1, ?) "'
+        '"ON CONFLICT(id) DO UPDATE SET config_json = excluded.config_json",'
+        "(sys.argv[1],));"
+        "connection.execute("
+        '"INSERT INTO activity (processed_at, result_json) VALUES (?, ?)",'
+        "('2026-08-12T00:00:00+00:00',sys.argv[2]));"
+        "connection.commit();"
+        "connection.close();"
+        "os.chmod(database,0o666)"
+    )
+    _docker(
+        "exec",
+        container_name,
+        "python",
+        "-c",
+        script,
+        json.dumps(source.config, separators=(",", ":")),
+        json.dumps(activity, separators=(",", ":")),
+    )
 
 
 def _database_digest(path: Path) -> str:
@@ -233,13 +246,9 @@ def _rehearse(source: SourceRelease, candidate_image: str, work_dir: Path) -> No
 
     try:
         _start_container(source_name, source.image, state_dir)
+        _seed_source_data(source_name, source)
         _remove_container(source_name)
         database = state_dir / "cleanarr.db"
-        # Released images create the database as their container UID, which is
-        # not guaranteed to match the hosted runner UID. This directory is an
-        # isolated disposable fixture; allow the runner to seed its test state.
-        os.chmod(database, 0o666)
-        _seed_source_data(source, database)
         _assert_source_state(source, database)
 
         shutil.copytree(state_dir, backup_dir)
