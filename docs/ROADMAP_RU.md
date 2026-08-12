@@ -137,8 +137,33 @@ CleanArr 1.0 — стабильный и безопасный оркестрат
   успешно завершён с checksums, DEB/RPM для amd64 и arm64 и публичным GHCR-
   манифестом для `linux/amd64` и `linux/arm64`.
 
-Следующий активный этап — **v0.5.0**: завершение data lifecycle и security
-baseline, затем добавление метрик и безопасного support tooling.
+### v0.5.0 — в работе
+
+- Persisted runtime config получил упорядоченную цепочку схем от
+  неверсионированного формата v0.4 через версии 1 и 2. Upgrade-тесты сохраняют
+  локального администратора и настройки OIDC client, подтверждают fail-closed
+  policy defaults, проверяют backup/restore SQLite до обновления и отклоняют
+  будущую версию config без перезаписи.
+- OIDC authorization-code login теперь проверяет точный discovery issuer и
+  HTTPS endpoints, ограниченный размер metadata/JWKS, асимметричную подпись и
+  алгоритм ID token, issuer, audience, срок действия, issued-at, nonce и `azp`
+  при нескольких audience. PKCE S256 и одноразовый state с привязкой к browser
+  обязательны; access token никогда не принимается как ID token.
+- Для администрирования через OIDC обязательна явная policy по пользователю,
+  группе или required claim. Локальный вход ограничивает попытки по source и
+  account. Browser sessions используют семидневную `HttpOnly`,
+  `SameSite=Strict` cookie, отдельный CSRF token, same-origin проверки мутаций и
+  документированный `Secure` за reverse proxy; dashboard больше не публичен,
+  включены базовые security headers.
+- Коммит реализации `e493502` проверен 109 backend-тестами, Ruff format/lint,
+  strict mypy, ESLint, production build frontend, browser-проходом регистрации,
+  настроек и logout, container smoke и установочными smoke-тестами DEB/RPM. Его
+  [quality run](https://github.com/mambastick/Cleanarr/actions/runs/31563074725)
+  успешно завершил все обязательные jobs.
+
+В v0.5 остаются редактированные export/import конфигурации и support bundle,
+privacy-safe metrics, покрытие редактирования credentials, dependency/container
+scanning, генерация SBOM и подписанные release artifacts с provenance.
 
 ## Обязательный scope 1.0
 

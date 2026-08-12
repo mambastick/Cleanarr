@@ -139,8 +139,32 @@ issue, pull request, or release decision.
   completed successfully with checksums, amd64/arm64 DEB and RPM assets, and a
   public GHCR manifest for `linux/amd64` and `linux/arm64`.
 
-The next active milestone is **v0.5.0**: complete the data lifecycle and
-security baseline, then add metrics and redacted support tooling.
+### v0.5.0 — in progress
+
+- Persisted runtime configuration now has an ordered schema chain from the
+  unversioned v0.4 format through versions 1 and 2. Upgrade tests preserve the
+  local administrator and OIDC client settings, prove fail-closed policy
+  defaults, verify a pre-upgrade SQLite backup/restore, and reject future
+  config versions without rewriting them.
+- OIDC authorization-code login now validates exact discovery issuer and HTTPS
+  endpoints, bounded metadata/JWKS responses, asymmetric ID-token signature and
+  algorithm, issuer, audience, expiry, issued-at, nonce, and multi-audience
+  `azp`. PKCE S256 and a browser-bound, one-time state are mandatory; an access
+  token is never treated as an ID token.
+- Administration through OIDC requires an explicit user, group, or required
+  claim policy. Local login has source/account throttling. Browser sessions use
+  a seven-day `HttpOnly`, `SameSite=Strict` cookie, per-session CSRF tokens,
+  same-origin mutation checks, and documented reverse-proxy `Secure` behavior;
+  the dashboard is no longer public and baseline security headers are enabled.
+- Implementation commit `e493502` is verified by 109 backend tests, Ruff
+  format/lint, strict mypy, ESLint, the frontend production build, a browser
+  registration/settings/logout walkthrough, container smoke, and installed
+  DEB/RPM smoke tests. Its [quality run](https://github.com/mambastick/Cleanarr/actions/runs/31563074725)
+  completed all required jobs successfully.
+
+The remaining v0.5 work is redacted configuration export/import and support
+bundles, privacy-safe metrics, credential-redaction coverage, dependency and
+container scanning, SBOM generation, and signed/provenanced release artifacts.
 
 ## Required 1.0 scope
 
