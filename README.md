@@ -19,6 +19,8 @@
   <a href="#configuration"><strong>Configuration</strong></a> ·
   <a href="docs/TORRENT_CLIENTS.md"><strong>Torrent clients</strong></a> ·
   <a href="docs/COMPATIBILITY.md"><strong>Compatibility</strong></a> ·
+  <a href="docs/SAFETY.md"><strong>Safety</strong></a> ·
+  <a href="docs/TROUBLESHOOTING.md"><strong>Troubleshooting</strong></a> ·
   <a href="docs/OPERATIONS.md"><strong>Operations</strong></a> ·
   <a href="docs/ROADMAP.md"><strong>Roadmap</strong></a> ·
   <a href="CONTRIBUTING.md"><strong>Contributing</strong></a>

@@ -19,6 +19,8 @@
   <a href="#настройка"><strong>Настройка</strong></a> ·
   <a href="docs/TORRENT_CLIENTS_RU.md"><strong>Torrent-клиенты</strong></a> ·
   <a href="docs/COMPATIBILITY_RU.md"><strong>Совместимость</strong></a> ·
+  <a href="docs/SAFETY_RU.md"><strong>Безопасность</strong></a> ·
+  <a href="docs/TROUBLESHOOTING_RU.md"><strong>Диагностика</strong></a> ·
   <a href="docs/OPERATIONS_RU.md"><strong>Эксплуатация</strong></a> ·
   <a href="docs/ROADMAP_RU.md"><strong>Roadmap</strong></a> ·
   <a href="CONTRIBUTING_RU.md"><strong>Участие в разработке</strong></a>
