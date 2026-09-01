@@ -353,6 +353,36 @@ fail-closed, dry-run, совместимости, миграциям и quality 
   Требуются воспроизводимые tests и browser walkthrough точных destructive и
   recovery flows.
 
+## Итоговый snapshot v1.1.0 — 2026-09-01
+
+- [Issue #4](https://github.com/mambastick/Cleanarr/issues/4) и
+  [PR #5](https://github.com/mambastick/Cleanarr/pull/5) реализовали ограниченный
+  post-1.0 scope в release-коммите `ac66ae0`: идемпотентное ручное удаление по
+  одному подтверждению, hash-bound batch plans, обратимые pause/resume для
+  загрузок, ограниченные playback insights, первоначальную настройку нескольких
+  downloader и доступную component system на semantic tokens. Automatic
+  deletion и остальные последующие opt-in пункты не входят в этот релиз.
+- SQLite schema v5 и config schema v3 проверены через последовательное
+  обновление, идемпотентность, отказ для будущей версии, проверенный backup и
+  rollback. Финальный локальный candidate прошёл 214 backend-тестов с 7
+  пропущенными в обычном suite pinned live-service тестами, Ruff format/lint,
+  strict mypy, 66 тестов Vitest/Testing Library, 12 browser-тестов
+  Playwright/Axe, frontend lint и production build, dependency/source/container
+  scans, container smoke и установочные smoke-тесты DEB/RPM.
+- Обязательный
+  [release workflow](https://github.com/mambastick/Cleanarr/actions/runs/33552452113)
+  тега повторил backend, frontend, supply-chain, container и package gates. Его
+  чистый compatibility stack прошёл все семь pinned real-service contracts и
+  обновил заполненные установки v0.2.11, v0.9.0 и v1.0.0, после чего восстановил
+  проверенные backups и успешно запустил каждый исходный релиз.
+- Проверенный [релиз v1.1.0](https://github.com/mambastick/Cleanarr/releases/tag/v1.1.0)
+  опубликовал четыре пакета DEB/RPM для amd64/arm64, три SPDX SBOM,
+  `SHA256SUMS` и публичный multi-architecture GHCR image. Независимая проверка
+  после публикации скачала все восемь файлов, подтвердила каждый checksum и
+  file provenance attestation, а также OCI provenance. Digest image index для
+  `linux/amd64` и `linux/arm64` —
+  `sha256:67cadfe8caa795ec5c6a5d9daaf61df25260ffce1f54bf72199aec47f5e37336`.
+
 ## Обязательный scope 1.0
 
 ### 1. Torrent-клиенты и маршрутизация

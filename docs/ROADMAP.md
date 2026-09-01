@@ -347,6 +347,36 @@ dry-run, compatibility, migration, and quality contracts remain mandatory.
   alone. Record reproducible tests and a real browser walkthrough of the exact
   destructive and recovery flows.
 
+## v1.1.0 completion snapshot — 2026-09-01
+
+- [Issue #4](https://github.com/mambastick/Cleanarr/issues/4) and
+  [PR #5](https://github.com/mambastick/Cleanarr/pull/5) delivered the bounded
+  post-1.0 slice in release commit `ac66ae0`: single-click idempotent manual
+  deletion, hash-bound batch plans, reversible download pause/resume, bounded
+  playback insights, multi-downloader first-run setup, and the accessible
+  tokenized component system. Automatic deletion and the other later opt-in
+  items remain outside this release.
+- SQLite schema v5 and config schema v3 were exercised through ordered upgrade,
+  idempotency, future-version rejection, verified backup, and rollback paths.
+  The final local candidate passed 214 backend tests with 7 pinned live-service
+  tests skipped in the ordinary suite, Ruff format/lint, strict mypy, 66
+  Vitest/Testing Library tests, 12 Playwright/Axe browser tests, frontend lint
+  and production build, dependency/source/container scans, container smoke,
+  and installed DEB/RPM smoke tests.
+- The tag's required
+  [release workflow](https://github.com/mambastick/Cleanarr/actions/runs/33552452113)
+  repeated the backend, frontend, supply-chain, container, and package gates.
+  Its clean compatibility stack passed all seven pinned real-service contracts
+  and upgraded seeded v0.2.11, v0.9.0, and v1.0.0 installations before
+  restoring verified backups and restarting each original release.
+- The verified [v1.1.0 release](https://github.com/mambastick/Cleanarr/releases/tag/v1.1.0)
+  published four amd64/arm64 DEB/RPM packages, three SPDX SBOMs, `SHA256SUMS`,
+  and a public multi-architecture GHCR image. Independent post-publication
+  verification downloaded all eight files, validated every checksum and file
+  provenance attestation, and verified the OCI provenance. The `linux/amd64`
+  and `linux/arm64` image index digest is
+  `sha256:67cadfe8caa795ec5c6a5d9daaf61df25260ffce1f54bf72199aec47f5e37336`.
+
 ## Required 1.0 scope
 
 ### 1. Download clients and routing
