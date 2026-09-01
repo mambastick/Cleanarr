@@ -24,6 +24,7 @@ from cleanarr.api.auth_schemas import (
     AuthStatusResponse,
     SSOLoginResponse,
 )
+from cleanarr.api.cleanup_candidates import create_cleanup_candidates_router
 from cleanarr.api.config_schemas import (
     ConnectionTestResponse,
     DelugeServiceRequest,
@@ -45,20 +46,16 @@ from cleanarr.api.dashboard import (
     WebhookAttemptStore,
     build_dashboard_response,
 )
-from cleanarr.api.deletion_jobs import (
-    DeletionJobActiveError,
-    DeletionJobNotFoundError,
-    DeletionPreflightError,
-    DeletionProgressReporter,
-    ManualDeletionJobStore,
-    validate_plan_confirmation,
-)
-from cleanarr.api.event_processing import DeletionExecutionCoordinator
+from cleanarr.api.downloads import create_downloads_router
 from cleanarr.api.library_schemas import (
     LibraryMoviesResponse,
     LibrarySeriesResponse,
+    ManualDeleteBatchListResponse,
+    ManualDeleteBatchPreviewRequest,
+    ManualDeleteBatchPreviewResponse,
+    ManualDeleteBatchResponse,
+    ManualDeleteBatchSubmitRequest,
     ManualDeleteJobListResponse,
-    ManualDeleteJobPhase,
     ManualDeleteJobResponse,
     ManualDeletePreviewResponse,
     ManualDeleteRequest,
@@ -77,21 +74,39 @@ from cleanarr.api.operations import (
 )
 from cleanarr.api.schemas import JellyfinWebhookPayload, ProcessingResultResponse, WebhookBatchResponse
 from cleanarr.application.authentication import LoginThrottledError
-from cleanarr.application.results import observe_actions
-from cleanarr.application.service import CascadeDeletionService
-from cleanarr.domain import (
-    ActionResult,
-    ActionStatus,
-    FailureReason,
-    ItemType,
-    MediaDeletionEvent,
-    MediaFingerprint,
-    OverallStatus,
-    ProcessingResult,
-    SonarrSeries,
+from cleanarr.application.cleanup_candidates import CleanupCandidatesService
+from cleanarr.application.deletion_batches import (
+    BatchNotFoundError,
+    BatchPlanChangedError,
+    BatchQueueFullError,
+    BatchValidationError,
+    ManualDeletionBatchService,
 )
+from cleanarr.application.deletion_events import DeletionExecutionCoordinator, WebhookInterruptedUnknownError
+from cleanarr.application.deletion_jobs import (
+    DeletionJobActiveError,
+    DeletionJobIdempotencyConflictError,
+    DeletionJobIdempotencyRequiredError,
+    DeletionJobIdempotencyRetiredError,
+    DeletionJobNotFoundError,
+    DeletionPreflightError,
+    ManualDeletionJobService,
+    validate_plan_confirmation,
+)
+from cleanarr.application.downloads import DownloadsService, NullDownloaderFleet, collect_arr_history_evidence
+from cleanarr.application.manual_deletion import (
+    ManualDeletionNotFoundError,
+    ManualDeletionService,
+    ManualDeletionValidationError,
+)
+from cleanarr.application.ports import DownloaderFleetPort
+from cleanarr.application.service import CascadeDeletionService
+from cleanarr.domain import MediaDeletionEvent, ProcessingResult, SonarrSeries
 from cleanarr.domain.config import BaseServiceConfig, GeneralConfig, ServiceKind
+from cleanarr.infrastructure.clients import NullJellyfinServerClient, NullRadarrClient, NullSonarrClient
 from cleanarr.infrastructure.container import ServiceContainer
+from cleanarr.infrastructure.deletion_repository import SQLiteDeletionRepository
+from cleanarr.infrastructure.downloads_repository import DownloadsRepository
 from cleanarr.infrastructure.oidc import (
     OIDCError,
     create_pkce_challenge,
@@ -111,17 +126,21 @@ _SSO_ERROR_PREFIX = "/?sso_error="
 _HTTP_UNPROCESSABLE_CONTENT = 422
 
 
-def _ignore_deletion_progress(
-    phase: ManualDeleteJobPhase,
-    progress_percent: int,
-    message: str,
-    item_name: str | None,
-) -> None:
-    """No-op reporter used by the backwards-compatible synchronous endpoint."""
-
-
 def _has_active_service(services: Sequence[BaseServiceConfig]) -> bool:
     return any(getattr(s, "enabled", False) for s in services)
+
+
+def _manual_deletion_transport_error(
+    exc: ManualDeletionValidationError | ManualDeletionNotFoundError,
+) -> HTTPException:
+    """Map application resolution errors to the established HTTP contract."""
+
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND
+        if isinstance(exc, ManualDeletionNotFoundError)
+        else _HTTP_UNPROCESSABLE_CONTENT,
+        detail=str(exc),
+    )
 
 
 async def _health_probe_loop(container: ServiceContainer, health_store: HealthProbeStore) -> None:
@@ -159,6 +178,38 @@ async def _health_probe_loop(container: ServiceContainer, health_store: HealthPr
         except Exception:
             _logger.exception("Health probe loop encountered an unexpected error")
         await asyncio.sleep(30)
+
+
+async def _download_policy_loop(container: ServiceContainer, downloads_service: DownloadsService) -> None:
+    """Run the opt-in reversible policy with bounded cancellation-aware cadence."""
+
+    await asyncio.sleep(30)
+    while True:
+        config = container.config
+        policy = config.general.seeding_stop_policy
+        if policy.enabled:
+            downloads_service.set_downloader(container.downloader)
+            try:
+                history_hashes, history_failed = await collect_arr_history_evidence(
+                    radarr=container.radarr,
+                    radarr_configured=any(profile.enabled for profile in config.radarr),
+                    sonarr=container.sonarr,
+                    sonarr_configured=any(profile.enabled for profile in config.sonarr),
+                )
+                await downloads_service.refresh(
+                    config=config.general,
+                    arr_history_hashes=history_hashes,
+                    arr_source_failed=history_failed,
+                )
+                await downloads_service.evaluate_and_apply_policy(config=config.general)
+            except Exception as exc:  # pragma: no cover - defensive background isolation
+                # Keep downstream exception text (which can contain private
+                # URLs, paths, or server details) out of application logs.
+                _logger.warning("Download policy cycle failed: %s", type(exc).__name__)
+            delay = policy.interval_seconds
+        else:
+            delay = 30
+        await asyncio.sleep(max(30, min(delay, 86_400)))
 
 
 def _extract_token(authorization: str | None, header_token: str | None) -> str | None:
@@ -346,222 +397,42 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     )
     webhook_attempt_store = WebhookAttemptStore()
     health_probe_store = HealthProbeStore()
-    execution_coordinator = DeletionExecutionCoordinator(Path(settings.db_path))
+    deletion_repository = SQLiteDeletionRepository(Path(settings.db_path))
+    execution_coordinator = DeletionExecutionCoordinator(deletion_repository)
+    downloads_service = DownloadsService(
+        repository=DownloadsRepository(Path(settings.db_path)),
+        downloader=cast(DownloaderFleetPort, getattr(resolved_container, "downloader", NullDownloaderFleet())),
+        execution_lock=execution_coordinator.lock,
+    )
+    cleanup_candidates_service = CleanupCandidatesService(
+        playback=getattr(resolved_container, "jellyfin_server", NullJellyfinServerClient()),
+        radarr=getattr(resolved_container, "radarr", NullRadarrClient()),
+        sonarr=getattr(resolved_container, "sonarr", NullSonarrClient()),
+        downloads_repository=downloads_service.repository,
+    )
+    cleanup_candidate_fallbacks = (NullJellyfinServerClient(), NullRadarrClient(), NullSonarrClient())
     static_dir = Path(__file__).resolve().parents[1] / "ui" / "static"
 
-    async def resolve_manual_delete(payload: ManualDeleteRequest) -> MediaDeletionEvent:
-        """Resolve a manual library selection to a stable deletion event."""
-
-        container = resolved_container
-
-        if payload.item_type is ItemType.MOVIE:
-            if payload.radarr_movie_id is None:
-                raise HTTPException(
-                    status_code=_HTTP_UNPROCESSABLE_CONTENT,
-                    detail="radarr_movie_id is required for movie deletion.",
-                )
-            movies_list = list(await container.radarr.list_movies())
-            movie = next((movie for movie in movies_list if movie.id == payload.radarr_movie_id), None)
-            if movie is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Radarr movie {payload.radarr_movie_id} not found.",
-                )
-            return MediaDeletionEvent(
-                notification_type="ItemDeleted",
-                item_type=ItemType.MOVIE,
-                item_id=f"manual:radarr:{movie.id}",
-                name=movie.title,
-                fingerprint=MediaFingerprint(
-                    tmdb_id=movie.tmdb_id,
-                    imdb_id=movie.imdb_id,
-                    path=movie.path,
-                ),
-            )
-
-        if payload.item_type not in {ItemType.SERIES, ItemType.SEASON}:
-            raise HTTPException(
-                status_code=_HTTP_UNPROCESSABLE_CONTENT,
-                detail="Manual deletion supports movies, series, and seasons.",
-            )
-        if payload.sonarr_series_id is None:
-            raise HTTPException(
-                status_code=_HTTP_UNPROCESSABLE_CONTENT,
-                detail="sonarr_series_id is required for series/season deletion.",
-            )
-        series_list = list(await container.sonarr.list_series())
-        series = next((series for series in series_list if series.id == payload.sonarr_series_id), None)
-        if series is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Sonarr series {payload.sonarr_series_id} not found.",
-            )
-        if payload.item_type is ItemType.SEASON and payload.season_number is None:
-            raise HTTPException(
-                status_code=_HTTP_UNPROCESSABLE_CONTENT,
-                detail="season_number is required for season deletion.",
-            )
-        scope = "series" if payload.item_type is ItemType.SERIES else f"season:{payload.season_number}"
-        return MediaDeletionEvent(
-            notification_type="ItemDeleted",
-            item_type=payload.item_type,
-            item_id=f"manual:sonarr:{series.id}:{scope}",
-            name=series.title,
-            fingerprint=MediaFingerprint(
-                tvdb_id=series.tvdb_id,
-                tmdb_id=series.tmdb_id,
-                imdb_id=series.imdb_id,
-                path=series.path,
-            ),
-            series_name=series.title,
-            season_number=payload.season_number,
-        )
-
-    def with_jellyfin_action(result: ProcessingResult, action: ActionResult) -> ProcessingResult:
-        actions = (*result.actions, action)
-        overall = OverallStatus.PARTIAL_FAILURE if action.status is ActionStatus.FAILED else result.status
-        return ProcessingResult(
-            event=result.event,
-            status=overall,
-            actions=actions,
-            correlation_id=result.correlation_id,
-        )
-
-    async def preview_manual_delete(
-        payload: ManualDeleteRequest,
-        event: MediaDeletionEvent,
-    ) -> ProcessingResultResponse:
-        """Build a mutation-free plan containing every intended target."""
-
-        strategy = resolved_container.strategy_factory.for_item_type(event.item_type, dry_run=True)
-        result = await strategy.handle(event)
-        if payload.jellyfin_item_id:
-            result = with_jellyfin_action(
-                result,
-                ActionResult(
-                    system="jellyfin",
-                    action="delete_item",
-                    status=ActionStatus.DRY_RUN,
-                    message="Would remove the selected item from Jellyfin after downstream cleanup succeeds.",
-                    details={"jellyfin_item_id": payload.jellyfin_item_id},
-                ),
-            )
-        return ProcessingResultResponse.from_domain(result)
-
-    async def execute_manual_delete(
-        payload: ManualDeleteRequest,
-        event: MediaDeletionEvent,
-        report_progress: DeletionProgressReporter | None = None,
-    ) -> ProcessingResultResponse:
-        """Execute a previously resolved manual deletion and record its outcome."""
-
-        report = report_progress or _ignore_deletion_progress
-        container = resolved_container
-        item_name = event.name
-
-        report(
-            ManualDeleteJobPhase.CLEANING,
-            30,
-            "Cleaning up Arr services, torrent clients, and Seerr.",
-            item_name,
-        )
-        strategy = container.strategy_factory.for_item_type(event.item_type)
-        completed_actions = 0
-
-        def report_action(action: ActionResult) -> None:
-            nonlocal completed_actions
-            completed_actions += 1
-            report(
-                ManualDeleteJobPhase.CLEANING,
-                min(78, 30 + completed_actions * 6),
-                f"{action.system}: {action.message}",
-                item_name,
-            )
-
-        with observe_actions(report_action):
-            result = await strategy.handle(event)
-
-        if payload.jellyfin_item_id and container.config.general.dry_run:
-            result = with_jellyfin_action(
-                result,
-                ActionResult(
-                    system="jellyfin",
-                    action="delete_item",
-                    status=ActionStatus.DRY_RUN,
-                    message="Would remove the selected item from Jellyfin after downstream cleanup succeeds.",
-                    details={"jellyfin_item_id": payload.jellyfin_item_id},
-                ),
-            )
-        elif payload.jellyfin_item_id and result.status is OverallStatus.PARTIAL_FAILURE:
-            result = with_jellyfin_action(
-                result,
-                ActionResult(
-                    system="jellyfin",
-                    action="delete_item",
-                    status=ActionStatus.SKIPPED,
-                    message="Kept the Jellyfin item because downstream cleanup did not finish safely.",
-                    reason=FailureReason.DOWNSTREAM_ERROR,
-                    details={"jellyfin_item_id": payload.jellyfin_item_id},
-                ),
-            )
-        elif payload.jellyfin_item_id:
-            report(
-                ManualDeleteJobPhase.JELLYFIN,
-                92,
-                "Removing the item from Jellyfin.",
-                item_name,
-            )
-            try:
-                await container.jellyfin_server.delete_item(payload.jellyfin_item_id)
-            except Exception as exc:  # noqa: BLE001
-                _logger.warning(
-                    "Failed to delete Jellyfin item %s after cascade deletion",
-                    payload.jellyfin_item_id,
-                )
-                result = with_jellyfin_action(
-                    result,
-                    ActionResult(
-                        system="jellyfin",
-                        action="delete_item",
-                        status=ActionStatus.FAILED,
-                        message="Could not remove the selected item from Jellyfin.",
-                        reason=FailureReason.DOWNSTREAM_ERROR,
-                        details={"jellyfin_item_id": payload.jellyfin_item_id, "error": str(exc)},
-                    ),
-                )
-            else:
-                result = with_jellyfin_action(
-                    result,
-                    ActionResult(
-                        system="jellyfin",
-                        action="delete_item",
-                        status=ActionStatus.DELETED,
-                        message="Removed the selected item from Jellyfin.",
-                        details={"jellyfin_item_id": payload.jellyfin_item_id},
-                    ),
-                )
-        else:
-            report(
-                ManualDeleteJobPhase.RECORDING,
-                95,
-                "Finalizing the background task.",
-                item_name,
-            )
-
-        report(
-            ManualDeleteJobPhase.RECORDING,
-            97,
-            "Saving the cleanup result to activity history.",
-            item_name,
-        )
-        await activity_store.record(result)
-        return ProcessingResultResponse.from_domain(result)
-
-    deletion_jobs = ManualDeletionJobStore(
-        resolve_manual_delete,
-        preview_manual_delete,
-        execute_manual_delete,
-        db_path=Path(settings.db_path),
+    manual_deletion_service = ManualDeletionService(
+        radarr=lambda: resolved_container.radarr,
+        sonarr=lambda: resolved_container.sonarr,
+        jellyfin=lambda: resolved_container.jellyfin_server,
+        strategy_factory=lambda: resolved_container.strategy_factory,
+        is_dry_run=lambda: resolved_container.config.general.dry_run,
+        activity_recorder=activity_store,
+    )
+    deletion_jobs = ManualDeletionJobService(
+        manual_deletion_service.resolve,
+        manual_deletion_service.preview,
+        manual_deletion_service.execute,
+        repository=deletion_repository,
+        execution_lock=execution_coordinator.lock,
+    )
+    deletion_batches = ManualDeletionBatchService(
+        manual_deletion_service.resolve,
+        manual_deletion_service.preview,
+        manual_deletion_service.execute,
+        repository=deletion_repository,
         execution_lock=execution_coordinator.lock,
     )
 
@@ -574,16 +445,27 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         app.state.webhook_attempt_store = webhook_attempt_store
         app.state.health_probe_store = health_probe_store
         app.state.deletion_jobs = deletion_jobs
+        app.state.deletion_batches = deletion_batches
         app.state.execution_coordinator = execution_coordinator
+        app.state.downloads_service = downloads_service
+        app.state.cleanup_candidates_service = cleanup_candidates_service
+        app.state.cleanup_candidate_fallbacks = cleanup_candidate_fallbacks
+        downloads_service.repository.recover_running_actions()
         await deletion_jobs.start()
+        await deletion_batches.start()
         probe_task = asyncio.create_task(_health_probe_loop(resolved_container, health_probe_store))
+        policy_task = asyncio.create_task(_download_policy_loop(resolved_container, downloads_service))
         try:
             yield
         finally:
             probe_task.cancel()
+            policy_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await probe_task
+            with contextlib.suppress(asyncio.CancelledError):
+                await policy_task
             await deletion_jobs.stop()
+            await deletion_batches.stop()
             if own_container:
                 await resolved_container.close()
 
@@ -593,7 +475,13 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     app.state.webhook_attempt_store = webhook_attempt_store
     app.state.health_probe_store = health_probe_store
     app.state.deletion_jobs = deletion_jobs
+    app.state.deletion_batches = deletion_batches
     app.state.execution_coordinator = execution_coordinator
+    app.state.downloads_service = downloads_service
+    app.state.cleanup_candidates_service = cleanup_candidates_service
+    app.state.cleanup_candidate_fallbacks = cleanup_candidate_fallbacks
+    app.include_router(create_downloads_router())
+    app.include_router(create_cleanup_candidates_router())
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next: RequestResponseEndpoint) -> Response:
@@ -876,6 +764,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
             webhook_attempt_store=request.app.state.webhook_attempt_store,
             health_probe_store=request.app.state.health_probe_store,
             deletion_jobs=request.app.state.deletion_jobs,
+            downloads_repository=request.app.state.downloads_service.repository,
         )
         return PlainTextResponse(
             payload,
@@ -895,6 +784,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
             webhook_attempt_store=request.app.state.webhook_attempt_store,
             health_probe_store=request.app.state.health_probe_store,
             deletion_jobs=request.app.state.deletion_jobs,
+            downloads_repository=request.app.state.downloads_service.repository,
         )
 
     @app.put(
@@ -1440,14 +1330,26 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
 
         results: list[ProcessingResult] = []
         duplicate_count = 0
-        for item in webhook_payloads:
-            result, duplicate = await execution_coordinator.process_webhook(
-                item.to_domain(),
-                process_and_record,
+        try:
+            for item in webhook_payloads:
+                result, duplicate = await execution_coordinator.process_webhook(
+                    item.to_domain(),
+                    process_and_record,
+                )
+                results.append(result)
+                if duplicate:
+                    duplicate_count += 1
+        except WebhookInterruptedUnknownError as exc:
+            request.app.state.webhook_attempt_store.record(
+                outcome=exc.code,
+                http_status=status.HTTP_409_CONFLICT,
+                message="A prior webhook delivery has an unknown downstream outcome; automatic replay is blocked.",
+                payload_event_count=len(payload_list),
             )
-            results.append(result)
-            if duplicate:
-                duplicate_count += 1
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
         batch_response = WebhookBatchResponse.from_results(results)
         first_payload = webhook_payloads[0]
         request.app.state.webhook_attempt_store.record(
@@ -1702,7 +1604,10 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     async def preview_manual_deletion(
         payload: ManualDeleteRequest,
     ) -> ManualDeletePreviewResponse:
-        return await deletion_jobs.preview(payload)
+        try:
+            return await deletion_jobs.preview(payload)
+        except (ManualDeletionValidationError, ManualDeletionNotFoundError) as exc:
+            raise _manual_deletion_transport_error(exc) from exc
 
     @app.post(
         "/api/actions/delete/jobs",
@@ -1715,10 +1620,27 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     ) -> ManualDeleteJobResponse:
         try:
             return await deletion_jobs.submit(payload)
+        except (ManualDeletionValidationError, ManualDeletionNotFoundError) as exc:
+            raise _manual_deletion_transport_error(exc) from exc
         except DeletionPreflightError as exc:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=str(exc),
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
+        except DeletionJobIdempotencyRequiredError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "idempotency_key_required", "message": str(exc)},
+            ) from exc
+        except DeletionJobIdempotencyConflictError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "idempotency_key_conflict", "message": str(exc)},
+            ) from exc
+        except DeletionJobIdempotencyRetiredError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "idempotency_key_retired", "message": str(exc)},
             ) from exc
 
     @app.get(
@@ -1740,7 +1662,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         except DeletionJobNotFoundError as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Deletion job not found.",
+                detail={"code": "job_not_found", "message": "Deletion job not found."},
             ) from exc
 
     @app.delete(
@@ -1754,14 +1676,98 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         except DeletionJobNotFoundError as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Deletion job not found.",
+                detail={"code": "job_not_found", "message": "Deletion job not found."},
             ) from exc
         except DeletionJobActiveError as exc:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="An active deletion job cannot be dismissed.",
+                detail={"code": "active_job", "message": "An active deletion job cannot be dismissed."},
             ) from exc
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.post(
+        "/api/actions/delete/batches/preview",
+        response_model=ManualDeleteBatchPreviewResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def preview_manual_delete_batch(
+        payload: ManualDeleteBatchPreviewRequest,
+    ) -> ManualDeleteBatchPreviewResponse:
+        try:
+            return await deletion_batches.preview(payload.children)
+        except BatchValidationError as exc:
+            raise HTTPException(
+                status_code=_HTTP_UNPROCESSABLE_CONTENT,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
+
+    @app.post(
+        "/api/actions/delete/batches",
+        response_model=ManualDeleteBatchResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def queue_manual_delete_batch(
+        payload: ManualDeleteBatchSubmitRequest,
+    ) -> ManualDeleteBatchResponse:
+        try:
+            return await deletion_batches.submit(payload)
+        except BatchValidationError as exc:
+            raise HTTPException(
+                status_code=_HTTP_UNPROCESSABLE_CONTENT,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
+        except BatchPlanChangedError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "batch_plan_changed", "message": str(exc)},
+            ) from exc
+        except DeletionJobIdempotencyConflictError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "idempotency_key_conflict", "message": str(exc)},
+            ) from exc
+        except DeletionJobIdempotencyRetiredError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "idempotency_key_retired", "message": str(exc)},
+            ) from exc
+        except BatchQueueFullError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={"code": "batch_queue_full", "message": str(exc)},
+            ) from exc
+
+    @app.get(
+        "/api/actions/delete/batches",
+        response_model=ManualDeleteBatchListResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def list_manual_delete_batches(
+        limit: int = Query(default=20, ge=1, le=50),
+        before: UUID | None = None,
+    ) -> ManualDeleteBatchListResponse:
+        try:
+            return deletion_batches.list(limit=limit, before=before)
+        except BatchValidationError as exc:
+            raise HTTPException(
+                status_code=_HTTP_UNPROCESSABLE_CONTENT,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
+
+    @app.get(
+        "/api/actions/delete/batches/{batch_id}",
+        response_model=ManualDeleteBatchResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def get_manual_delete_batch(batch_id: UUID) -> ManualDeleteBatchResponse:
+        try:
+            return deletion_batches.get(batch_id)
+        except BatchNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "batch_not_found", "message": "Deletion batch not found."},
+            ) from exc
 
     @app.post(
         "/api/actions/delete",
@@ -1771,16 +1777,18 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     )
     async def manual_delete(payload: ManualDeleteRequest) -> ProcessingResultResponse:
         async with execution_coordinator.lock:
-            event = await resolve_manual_delete(payload)
-            plan = await preview_manual_delete(payload, event)
             try:
+                event = await manual_deletion_service.resolve(payload)
+                plan = await manual_deletion_service.preview(payload, event)
                 validate_plan_confirmation(payload, plan)
             except DeletionPreflightError as exc:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail=str(exc),
+                    detail={"code": exc.code, "message": str(exc)},
                 ) from exc
-            return await execute_manual_delete(payload, event)
+            except (ManualDeletionValidationError, ManualDeletionNotFoundError) as exc:
+                raise _manual_deletion_transport_error(exc) from exc
+            return await manual_deletion_service.execute(payload, event)
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa(full_path: str) -> FileResponse:

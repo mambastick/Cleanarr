@@ -139,10 +139,12 @@ def test_v040_config_upgrade_is_versioned_fail_closed_and_rollback_safe(tmp_path
     assert config.general.sso_allowed_users == []
     assert config.general.sso_allowed_groups == []
     assert config.general.has_sso_access_policy() is False
+    assert config.general.seeding_stop_policy.enabled is False
     with sqlite3.connect(db_path) as connection:
         migrated = json.loads(connection.execute("SELECT config_json FROM config WHERE id = 1").fetchone()[0])
     assert migrated["config_schema_version"] == CURRENT_CONFIG_SCHEMA_VERSION
     assert migrated["general"]["sso_client_secret"] == "existing-secret"
+    assert migrated["general"]["seeding_stop_policy"]["enabled"] is False
 
     with sqlite3.connect(backup_path) as backup, sqlite3.connect(restored_path) as restored:
         backup.backup(restored)

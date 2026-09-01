@@ -4,21 +4,23 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from cleanarr.domain import (
-    ActionResult,
-    ActionStatus,
-    FailureReason,
-    ItemType,
-    MediaDeletionEvent,
-    MediaFingerprint,
-    OverallStatus,
-    ProcessingResult,
+from cleanarr.application.deletion_models import (
+    ActionResultResponse,
+    MediaFingerprintResponse,
+    ProcessingResultResponse,
 )
-from cleanarr.redaction import redact_sensitive_mapping, redact_sensitive_text
+from cleanarr.domain import ItemType, MediaDeletionEvent, MediaFingerprint, OverallStatus, ProcessingResult
+
+__all__ = (
+    "ActionResultResponse",
+    "JellyfinWebhookPayload",
+    "MediaFingerprintResponse",
+    "ProcessingResultResponse",
+    "WebhookBatchResponse",
+)
 
 
 class JellyfinWebhookPayload(BaseModel):
@@ -120,104 +122,6 @@ class JellyfinWebhookPayload(BaseModel):
             episode_number=event.episode_number,
             episode_end_number=event.episode_end_number,
             occurred_at=event.occurred_at,
-        )
-
-
-class ActionResultResponse(BaseModel):
-    """Serialized action result."""
-
-    system: str
-    action: str
-    status: ActionStatus
-    message: str
-    reason: FailureReason | None = None
-    details: dict[str, Any]
-
-    @field_validator("message", mode="before")
-    @classmethod
-    def redact_message(cls, value: object) -> str:
-        return redact_sensitive_text(str(value))
-
-    @field_validator("details", mode="before")
-    @classmethod
-    def redact_details(cls, value: object) -> dict[str, Any]:
-        if not isinstance(value, dict):
-            raise ValueError("Action details must be an object.")
-        return redact_sensitive_mapping(value)
-
-    @classmethod
-    def from_domain(cls, action: ActionResult) -> ActionResultResponse:
-        return cls(
-            system=action.system,
-            action=action.action,
-            status=action.status,
-            message=action.message,
-            reason=action.reason,
-            details=dict(action.details),
-        )
-
-
-class MediaFingerprintResponse(BaseModel):
-    """Stable identifiers and path used to resolve a deletion target."""
-
-    tmdb_id: int | None = None
-    tvdb_id: int | None = None
-    imdb_id: str | None = None
-    path: str | None = None
-
-
-class ProcessingResultResponse(BaseModel):
-    """Serialized per-event result."""
-
-    item_type: ItemType
-    correlation_id: str | None = None
-    item_id: str
-    name: str
-    status: OverallStatus
-    fingerprint: MediaFingerprintResponse = Field(default_factory=MediaFingerprintResponse)
-    season_number: int | None = None
-    episode_number: int | None = None
-    episode_end_number: int | None = None
-    actions: list[ActionResultResponse]
-
-    @classmethod
-    def from_domain(cls, result: ProcessingResult) -> ProcessingResultResponse:
-        return cls(
-            item_type=result.event.item_type,
-            correlation_id=result.correlation_id,
-            item_id=result.event.item_id,
-            name=result.event.name,
-            status=result.status,
-            fingerprint=MediaFingerprintResponse(
-                tmdb_id=result.event.fingerprint.tmdb_id,
-                tvdb_id=result.event.fingerprint.tvdb_id,
-                imdb_id=result.event.fingerprint.imdb_id,
-                path=result.event.fingerprint.path,
-            ),
-            season_number=result.event.season_number,
-            episode_number=result.event.episode_number,
-            episode_end_number=result.event.episode_end_number,
-            actions=[ActionResultResponse.from_domain(action) for action in result.actions],
-        )
-
-    def to_domain(self, event: MediaDeletionEvent) -> ProcessingResult:
-        """Restore a cached result for its persisted source event."""
-
-        return ProcessingResult(
-            event=event,
-            status=self.status,
-            actions=tuple(
-                ActionResult(
-                    system=action.system,
-                    action=action.action,
-                    status=action.status,
-                    message=action.message,
-                    reason=action.reason,
-                    details=action.details,
-                )
-                for action in self.actions
-            ),
-            correlation_id=self.correlation_id or uuid4().hex,
         )
 
 

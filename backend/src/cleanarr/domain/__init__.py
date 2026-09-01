@@ -1,5 +1,18 @@
 """Domain exports."""
 
+from .downloads import (
+    DownloadActionClaim,
+    DownloadActionStatus,
+    DownloadControlAction,
+    DownloadControlOutcome,
+    DownloaderControlResult,
+    DownloaderListing,
+    DownloaderReadFailure,
+    ListingFreshness,
+    TorrentOwnership,
+    TorrentSnapshot,
+    TorrentState,
+)
 from .errors import AuthenticationError, ExternalServiceError, ResourceNotFoundError
 from .models import (
     ActionResult,
@@ -24,16 +37,41 @@ from .models import (
     SonarrHistoryRecord,
     SonarrSeries,
 )
+from .playback import (
+    CleanupCandidate,
+    CleanupDeletionLink,
+    CleanupMediaType,
+    JellyfinCleanupItem,
+    PlaybackAggregate,
+    PlaybackObservation,
+    PlaybackReadResult,
+    PlaybackStatus,
+    SeedingSummary,
+    reduce_playback,
+    unknown_playback,
+)
 
 __all__ = [
     "ActionResult",
     "ActionStatus",
     "AuthenticationError",
+    "DownloadControlAction",
+    "DownloadControlOutcome",
+    "DownloadActionStatus",
+    "DownloadActionClaim",
+    "DownloaderControlResult",
+    "DownloaderListing",
     "DownloaderRemovalResult",
+    "DownloaderReadFailure",
     "ExternalServiceError",
     "FailureReason",
     "ItemType",
     "JellyfinItem",
+    "JellyfinCleanupItem",
+    "CleanupCandidate",
+    "CleanupDeletionLink",
+    "CleanupMediaType",
+    "ListingFreshness",
     "SeerrIssue",
     "SeerrMedia",
     "SeerrRequest",
@@ -41,6 +79,11 @@ __all__ = [
     "MediaFingerprint",
     "OverallStatus",
     "ProcessingResult",
+    "PlaybackAggregate",
+    "PlaybackObservation",
+    "PlaybackReadResult",
+    "PlaybackStatus",
+    "SeedingSummary",
     "RadarrHistoryRecord",
     "RadarrMovie",
     "ResourceNotFoundError",
@@ -50,4 +93,9 @@ __all__ = [
     "SonarrEpisodeFile",
     "SonarrHistoryRecord",
     "SonarrSeries",
+    "TorrentOwnership",
+    "TorrentSnapshot",
+    "TorrentState",
+    "reduce_playback",
+    "unknown_playback",
 ]

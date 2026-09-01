@@ -2,17 +2,29 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
 from cleanarr.domain import (
     AuthenticationError,
+    CleanupMediaType,
+    DownloadControlAction,
+    DownloadControlOutcome,
+    DownloaderControlResult,
+    DownloaderListing,
+    DownloaderReadFailure,
     DownloaderRemovalResult,
     ExternalServiceError,
+    JellyfinCleanupItem,
     JellyfinItem,
+    ListingFreshness,
+    PlaybackObservation,
     RadarrHistoryRecord,
     RadarrMovie,
     ResourceNotFoundError,
@@ -23,9 +35,14 @@ from cleanarr.domain import (
     SonarrEpisodeFile,
     SonarrHistoryRecord,
     SonarrSeries,
+    TorrentOwnership,
+    TorrentSnapshot,
+    TorrentState,
 )
 from cleanarr.domain.config import TorrentRemovalPolicy
 from cleanarr.domain.seeding import TorrentSeedingStatus, seeding_policy_skip_reason
+
+_CONTROL_VERIFICATION_DELAYS = (0.0, 0.05, 0.1, 0.2, 0.4, 0.8)
 
 
 def _optional_float(value: object) -> float | None:
@@ -44,6 +61,186 @@ def _optional_int(value: object) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _qbt_hash(value: object) -> str:
+    normalized = value.strip().upper() if isinstance(value, str) else ""
+    return (
+        normalized
+        if len(normalized) in {40, 64} and all(character in "0123456789ABCDEF" for character in normalized)
+        else ""
+    )
+
+
+def _qbt_safe_text(value: object, *, limit: int = 160) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = " ".join(value.split())[:limit]
+    return None if not text or "://" in text or text.startswith(("/", "\\")) else text
+
+
+def _qbt_nonnegative_int(value: object) -> int | None:
+    parsed = _optional_int(value)
+    return parsed if parsed is not None and parsed >= 0 else None
+
+
+def _qbt_nonnegative_float(value: object) -> float | None:
+    parsed = _optional_float(value)
+    return parsed if parsed is not None and parsed >= 0 else None
+
+
+def _qbt_timestamp(value: object) -> datetime | None:
+    parsed = _qbt_nonnegative_int(value)
+    if not parsed:
+        return None
+    try:
+        return datetime.fromtimestamp(parsed, tz=UTC)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _qbt_eta(value: object) -> int | None:
+    parsed = _qbt_nonnegative_int(value)
+    return parsed if parsed is not None and parsed < 8_640_000 else None
+
+
+def _qbt_failure(client: Any, code: str) -> DownloaderReadFailure:
+    return DownloaderReadFailure(
+        str(client._service_id or client._system),
+        _qbt_safe_text(client._service_name) or client._system,
+        client._system,
+        code,
+    )
+
+
+def _qbt_snapshot(item: object, *, client: Any) -> TorrentSnapshot | None:
+    if not isinstance(item, dict):
+        return None
+    info_hash = _qbt_hash(item.get("hash"))
+    if not info_hash:
+        return None
+    raw_state = str(item.get("state") or "").casefold()
+    state = (
+        TorrentState.STOPPED
+        if raw_state.startswith(("paused", "stopped"))
+        else TorrentState.SEEDING
+        if raw_state in {"uploading", "stalledup", "forcedup"}
+        else TorrentState.DOWNLOADING
+        if raw_state in {"downloading", "stalleddl", "forceddl", "metadl", "allocating", "moving"}
+        else TorrentState.QUEUED
+        if raw_state in {"queuedup", "queueddl"}
+        else TorrentState.CHECKING
+        if "check" in raw_state
+        else TorrentState.ERROR
+        if "error" in raw_state or "missingfiles" in raw_state
+        else TorrentState.UNKNOWN
+    )
+    progress = _optional_float(item.get("progress"))
+    if progress is not None and not 0 <= progress <= 1:
+        progress = None
+    tags = item.get("tags")
+    safe_tags = (
+        tuple(filter(None, (_qbt_safe_text(tag, limit=64) for tag in tags.split(","))))[:20]
+        if isinstance(tags, str)
+        else None
+    )
+    tracker_raw = item.get("tracker")
+    tracker = urlparse(tracker_raw).hostname if isinstance(tracker_raw, str) and "://" in tracker_raw else None
+    return TorrentSnapshot(
+        str(client._service_id or client._system),
+        _qbt_safe_text(client._service_name) or client._system,
+        client._system,
+        info_hash,
+        _qbt_safe_text(item.get("name")),
+        state,
+        datetime.now(tz=UTC),
+        progress=progress,
+        total_bytes=_qbt_nonnegative_int(item.get("size")),
+        downloaded_bytes=_qbt_nonnegative_int(item.get("downloaded")),
+        uploaded_bytes=_qbt_nonnegative_int(item.get("uploaded")),
+        ratio=_qbt_nonnegative_float(item.get("ratio")),
+        seeding_time_seconds=_qbt_nonnegative_int(item.get("seeding_time")),
+        download_speed_bytes_per_second=_qbt_nonnegative_int(item.get("dlspeed")),
+        upload_speed_bytes_per_second=_qbt_nonnegative_int(item.get("upspeed")),
+        eta_seconds=_qbt_eta(item.get("eta")),
+        added_at=_qbt_timestamp(item.get("added_on")),
+        completed_at=_qbt_timestamp(item.get("completion_on")),
+        activity_at=_qbt_timestamp(item.get("last_activity")),
+        category=_qbt_safe_text(item.get("category"), limit=64),
+        tags=safe_tags,
+        tracker_summary=_qbt_safe_text(tracker, limit=120),
+        freshness=ListingFreshness.FRESH,
+        ownership=TorrentOwnership.UNKNOWN,
+    )
+
+
+def _qbt_find(listing: DownloaderListing, info_hash: str) -> TorrentSnapshot | None:
+    return next((torrent for torrent in listing.torrents if torrent.info_hash == info_hash), None)
+
+
+def _qbt_has_desired_state(state: TorrentState, action: DownloadControlAction) -> bool:
+    if action is DownloadControlAction.PAUSE:
+        return state is TorrentState.STOPPED
+    return state in {TorrentState.DOWNLOADING, TorrentState.SEEDING, TorrentState.QUEUED, TorrentState.CHECKING}
+
+
+async def _qbt_verify_post_control_state(
+    client: QbittorrentClient,
+    info_hash: str,
+    action: DownloadControlAction,
+) -> tuple[TorrentSnapshot | None, str | None]:
+    """Poll boundedly for qBittorrent's asynchronously visible state transition."""
+    after: TorrentSnapshot | None = None
+    failure_code = "post_state_unverified"
+    for delay in _CONTROL_VERIFICATION_DELAYS:
+        if delay:
+            await asyncio.sleep(delay)
+        try:
+            listing = await client.list_torrents()
+        except ExternalServiceError:
+            failure_code = "mutation_or_post_read_failed"
+            continue
+        after = _qbt_find(listing, info_hash)
+        if after is not None and _qbt_has_desired_state(after.state, action):
+            return after, None
+        failure_code = "post_read_incomplete" if after is None and listing.failures else "post_state_unverified"
+    return after, failure_code
+
+
+def _qbt_control_path(version: str, action: DownloadControlAction) -> str | None:
+    numeric = version.lstrip("vV").split(".")
+    try:
+        major = int(numeric[0])
+    except (IndexError, ValueError):
+        return None
+    if major >= 5:
+        return "/api/v2/torrents/stop" if action is DownloadControlAction.PAUSE else "/api/v2/torrents/start"
+    if major == 4:
+        return "/api/v2/torrents/pause" if action is DownloadControlAction.PAUSE else "/api/v2/torrents/resume"
+    return None
+
+
+def _qbt_control(
+    client: Any,
+    info_hash: str,
+    action: DownloadControlAction,
+    outcome: DownloadControlOutcome,
+    code: str,
+    *,
+    before: TorrentSnapshot | None = None,
+    after: TorrentSnapshot | None = None,
+) -> DownloaderControlResult:
+    return DownloaderControlResult(
+        str(client._service_id or client._system),
+        _qbt_safe_text(client._service_name) or client._system,
+        client._system,
+        info_hash,
+        action,
+        outcome,
+        before,
+        after,
+        code,
+    )
 
 
 class JsonServiceClient:
@@ -774,6 +971,95 @@ class QbittorrentClient:
             await self._delete_existing_hashes(deletion_hashes, delete_files=delete_files)
         return results
 
+    async def list_torrents(self) -> DownloaderListing:
+        """Return safe normalized torrent snapshots without exposing data paths."""
+        await self._login()
+        try:
+            response = await self._client.get("/api/v2/torrents/info")
+        except httpx.HTTPError as exc:
+            raise ExternalServiceError(self._system, "qBittorrent torrent listing failed.") from exc
+        if response.status_code in {401, 403}:
+            raise AuthenticationError(self._system, "qBittorrent rejected the configured credentials.")
+        if response.status_code >= 400:
+            raise ExternalServiceError(self._system, "qBittorrent torrent listing failed.")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ExternalServiceError(self._system, "qBittorrent returned an invalid JSON response.") from exc
+        if not isinstance(payload, list):
+            return DownloaderListing(failures=(_qbt_failure(self, "invalid_torrent_list"),))
+        snapshots: list[TorrentSnapshot] = []
+        failures: list[DownloaderReadFailure] = []
+        for item in payload:
+            snapshot = _qbt_snapshot(item, client=self)
+            if snapshot is None:
+                failures.append(_qbt_failure(self, "malformed_torrent"))
+            else:
+                snapshots.append(snapshot)
+        return DownloaderListing(torrents=tuple(snapshots), failures=tuple(failures))
+
+    async def control_torrent(self, info_hash: str, *, action: DownloadControlAction) -> DownloaderControlResult:
+        normalized = _qbt_hash(info_hash)
+        if not normalized:
+            return _qbt_control(self, normalized, action, DownloadControlOutcome.UNKNOWN, "invalid_identifier")
+        try:
+            pre_listing = await self.list_torrents()
+        except ExternalServiceError:
+            return _qbt_control(self, normalized, action, DownloadControlOutcome.UNKNOWN, "pre_read_failed")
+        before = _qbt_find(pre_listing, normalized)
+        if before is None and pre_listing.failures:
+            return _qbt_control(self, normalized, action, DownloadControlOutcome.UNKNOWN, "pre_read_incomplete")
+        if before is None:
+            return _qbt_control(self, normalized, action, DownloadControlOutcome.NOT_FOUND, "not_found")
+        if before.state is TorrentState.UNKNOWN:
+            return _qbt_control(
+                self, normalized, action, DownloadControlOutcome.UNKNOWN, "pre_state_unknown", before=before
+            )
+        if _qbt_has_desired_state(before.state, action):
+            return _qbt_control(
+                self,
+                normalized,
+                action,
+                DownloadControlOutcome.ALREADY_IN_DESIRED_STATE,
+                "already_in_desired_state",
+                before=before,
+            )
+        try:
+            control_path = _qbt_control_path(await self.get_version(), action)
+            if control_path is None:
+                return _qbt_control(
+                    self,
+                    normalized,
+                    action,
+                    DownloadControlOutcome.UNKNOWN,
+                    "unsupported_client_version",
+                    before=before,
+                )
+            response = await self._client.post(control_path, data={"hashes": normalized})
+            if response.status_code in {401, 403}:
+                raise AuthenticationError(self._system, "qBittorrent rejected the configured credentials.")
+            if response.status_code >= 400:
+                raise ExternalServiceError(self._system, "qBittorrent control request failed.")
+        except ExternalServiceError:
+            return _qbt_control(
+                self, normalized, action, DownloadControlOutcome.UNKNOWN, "mutation_or_post_read_failed", before=before
+            )
+        after, failure_code = await _qbt_verify_post_control_state(self, normalized, action)
+        if failure_code is not None:
+            return _qbt_control(
+                self,
+                normalized,
+                action,
+                DownloadControlOutcome.UNKNOWN,
+                failure_code,
+                before=before,
+                after=after,
+            )
+        assert after is not None
+        return _qbt_control(
+            self, normalized, action, DownloadControlOutcome.APPLIED, "applied", before=before, after=after
+        )
+
     async def _matching_torrents(
         self,
         hashes: Sequence[str],
@@ -921,6 +1207,155 @@ class JellyfinServerClient(JsonServiceClient):
             )
         return result
 
+    @staticmethod
+    def _cleanup_datetime(value: object) -> tuple[datetime | None, bool]:
+        if value is None:
+            return None, True
+        if not isinstance(value, str) or not value:
+            return None, False
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None, False
+        if parsed.tzinfo is None:
+            return None, False
+        return parsed.astimezone(UTC), True
+
+    @staticmethod
+    def _cleanup_int(value: object) -> int | None:
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+    @classmethod
+    def _cleanup_item(cls, raw: object) -> JellyfinCleanupItem | None:
+        if not isinstance(raw, dict):
+            return None
+        item_id = raw.get("Id")
+        item_type = raw.get("Type")
+        name = raw.get("Name")
+        if not isinstance(item_id, str) or not item_id or not isinstance(name, str) or not isinstance(item_type, str):
+            return None
+        media_type = {"Movie": CleanupMediaType.MOVIE, "Series": CleanupMediaType.SERIES}.get(item_type)
+        if media_type is None:
+            return None
+        provider_ids = raw.get("ProviderIds")
+        provider_ids = provider_ids if isinstance(provider_ids, dict) else {}
+        tmdb = provider_ids.get("Tmdb")
+        tvdb = provider_ids.get("Tvdb")
+        imdb = provider_ids.get("Imdb")
+        created_at, created_valid = cls._cleanup_datetime(raw.get("DateCreated"))
+        added_at, added_valid = cls._cleanup_datetime(raw.get("DateLastMediaAdded"))
+        # A media source may represent an alternative rendition.  Reporting a
+        # size for several sources would create a misleading aggregate, so it
+        # is deliberately unavailable unless Jellyfin supplies one valid size.
+        sources = raw.get("MediaSources")
+        size: int | None = None
+        if isinstance(sources, list):
+            values = [source.get("Size") for source in sources if isinstance(source, dict)]
+            if len(values) == 1 and isinstance(values[0], int) and not isinstance(values[0], bool) and values[0] >= 0:
+                size = values[0]
+        return JellyfinCleanupItem(
+            item_id=item_id,
+            display_name=_qbt_safe_text(name, limit=240) or "Untitled",
+            media_type=media_type,
+            created_at=created_at if created_valid else None,
+            added_at=added_at if added_valid else None,
+            size_bytes=size,
+            tmdb_id=int(tmdb) if isinstance(tmdb, str) and tmdb.isdigit() else None,
+            tvdb_id=int(tvdb) if isinstance(tvdb, str) and tvdb.isdigit() else None,
+            imdb_id=imdb.strip() if isinstance(imdb, str) and imdb.strip() else None,
+        )
+
+    async def list_cleanup_items(
+        self, *, accept_language: str | None = None, max_items: int = 200
+    ) -> tuple[tuple[JellyfinCleanupItem, ...], bool]:
+        """Read a bounded, paginated Movie/Series catalogue without user data."""
+
+        limit = min(50, max(1, max_items))
+        start = 0
+        items: list[JellyfinCleanupItem] = []
+        truncated = False
+        headers = {"Accept-Language": accept_language} if accept_language else None
+        while True:
+            payload = await self._request(
+                "GET",
+                "/Items",
+                params={
+                    "Recursive": "true",
+                    "IncludeItemTypes": "Movie,Series",
+                    "Fields": "DateCreated,DateLastMediaAdded,MediaSources,ParentId,ProviderIds",
+                    "EnableUserData": "false",
+                    "StartIndex": start,
+                    "Limit": limit,
+                },
+                headers=headers,
+            )
+            if not isinstance(payload, dict) or not isinstance(payload.get("Items"), list):
+                raise ExternalServiceError("jellyfin", "Jellyfin returned an invalid cleanup catalogue.")
+            raw_items = payload["Items"]
+            for raw in raw_items:
+                parsed = self._cleanup_item(raw)
+                if parsed is None:
+                    raise ExternalServiceError("jellyfin", "Jellyfin returned malformed cleanup metadata.")
+                items.append(parsed)
+            total = payload.get("TotalRecordCount")
+            if not isinstance(total, int) or total < 0:
+                raise ExternalServiceError("jellyfin", "Jellyfin returned an invalid cleanup catalogue count.")
+            start += len(raw_items)
+            if start >= total:
+                break
+            if len(items) >= max_items or not raw_items:
+                truncated = True
+                break
+        return tuple(items[:max_items]), truncated
+
+    async def list_playback_users(self, *, max_users: int = 20) -> tuple[tuple[str, ...], bool]:
+        payload = await self._request("GET", "/Users")
+        if not isinstance(payload, list):
+            raise ExternalServiceError("jellyfin", "Jellyfin returned an invalid user scope.")
+        user_ids: list[str] = []
+        for raw in payload:
+            user_id = raw.get("Id") if isinstance(raw, dict) else None
+            if not isinstance(user_id, str) or not user_id or user_id in user_ids:
+                raise ExternalServiceError("jellyfin", "Jellyfin returned an invalid user scope.")
+            user_ids.append(user_id)
+        return tuple(user_ids[:max_users]), len(user_ids) > max_users
+
+    async def list_user_playback(
+        self, *, user_id: str, item_ids: tuple[str, ...], accept_language: str | None = None
+    ) -> tuple[PlaybackObservation, ...]:
+        if not item_ids or len(item_ids) > 50:
+            raise ValueError("Jellyfin playback item chunks must contain 1-50 IDs.")
+        headers = {"Accept-Language": accept_language} if accept_language else None
+        payload = await self._request(
+            "GET",
+            "/Items",
+            params={"UserId": user_id, "Ids": ",".join(item_ids), "EnableUserData": "true"},
+            headers=headers,
+        )
+        if not isinstance(payload, dict) or not isinstance(payload.get("Items"), list):
+            raise ExternalServiceError("jellyfin", "Jellyfin returned invalid playback data.")
+        observations: list[PlaybackObservation] = []
+        for raw in payload["Items"]:
+            item_id = raw.get("Id") if isinstance(raw, dict) else None
+            user_data = raw.get("UserData") if isinstance(raw, dict) else None
+            if not isinstance(item_id, str) or not isinstance(user_data, dict):
+                continue
+            played = user_data.get("Played")
+            play_count = user_data.get("PlayCount")
+            last_played, timestamp_valid = self._cleanup_datetime(user_data.get("LastPlayedDate"))
+            valid = isinstance(played, bool) and isinstance(play_count, int) and not isinstance(play_count, bool)
+            observations.append(
+                PlaybackObservation(
+                    user_id=user_id,
+                    item_id=item_id,
+                    played=played if isinstance(played, bool) else None,
+                    play_count=play_count if isinstance(play_count, int) and not isinstance(play_count, bool) else None,
+                    last_played_at=last_played,
+                    valid=valid and timestamp_valid,
+                )
+            )
+        return tuple(observations)
+
     async def delete_item(self, item_id: str) -> None:
         await self._request("DELETE", f"/Items/{item_id}", expected_statuses={200, 204, 404})
 
@@ -1033,6 +1468,19 @@ class NullJellyfinServerClient:
     ) -> Sequence[JellyfinItem]:
         return []
 
+    async def list_cleanup_items(
+        self, *, accept_language: str | None = None, max_items: int = 200
+    ) -> tuple[tuple[JellyfinCleanupItem, ...], bool]:
+        return (), False
+
+    async def list_playback_users(self, *, max_users: int = 20) -> tuple[tuple[str, ...], bool]:
+        return (), False
+
+    async def list_user_playback(
+        self, *, user_id: str, item_ids: tuple[str, ...], accept_language: str | None = None
+    ) -> tuple[PlaybackObservation, ...]:
+        return ()
+
     async def delete_item(self, item_id: str) -> None:
         return None
 
@@ -1066,6 +1514,28 @@ class NullDownloaderClient:
 
     async def get_version(self) -> str:
         return "not configured"
+
+    def configured_client_ids(self) -> set[str]:
+        return set()
+
+    async def list_torrents(self) -> DownloaderListing:
+        return DownloaderListing()
+
+    async def control_torrent(
+        self, client_id: str, info_hash: str | None = None, *, action: DownloadControlAction
+    ) -> DownloaderControlResult:
+        if info_hash is None:
+            info_hash = client_id
+            client_id = "not_configured"
+        return DownloaderControlResult(
+            client_id=client_id,
+            client_name="not configured",
+            client_kind="none",
+            info_hash=_qbt_hash(info_hash),
+            action=action,
+            outcome=DownloadControlOutcome.UNKNOWN,
+            code="not_configured",
+        )
 
     async def delete_hashes(
         self,

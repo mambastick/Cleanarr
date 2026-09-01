@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 import pytest
 
 from cleanarr.domain import (
+    DownloadControlAction,
+    DownloadControlOutcome,
+    DownloaderControlResult,
+    DownloaderListing,
     DownloaderRemovalResult,
     ExternalServiceError,
     RadarrHistoryRecord,
@@ -15,6 +21,8 @@ from cleanarr.domain import (
     SonarrEpisodeFile,
     SonarrHistoryRecord,
     SonarrSeries,
+    TorrentSnapshot,
+    TorrentState,
 )
 from cleanarr.infrastructure.downloaders import DownloaderTarget, MultiDownloaderClient
 from cleanarr.infrastructure.routers import MultiRadarrClient, MultiSonarrClient, RadarrTarget, SonarrTarget
@@ -77,6 +85,39 @@ class FailingDownloader:
     ) -> list[DownloaderRemovalResult]:
         self.seen_hashes.extend(hashes)
         raise ExternalServiceError("transmission", self.message)
+
+
+@dataclass
+class ReadControlDownloader:
+    info_hash: str
+    controls: list[str] = field(default_factory=list)
+
+    async def close(self) -> None:
+        return None
+
+    async def ping(self) -> None:
+        return None
+
+    async def get_version(self) -> str:
+        return "test"
+
+    async def delete_hashes(
+        self, hashes: list[str], *, delete_files: bool, dry_run: bool = False
+    ) -> list[DownloaderRemovalResult]:
+        return []
+
+    async def list_torrents(self) -> DownloaderListing:
+        return DownloaderListing(
+            torrents=(
+                TorrentSnapshot(
+                    "local", "local", "test", self.info_hash, "test", TorrentState.DOWNLOADING, datetime.now(tz=UTC)
+                ),
+            )
+        )
+
+    async def control_torrent(self, info_hash: str, *, action: DownloadControlAction) -> DownloaderControlResult:
+        self.controls.append(info_hash)
+        return DownloaderControlResult("local", "local", "test", info_hash, action, DownloadControlOutcome.APPLIED)
 
 
 @pytest.mark.asyncio
@@ -194,3 +235,57 @@ async def test_downloader_router_checks_all_clients_and_keeps_partial_errors() -
     assert results[0].existed is True
     assert results[1].client_id == "tr"
     assert results[1].error == "Transmission timed out"
+
+
+@pytest.mark.asyncio
+async def test_downloader_read_keeps_partial_failures_and_control_routes_to_one_owner() -> None:
+    info_hash = "D" * 40
+    first = ReadControlDownloader(info_hash)
+    second = ReadControlDownloader(info_hash)
+    router = MultiDownloaderClient(
+        [
+            DownloaderTarget(id="first", name="First", kind="qbittorrent", client=first),
+            DownloaderTarget(id="second", name="Second", kind="transmission", client=second),
+            DownloaderTarget(id="broken", name="Broken", kind="deluge", client=FailingDownloader("down")),
+        ],
+        max_read_concurrency=1,
+    )
+
+    listing = await router.list_torrents()
+    result = await router.control_torrent("second", info_hash, action=DownloadControlAction.PAUSE)
+
+    assert [torrent.client_id for torrent in listing.torrents] == ["first", "second"]
+    assert listing.failures[0].client_id == "broken"
+    assert result.outcome is DownloadControlOutcome.APPLIED
+    assert first.controls == []
+    assert second.controls == [info_hash]
+
+
+@pytest.mark.asyncio
+async def test_downloader_read_respects_configured_concurrency_bound() -> None:
+    info_hash = "2" * 40
+    active = 0
+    peak = 0
+
+    @dataclass
+    class SlowDownloader(ReadControlDownloader):
+        async def list_torrents(self) -> DownloaderListing:
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            return await super().list_torrents()
+
+    router = MultiDownloaderClient(
+        [
+            DownloaderTarget(id=str(index), name=str(index), kind="test", client=SlowDownloader(info_hash))
+            for index in range(5)
+        ],
+        max_read_concurrency=2,
+    )
+
+    listing = await router.list_torrents()
+
+    assert len(listing.torrents) == 5
+    assert peak == 2

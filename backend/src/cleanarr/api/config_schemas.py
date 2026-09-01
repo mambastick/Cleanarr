@@ -14,6 +14,7 @@ from cleanarr.domain.config import (
     RadarrServiceConfig,
     RTorrentServiceConfig,
     RuntimeConfig,
+    SeedingStopPolicyConfig,
     SeerrServiceConfig,
     ServiceKind,
     SonarrServiceConfig,
@@ -68,6 +69,7 @@ class GeneralConfigRequest(BaseModel):
     sso_group_claim: str = "groups"
     sso_required_claim: str | None = None
     sso_required_value: str | None = None
+    seeding_stop_policy: SeedingStopPolicyConfig = Field(default_factory=SeedingStopPolicyConfig)
 
     def to_domain(self) -> GeneralConfig:
         return GeneralConfig.model_validate(self.model_dump())

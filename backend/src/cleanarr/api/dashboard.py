@@ -82,9 +82,11 @@ class ActivityStore:
             conn.execute("DELETE FROM activity WHERE processed_at < ?", (cutoff,))
             conn.commit()
 
-    def _record_sync(self, result: ProcessingResult) -> None:
+    def _record_sync(self, result: ProcessingResult, display_name: str | None = None) -> None:
         now = datetime.now(UTC).isoformat()
-        result_response = ProcessingResultResponse.from_domain(result)
+        result_response = ProcessingResultResponse.from_domain(result).model_copy(
+            update={"display_name": display_name or result.event.name or result.event.item_type.value}
+        )
         with sqlite3.connect(self._db_path) as conn:
             conn.execute(
                 "INSERT INTO activity (processed_at, result_json) VALUES (?, ?)",
@@ -94,8 +96,8 @@ class ActivityStore:
             conn.execute("DELETE FROM activity WHERE processed_at < ?", (cutoff,))
             conn.commit()
 
-    async def record(self, result: ProcessingResult) -> None:
-        await asyncio.to_thread(self._record_sync, result)
+    async def record(self, result: ProcessingResult, *, display_name: str | None = None) -> None:
+        await asyncio.to_thread(self._record_sync, result, display_name)
 
     def _snapshot_sync(self, limit: int) -> list[ActivityRecord]:
         with sqlite3.connect(self._db_path) as conn:

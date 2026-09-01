@@ -13,7 +13,14 @@ from xmlrpc.client import Binary, dumps, loads
 import httpx
 import pytest
 
-from cleanarr.domain import AuthenticationError
+from cleanarr.domain import (
+    AuthenticationError,
+    DownloadControlAction,
+    DownloadControlOutcome,
+    ListingFreshness,
+    TorrentSnapshot,
+    TorrentState,
+)
 from cleanarr.infrastructure.clients import (
     JellyfinServerClient,
     QbittorrentClient,
@@ -88,6 +95,68 @@ async def _eventually_find_torrent(client: Any) -> None:
             return
         await asyncio.sleep(0.2)
     pytest.fail(f"{client.__class__.__name__} did not expose the added compatibility torrent")
+
+
+async def _eventually_read_torrent(client: Any) -> TorrentSnapshot:
+    last_failures: object = ()
+    for _ in range(30):
+        listing = await client.list_torrents()
+        last_failures = listing.failures
+        matches = [torrent for torrent in listing.torrents if torrent.info_hash == TORRENT_HASH]
+        if len(matches) == 1 and matches[0].state is not TorrentState.UNKNOWN:
+            assert not listing.failures
+            return matches[0]
+        await asyncio.sleep(0.2)
+    pytest.fail(
+        f"{client.__class__.__name__} did not expose one normalized compatibility torrent; failures={last_failures!r}"
+    )
+
+
+async def _assert_download_control_contract(client: Any) -> None:
+    snapshot = await _eventually_read_torrent(client)
+    assert snapshot.display_name == "cleanarr-compatibility.bin"
+    assert snapshot.total_bytes == len(CONTENT)
+    assert snapshot.freshness is ListingFreshness.FRESH
+    assert snapshot.progress is None or 0 <= snapshot.progress <= 1
+
+    if snapshot.state is TorrentState.STOPPED:
+        initially_resumed = await client.control_torrent(TORRENT_HASH, action=DownloadControlAction.RESUME)
+        assert initially_resumed.outcome in {
+            DownloadControlOutcome.APPLIED,
+            DownloadControlOutcome.ALREADY_IN_DESIRED_STATE,
+        }
+        assert initially_resumed.after is not None
+        assert initially_resumed.after.state in {
+            TorrentState.DOWNLOADING,
+            TorrentState.SEEDING,
+            TorrentState.QUEUED,
+            TorrentState.CHECKING,
+        }
+        resumed_again = await client.control_torrent(TORRENT_HASH, action=DownloadControlAction.RESUME)
+        assert resumed_again.outcome is DownloadControlOutcome.ALREADY_IN_DESIRED_STATE
+
+    paused = await client.control_torrent(TORRENT_HASH, action=DownloadControlAction.PAUSE)
+    assert paused.outcome is DownloadControlOutcome.APPLIED
+    assert paused.before is not None
+    assert paused.after is not None
+    assert paused.after.state is TorrentState.STOPPED
+
+    paused_again = await client.control_torrent(TORRENT_HASH, action=DownloadControlAction.PAUSE)
+    assert paused_again.outcome is DownloadControlOutcome.ALREADY_IN_DESIRED_STATE
+
+    resumed = await client.control_torrent(TORRENT_HASH, action=DownloadControlAction.RESUME)
+    assert resumed.outcome is DownloadControlOutcome.APPLIED
+    assert resumed.before is not None
+    assert resumed.after is not None
+    assert resumed.after.state in {
+        TorrentState.DOWNLOADING,
+        TorrentState.SEEDING,
+        TorrentState.QUEUED,
+        TorrentState.CHECKING,
+    }
+
+    resumed_again = await client.control_torrent(TORRENT_HASH, action=DownloadControlAction.RESUME)
+    assert resumed_again.outcome is DownloadControlOutcome.ALREADY_IN_DESIRED_STATE
 
 
 async def _qbittorrent_add(password: str) -> None:
@@ -201,6 +270,7 @@ async def test_qbittorrent_5_2_contract(qbittorrent: QbittorrentClient) -> None:
 
     await _qbittorrent_add(password)
     await _eventually_find_torrent(qbittorrent)
+    await _assert_download_control_contract(qbittorrent)
     assert (await qbittorrent.delete_hashes([TORRENT_HASH], delete_files=False))[0].existed is True
     assert (await qbittorrent.delete_hashes([TORRENT_HASH], delete_files=False))[0].existed is False
 
@@ -227,6 +297,7 @@ async def test_transmission_generations(port: int, expected_version: str, modern
         assert (await client.delete_hashes([MISSING_HASH], delete_files=False))[0].existed is False
 
         await _transmission_add(base_url, modern=modern)
+        await _assert_download_control_contract(client)
         assert (await client.delete_hashes([TORRENT_HASH], delete_files=False, dry_run=True))[0].existed is True
         assert (await client.delete_hashes([TORRENT_HASH], delete_files=False))[0].existed is True
         assert (await client.delete_hashes([TORRENT_HASH], delete_files=False))[0].existed is False
@@ -245,6 +316,7 @@ async def test_deluge_2_2_contract() -> None:
         assert (await client.delete_hashes([MISSING_HASH], delete_files=False))[0].existed is False
 
         await _deluge_add()
+        await _assert_download_control_contract(client)
         assert (await client.delete_hashes([TORRENT_HASH], delete_files=False, dry_run=True))[0].existed is True
         assert (await client.delete_hashes([TORRENT_HASH], delete_files=False))[0].existed is True
         assert (await client.delete_hashes([TORRENT_HASH], delete_files=False))[0].existed is False
@@ -268,6 +340,7 @@ async def test_rtorrent_0_16_xmlrpc_contract() -> None:
         assert (await client.delete_hashes([MISSING_HASH], delete_files=False))[0].existed is False
 
         await _rtorrent_add()
+        await _assert_download_control_contract(client)
         assert (await client.delete_hashes([TORRENT_HASH], delete_files=False, dry_run=True))[0].existed is True
         assert (await client.delete_hashes([TORRENT_HASH], delete_files=False))[0].existed is True
         assert (await client.delete_hashes([TORRENT_HASH], delete_files=False))[0].existed is False

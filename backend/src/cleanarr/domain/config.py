@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
-CURRENT_CONFIG_SCHEMA_VERSION: Literal[2] = 2
+CURRENT_CONFIG_SCHEMA_VERSION: Literal[3] = 3
 
 
 class ServiceKind(StrEnum):
@@ -39,6 +39,51 @@ class SSOAuthMode(StrEnum):
     PASSWORD_ONLY = "password_only"
     SSO_ONLY = "sso_only"
     BOTH = "both"
+
+
+class SeedingStopPolicyMode(StrEnum):
+    ALL = "all"
+    ANY = "any"
+
+
+class SeedingStopPolicyConfig(BaseModel):
+    """Opt-in reversible stop policy; thresholds are deliberately fail-closed."""
+
+    enabled: bool = False
+    mode: SeedingStopPolicyMode = SeedingStopPolicyMode.ALL
+    min_ratio: float | None = Field(default=None, ge=0)
+    min_seeding_minutes: int | None = Field(default=None, ge=1)
+    include_categories: list[str] = Field(default_factory=list)
+    exclude_categories: list[str] = Field(default_factory=list)
+    include_tags: list[str] = Field(default_factory=list)
+    exclude_tags: list[str] = Field(default_factory=list)
+    interval_seconds: int = Field(default=300, ge=30, le=86_400)
+    max_attempts: int = Field(default=1, ge=1, le=5)
+
+    @model_validator(mode="after")
+    def validate_thresholds(self) -> SeedingStopPolicyConfig:
+        if self.enabled and self.min_ratio is None and self.min_seeding_minutes is None:
+            raise ValueError("Enabled seeding stop policy requires a ratio or seeding-time threshold.")
+        return self
+
+    @field_validator("include_categories", "exclude_categories", "include_tags", "exclude_tags", mode="before")
+    @classmethod
+    def normalize_scope(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            value = value.replace("\n", ",").split(",")
+        if not isinstance(value, (list, tuple, set)):
+            raise ValueError("Policy scope must be a list or comma-separated string.")
+        result: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            text = str(item).strip()
+            folded = text.casefold()
+            if text and folded not in seen:
+                result.append(text)
+                seen.add(folded)
+        return result[:100]
 
 
 def _normalize_sso_mode_value(value: object) -> SSOAuthMode:
@@ -89,6 +134,7 @@ class GeneralConfig(BaseModel):
     sso_group_claim: str = "groups"
     sso_required_claim: str | None = None
     sso_required_value: str | None = None
+    seeding_stop_policy: SeedingStopPolicyConfig = Field(default_factory=SeedingStopPolicyConfig)
 
     @field_validator("log_level", mode="before")
     @classmethod
@@ -351,7 +397,7 @@ class JellyfinServiceConfig(BaseServiceConfig):
 class RuntimeConfig(BaseModel):
     """Complete persisted CleanArr runtime configuration."""
 
-    config_schema_version: Literal[2] = CURRENT_CONFIG_SCHEMA_VERSION
+    config_schema_version: Literal[3] = CURRENT_CONFIG_SCHEMA_VERSION
     admin: AdminAccountConfig = Field(default_factory=AdminAccountConfig)
     general: GeneralConfig = Field(default_factory=GeneralConfig)
     radarr: list[RadarrServiceConfig] = Field(default_factory=list)

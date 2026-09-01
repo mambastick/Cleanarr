@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 
 from cleanarr.application.authentication import AuthenticationService
-from cleanarr.application.configuration import RuntimeConfigurationService, build_downloader_client
+from cleanarr.application.configuration import RuntimeConfigurationService
 from cleanarr.application.service import CascadeDeletionService
 from cleanarr.application.strategies import DeletionStrategyFactory
 from cleanarr.domain.config import (
@@ -28,6 +28,7 @@ from cleanarr.infrastructure.clients import (
     SonarrClient,
 )
 from cleanarr.infrastructure.config_store import SqliteConfigStore
+from cleanarr.infrastructure.configuration_connections import ServiceConnectionTester, build_downloader_client
 from cleanarr.infrastructure.downloaders import (
     DownloaderTarget,
     MultiDownloaderClient,
@@ -85,6 +86,7 @@ class ServiceContainer:
                 migrate_from=settings.config_state_path,
             ),
             settings=settings,
+            connection_tester=ServiceConnectionTester(),
         )
         auth_service = AuthenticationService(
             config_service=config_service,

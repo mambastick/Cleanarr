@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
+import httpx
 import pytest
 import respx
 
-from cleanarr.domain import AuthenticationError, ExternalServiceError, SeerrRequest
+from cleanarr.domain import (
+    AuthenticationError,
+    DownloadControlAction,
+    DownloadControlOutcome,
+    ExternalServiceError,
+    SeerrRequest,
+    TorrentState,
+)
 from cleanarr.domain.config import TorrentRemovalPolicy
 from cleanarr.infrastructure.clients import (
     JellyfinServerClient,
+    NullDownloaderClient,
     QbittorrentClient,
     RadarrClient,
     SeerrClient,
@@ -470,3 +479,155 @@ async def test_qbittorrent_client_maps_hybrid_hashes_to_one_policy_checked_remov
         ("V1HASH", True, None),
         ("V2HASH", True, None),
     ]
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize(
+    ("version", "action", "initial_stopped", "endpoint"),
+    [
+        ("v5.2.3", DownloadControlAction.PAUSE, False, "stop"),
+        ("v5.2.3", DownloadControlAction.RESUME, True, "start"),
+        ("v4.6.7", DownloadControlAction.PAUSE, False, "pause"),
+        ("v4.6.7", DownloadControlAction.RESUME, True, "resume"),
+    ],
+)
+async def test_qbittorrent_control_protocol_matrix(
+    version: str, action: DownloadControlAction, initial_stopped: bool, endpoint: str
+) -> None:
+    info_hash = "C" * 40
+    stopped = initial_stopped
+    stale_reads = 0
+
+    respx.post("http://qbt/api/v2/auth/login").respond(text="Ok.")
+    respx.get("http://qbt/api/v2/app/version").respond(text=version)
+
+    def info_handler(_: httpx.Request) -> httpx.Response:
+        nonlocal stale_reads
+        visible_stopped = not stopped if stale_reads else stopped
+        stale_reads = max(0, stale_reads - 1)
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "hash": info_hash,
+                    "name": "/private/path",
+                    "state": "pausedDL" if visible_stopped else "downloading",
+                    "progress": 0.5,
+                    "tracker": "https://tracker.example/announce",
+                    "eta": 8640001,
+                }
+            ],
+        )
+
+    route = respx.get("http://qbt/api/v2/torrents/info").mock(side_effect=info_handler)
+
+    def control_handler(request: httpx.Request) -> httpx.Response:
+        nonlocal stale_reads, stopped
+        assert request.content == f"hashes={info_hash}".encode()
+        stopped = action is DownloadControlAction.PAUSE
+        stale_reads = 1
+        return httpx.Response(200)
+
+    controls = {
+        name: respx.post(f"http://qbt/api/v2/torrents/{name}").mock(side_effect=control_handler)
+        for name in ("stop", "start", "pause", "resume")
+    }
+    delete = respx.post("http://qbt/api/v2/torrents/delete").respond(status_code=200)
+    client = QbittorrentClient(base_url="http://qbt", username="user", password="pass", timeout_seconds=5)
+    try:
+        listing = await client.list_torrents()
+        result = await client.control_torrent(info_hash, action=action)
+    finally:
+        await client.close()
+
+    assert listing.torrents[0].display_name is None
+    assert listing.torrents[0].tracker_summary == "tracker.example"
+    assert listing.torrents[0].eta_seconds is None
+    assert result.outcome is DownloadControlOutcome.APPLIED
+    assert result.after is not None and result.after.state is (
+        TorrentState.STOPPED if action is DownloadControlAction.PAUSE else TorrentState.DOWNLOADING
+    )
+    assert controls[endpoint].call_count == 1
+    assert sum(route.call_count for route in controls.values()) == 1
+    assert delete.call_count == 0
+    assert route.call_count >= 3
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize("version", ["unknown", "v3.3.0"])
+async def test_qbittorrent_unknown_version_fails_closed_without_control_mutation(version: str) -> None:
+    info_hash = "F" * 40
+    respx.post("http://qbt/api/v2/auth/login").respond(text="Ok.")
+    respx.get("http://qbt/api/v2/torrents/info").respond(json=[{"hash": info_hash, "state": "downloading"}])
+    respx.get("http://qbt/api/v2/app/version").respond(text=version)
+    stop = respx.post("http://qbt/api/v2/torrents/stop").respond(status_code=200)
+    legacy = respx.post("http://qbt/api/v2/torrents/pause").respond(status_code=200)
+    client = QbittorrentClient(base_url="http://qbt", username="user", password="pass", timeout_seconds=5)
+    try:
+        result = await client.control_torrent(info_hash, action=DownloadControlAction.PAUSE)
+    finally:
+        await client.close()
+
+    assert result.outcome is DownloadControlOutcome.UNKNOWN
+    assert result.code == "unsupported_client_version"
+    assert not stop.called and not legacy.called
+
+
+@pytest.mark.asyncio
+async def test_null_downloader_read_and_control_are_safe_without_configuration() -> None:
+    client = NullDownloaderClient()
+
+    listing = await client.list_torrents()
+    result = await client.control_torrent("not-a-hash", action=DownloadControlAction.PAUSE)
+
+    assert listing.torrents == () and listing.failures == ()
+    assert result.outcome is DownloadControlOutcome.UNKNOWN
+    assert result.info_hash == ""
+    assert result.code == "not_configured"
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize(
+    ("action", "state"),
+    [(DownloadControlAction.PAUSE, "pausedDL"), (DownloadControlAction.RESUME, "downloading")],
+)
+async def test_qbittorrent_already_in_desired_state_issues_no_control(
+    action: DownloadControlAction, state: str
+) -> None:
+    info_hash = "A" * 40
+    respx.post("http://qbt/api/v2/auth/login").respond(text="Ok.")
+    respx.get("http://qbt/api/v2/torrents/info").respond(json=[{"hash": info_hash, "state": state}])
+    controls = [
+        respx.post(f"http://qbt/api/v2/torrents/{name}").respond(status_code=200)
+        for name in ("stop", "start", "pause", "resume", "delete")
+    ]
+    client = QbittorrentClient(base_url="http://qbt", username="user", password="pass", timeout_seconds=5)
+    try:
+        result = await client.control_torrent(info_hash, action=action)
+    finally:
+        await client.close()
+
+    assert result.outcome is DownloadControlOutcome.ALREADY_IN_DESIRED_STATE
+    assert all(route.call_count == 0 for route in controls)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_qbittorrent_queued_states_are_not_misclassified_as_seeding_or_downloading() -> None:
+    respx.post("http://qbt/api/v2/auth/login").respond(text="Ok.")
+    respx.get("http://qbt/api/v2/torrents/info").respond(
+        json=[
+            {"hash": "B" * 40, "state": "queuedUP"},
+            {"hash": "C" * 40, "state": "queuedDL"},
+        ]
+    )
+    client = QbittorrentClient(base_url="http://qbt", username="user", password="pass", timeout_seconds=5)
+    try:
+        listing = await client.list_torrents()
+    finally:
+        await client.close()
+
+    assert [torrent.state for torrent in listing.torrents] == [TorrentState.QUEUED, TorrentState.QUEUED]

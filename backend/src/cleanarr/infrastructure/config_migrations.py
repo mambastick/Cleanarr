@@ -63,9 +63,19 @@ def _migrate_v2(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _migrate_v3(payload: dict[str, Any]) -> dict[str, Any]:
+    """Add the disabled-by-default reversible seeding-stop policy."""
+
+    general = payload.get("general")
+    if isinstance(general, dict):
+        general.setdefault("seeding_stop_policy", {})
+    return payload
+
+
 CONFIG_MIGRATIONS = (
     ConfigMigration(version=1, migrate=_migrate_v1),
     ConfigMigration(version=2, migrate=_migrate_v2),
+    ConfigMigration(version=3, migrate=_migrate_v3),
 )
 
 
