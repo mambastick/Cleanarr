@@ -54,6 +54,10 @@ fail-closed результатами.
 profile URL, владение instance или download history и создайте новый dry-run
 preview.
 
+При коде `interrupted_unknown` сохраните database и downstream evidence. Не
+повторяйте webhook автоматически: до interruption он мог дойти до downstream
+mutation.
+
 ## Ручное задание partial или ожидает retry
 
 Откройте персистентное задание и сравните завершённые действия с заново
@@ -65,6 +69,24 @@ Arr/Seerr/Jellyfin. Восстановите dependency, оставьте dry-ru
 После рестарта дождитесь readiness и повторно откройте job. Resolved event,
 подтверждённый preflight, завершённые actions, attempt count и next retry time
 хранятся персистентно.
+
+При `plan_changed` или `confirmation_required` создайте новый preview и
+подтвердите его текущий hash. При `idempotency_key_conflict` или retired key не
+меняйте request body с тем же ключом. Batch может быть partial: проверьте каждый
+child и его blocked/error code; `batch_plan_changed` требует нового batch preview.
+Interrupted potentially mutating job имеет `interrupted_unknown`, а не retry.
+
+## Downloads или cleanup candidates неполны
+
+Обновите Downloads и проверьте source status, client failure details, freshness
+и managed ownership перед pause/resume. HTTP response не равен completion:
+`uncertain` и `reconcile_required` требуют reconciliation. Ambiguous action
+повторяйте только с тем же action и idempotency key.
+
+Cleanup candidates являются рекомендациями. `source_status=partial`,
+`truncated` или `failure_codes` означают неполный список; unknown watch/readiness
+data никогда не разрешают удаление. Candidate без `deletion_link` non-actionable;
+используйте display name связанного item только для запуска обычного preview flow.
 
 ## Не работает login или SSO
 

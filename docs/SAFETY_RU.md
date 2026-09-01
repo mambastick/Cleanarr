@@ -50,6 +50,15 @@ torrent client/hash/path, downstream-мутации и все safety decisions.
 отсутствующий, изменившийся или устаревший hash и пересчитывает план до первой
 мутации.
 
+Только устойчивые service identifiers, hashes и paths являются входными данными
+для ownership. `display_name` — лишь presentation data. Batch сначала получает
+mutation-free preview каждого child, связывает упорядоченные child plans одним
+batch hash и перепроверяет их при submit/execution. Client idempotency key
+возвращает ресурс только для того же canonical confirmed request; повторное
+использование для другого request отклоняется. Заблокированные children остаются
+видимыми, а batch может завершиться partial: общей all-or-nothing транзакции
+между сервисами нет.
+
 Удаление torrent выполняется до зависимых удалений из Arr, Seerr и Jellyfin.
 Ошибка torrent блокирует эти зависимые мутации, чтобы доказательства владения
 сохранились для безопасного retry. Успешные предыдущие действия и оставшееся
@@ -62,6 +71,19 @@ retry-state сохраняются в SQLite.
 Partial failures и safety skips не помечаются завершёнными, потому что состояние
 dependencies может измениться и следующий подтверждённый retry может стать
 безопасным.
+
+Если рестарт произошёл до потенциально мутирующей фазы manual job, CleanArr
+перепроверяет сохранённый preflight. После этой точки job получает terminal
+`interrupted_unknown` и не запускается автоматически. Exception или cancellation
+webhook также оставляет durable tombstone `interrupted_unknown`; automatic
+reconciliation/replay блокируется, поскольку нельзя доказать достигнутую
+downstream-стадию.
+
+Pause/resume в Downloads — обратимое действие, отдельное от удаления torrent
+entry или data. Для него нужны fresh managed ownership evidence. Отсутствующие,
+stale, partial или conflicting playback/watch/download observations являются
+unknown: ими можно сортировать или объяснять рекомендацию, но нельзя разрешать
+удаление.
 
 Единый process-wide safety lock сериализует разрушительную webhook- и ручную
 работу. CleanArr 1.0 поддерживает одну реплику приложения с одним SQLite state

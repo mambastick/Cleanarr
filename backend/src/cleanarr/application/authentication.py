@@ -8,11 +8,48 @@ from collections import deque
 from dataclasses import dataclass
 from math import ceil
 from threading import Lock
-from typing import Any
+from typing import Any, Protocol
 
 from cleanarr.application.configuration import RuntimeConfigurationService
 from cleanarr.domain.config import GeneralConfig, SSOAuthMode
-from cleanarr.infrastructure.auth import InMemorySessionStore, PasswordHasher
+
+
+class PasswordHashResult(Protocol):
+    """Result returned by the injected password-hashing adapter."""
+
+    @property
+    def salt(self) -> str: ...
+
+    @property
+    def digest(self) -> str: ...
+
+
+class PasswordHasherPort(Protocol):
+    """Application port for password hashing and verification."""
+
+    def hash_password(self, password: str) -> PasswordHashResult: ...
+
+    def verify_password(self, password: str, *, salt: str, digest: str) -> bool: ...
+
+
+class SessionRecordPort(Protocol):
+    """Application view of a resolved session."""
+
+    @property
+    def username(self) -> str: ...
+
+    @property
+    def csrf_token(self) -> str: ...
+
+
+class SessionStorePort(Protocol):
+    """Application port for local session lifecycle."""
+
+    def create_session(self, username: str) -> str: ...
+
+    def resolve_session(self, token: str) -> SessionRecordPort | None: ...
+
+    def revoke_session(self, token: str) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -62,8 +99,8 @@ class AuthenticationService:
         self,
         *,
         config_service: RuntimeConfigurationService,
-        password_hasher: PasswordHasher,
-        session_store: InMemorySessionStore,
+        password_hasher: PasswordHasherPort,
+        session_store: SessionStorePort,
         sso_state_ttl_seconds: int = 60 * 5,
         login_window_seconds: int = 60 * 5,
         login_max_failures: int = 5,

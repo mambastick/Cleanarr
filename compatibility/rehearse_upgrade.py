@@ -15,10 +15,11 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-V0211_IMAGE = (
-    "ghcr.io/mambastick/cleanarr:0.2.11@sha256:a7c8c64f102e134c30a385ed42d3951766cf1a97891d9af2de133d93f7f95aa6"
-)
+V0211_IMAGE = "ghcr.io/mambastick/cleanarr:0.2.11@sha256:a7c8c64f102e134c30a385ed42d3951766cf1a97891d9af2de133d93f7f95aa6"
 V090_IMAGE = "ghcr.io/mambastick/cleanarr:0.9.0@sha256:c77bffd72ca49279b95a5c1b82e3b20938d702d7016ab759ce11fc39be29de67"
+V100_IMAGE = "ghcr.io/mambastick/cleanarr:1.0.0@sha256:fd039528eed3326ad0c16d8f36630a4dc5b67962e3c93d3687a768e206979dc5"
+CANDIDATE_DATABASE_SCHEMA_VERSION = 5
+CANDIDATE_CONFIG_SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,34 @@ SOURCES = (
             "jellyfin": [],
         },
     ),
+    SourceRelease(
+        version="1.0.0",
+        image=V100_IMAGE,
+        schema_version=2,
+        config={
+            "config_schema_version": 2,
+            "admin": {
+                "username": "upgrade-admin",
+                "password_salt": "upgrade-salt",
+                "password_hash": "upgrade-hash",
+            },
+            "general": {
+                "dry_run": False,
+                "log_level": "WARNING",
+                "webhook_shared_token": "upgrade-marker-1.0.0",
+                "ui_language": "ru",
+                "sso_mode": "password_only",
+                "sso_allowed_users": [],
+                "sso_allowed_groups": [],
+                "sso_group_claim": "groups",
+            },
+            "radarr": [],
+            "sonarr": [],
+            "seerr": [],
+            "downloaders": [],
+            "jellyfin": [],
+        },
+    ),
 )
 
 
@@ -139,13 +168,17 @@ def _start_container(name: str, image: str, state_dir: Path) -> None:
         )
         if probe.returncode == 0:
             return
-        running = _docker("inspect", name, "--format", "{{.State.Running}}", capture=True).stdout.strip()
+        running = _docker(
+            "inspect", name, "--format", "{{.State.Running}}", capture=True
+        ).stdout.strip()
         if running != "true":
             logs = _docker("logs", name, capture=True).stdout
             raise RuntimeError(f"{image} exited during upgrade rehearsal:\n{logs}")
         time.sleep(2)
     logs = _docker("logs", name, capture=True).stdout
-    raise RuntimeError(f"{image} did not become ready during upgrade rehearsal:\n{logs}")
+    raise RuntimeError(
+        f"{image} did not become ready during upgrade rehearsal:\n{logs}"
+    )
 
 
 def _remove_container(name: str) -> None:
@@ -199,7 +232,11 @@ def _database_digest(path: Path) -> str:
 def _assert_source_state(source: SourceRelease, database: Path) -> None:
     with sqlite3.connect(database) as connection:
         schema_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        payload = json.loads(connection.execute("SELECT config_json FROM config WHERE id = 1").fetchone()[0])
+        payload = json.loads(
+            connection.execute(
+                "SELECT config_json FROM config WHERE id = 1"
+            ).fetchone()[0]
+        )
         activity_count = int(
             connection.execute(
                 "SELECT COUNT(*) FROM activity WHERE result_json LIKE ?",
@@ -208,24 +245,57 @@ def _assert_source_state(source: SourceRelease, database: Path) -> None:
         )
     assert schema_version == source.schema_version
     assert payload["admin"]["username"] == "upgrade-admin"
-    assert payload["general"]["webhook_shared_token"] == f"upgrade-marker-{source.version}"
+    assert (
+        payload["general"]["webhook_shared_token"] == f"upgrade-marker-{source.version}"
+    )
     assert activity_count == 1
 
 
-def _assert_candidate_state(container_name: str, source: SourceRelease, database: Path) -> None:
+def _assert_candidate_state(
+    container_name: str, source: SourceRelease, database: Path
+) -> None:
     validation = (
         "from cleanarr.infrastructure.config_store import SqliteConfigStore;"
         "c=SqliteConfigStore('/config/cleanarr.db').load();"
         "assert c is not None;"
-        "assert c.config_schema_version == 2;"
+        f"assert c.config_schema_version == {CANDIDATE_CONFIG_SCHEMA_VERSION};"
         "assert c.admin.username == 'upgrade-admin';"
         f"assert c.general.webhook_shared_token == 'upgrade-marker-{source.version}';"
         "assert c.general.dry_run is False;"
-        + ("assert c.seerr[0].name == 'Legacy Seerr';" if source.version == "0.2.11" else "")
+        "assert c.general.seeding_stop_policy.enabled is False;"
+        + (
+            "assert c.seerr[0].name == 'Legacy Seerr';"
+            if source.version == "0.2.11"
+            else ""
+        )
     )
     _docker("exec", container_name, "python", "-c", validation)
     with sqlite3.connect(database) as connection:
-        assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == 2
+        assert (
+            int(connection.execute("PRAGMA user_version").fetchone()[0])
+            == CANDIDATE_DATABASE_SCHEMA_VERSION
+        )
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        assert {
+            "destructive_idempotency_ledger",
+            "manual_delete_batches",
+            "manual_delete_batch_children",
+            "download_observations",
+            "download_actions",
+            "policy_evaluations",
+        } <= tables
+        config = json.loads(
+            connection.execute(
+                "SELECT config_json FROM config WHERE id = 1"
+            ).fetchone()[0]
+        )
+        assert config["config_schema_version"] == CANDIDATE_CONFIG_SCHEMA_VERSION
+        assert config["general"]["seeding_stop_policy"]["enabled"] is False
         activity_count = int(
             connection.execute(
                 "SELECT COUNT(*) FROM activity WHERE result_json LIKE ?",
@@ -240,9 +310,15 @@ def _rehearse(source: SourceRelease, candidate_image: str, work_dir: Path) -> No
     backup_dir = work_dir / f"backup-{source.version}"
     state_dir.mkdir(mode=0o777)
     os.chmod(state_dir, 0o777)
-    source_name = f"cleanarr-upgrade-source-{source.version.replace('.', '-')}-{os.getpid()}"
-    candidate_name = f"cleanarr-upgrade-candidate-{source.version.replace('.', '-')}-{os.getpid()}"
-    rollback_name = f"cleanarr-upgrade-rollback-{source.version.replace('.', '-')}-{os.getpid()}"
+    source_name = (
+        f"cleanarr-upgrade-source-{source.version.replace('.', '-')}-{os.getpid()}"
+    )
+    candidate_name = (
+        f"cleanarr-upgrade-candidate-{source.version.replace('.', '-')}-{os.getpid()}"
+    )
+    rollback_name = (
+        f"cleanarr-upgrade-rollback-{source.version.replace('.', '-')}-{os.getpid()}"
+    )
 
     try:
         _start_container(source_name, source.image, state_dir)
@@ -264,7 +340,9 @@ def _rehearse(source: SourceRelease, candidate_image: str, work_dir: Path) -> No
         _start_container(rollback_name, source.image, state_dir)
         _assert_source_state(source, state_dir / "cleanarr.db")
         _remove_container(rollback_name)
-        print(f"Upgrade and backup rollback passed: v{source.version} -> candidate -> v{source.version}")
+        print(
+            f"Upgrade and backup rollback passed: v{source.version} -> candidate -> v{source.version}"
+        )
     finally:
         for name in (source_name, candidate_name, rollback_name):
             _remove_container(name)
@@ -272,7 +350,7 @@ def _rehearse(source: SourceRelease, candidate_image: str, work_dir: Path) -> No
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("candidate_image", help="Locally built 1.0 release-candidate image")
+    parser.add_argument("candidate_image", help="Locally built release-candidate image")
     arguments = parser.parse_args()
     if shutil.which("docker") is None:
         raise RuntimeError("docker is required")

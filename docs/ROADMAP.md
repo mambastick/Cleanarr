@@ -261,6 +261,92 @@ issue, pull request, or release decision.
   digest is
   `sha256:fd039528eed3326ad0c16d8f36630a4dc5b67962e3c93d3687a768e206979dc5`.
 
+## Accepted post-1.0 workstream
+
+Accepted on **2026-09-01**. This section records the next product direction; it
+does not claim that the work is implemented or released. The 1.0 fail-closed,
+dry-run, compatibility, migration, and quality contracts remain mandatory.
+
+### 1. Deletion interaction correctness and first-run setup
+
+- Make a single confirmed click start exactly one deletion job. Expose explicit
+  plan-loading, ready, submitting, success, failure, and retry states; prevent
+  duplicate submission and never require repeated clicking to advance.
+- Keep the user-facing library title stable through preview, background job,
+  activity, retry, and batch results. A localized display title is presentation
+  data and must not replace stable media identifiers or ownership evidence.
+- Redesign the first-run downloader step around qBittorrent, Transmission,
+  Deluge, and rTorrent-specific URL/authentication fields, validation, help, and
+  connection evidence. It must support configuring more than one client instead
+  of implying that the first client is the complete runtime topology.
+
+### 2. Unified design system and accessible destructive UX
+
+- Audit every frontend surface and consolidate color, status, surface, focus,
+  radius, spacing, motion, and scrollbar behavior into semantic tokens with
+  verified light, dark, and system-theme parity.
+- Use shadcn/ui as the accessible component foundation, Animate UI for the
+  compatible animated tabs and Lucide icon interactions, and a curated subset
+  of React Bits for presentation-only polish. Do not add an independent fourth
+  component system or use decorative components for critical form semantics.
+- Replace inconsistent native selects, checkboxes, ad-hoc dialogs, buttons, and
+  scroll containers with reviewed local primitives. Respect keyboard access,
+  focus restoration, reduced motion, responsive reflow, and WCAG 2.2 AA
+  contrast/semantics.
+- Replace the technical deletion dump with a progressive plan: a plain-language
+  summary of what will be deleted, retained, skipped, or blocked, followed by
+  optional technical identifiers and diagnostics.
+
+### 3. Bounded batch deletion
+
+- Add explicit card selection, visible selected counts, select-visible/clear
+  actions, and a persistent batch action bar without making the whole card an
+  ambiguous destructive control.
+- Generate a mutation-free item-level plan for every selection, then bind the
+  exact ordered batch to one confirmation hash. A changed, failed, ambiguous,
+  or stale child plan blocks that child and requires a refreshed confirmation.
+- Require a separate accessible confirmation dialog summarizing item types,
+  item count, estimated size, affected systems, retained torrents, and safety
+  blocks. Batch submission is bounded server-side, idempotent, and reports
+  per-item progress and partial outcomes instead of pretending to be atomic
+  across external services.
+
+### 4. Downloads and cleanup insights
+
+- Add a top-level **Downloads** section with two distinct views: live download/
+  seeding state and library cleanup candidates. Do not mix torrent state with
+  watch-derived deletion eligibility in one opaque score.
+- Normalize read-only state across all four Tier 1 clients: client, state,
+  progress, size, ratio, seeding time, activity, category/tags when available,
+  and data freshness. Add idempotent pause/stop and resume actions only after
+  each adapter has documented semantics and contract tests.
+- Add an explicit policy for stopping seeding after configured ratio/time
+  conditions. Policy evaluation, state changes, failures, and retries must be
+  persisted and auditable; stopping is not torrent/data deletion.
+- Build explainable Jellyfin cleanup signals: watched/never-watched/unknown,
+  aggregate play count, last played time, library age, size, and seeding
+  readiness. Missing or stale history remains unknown. Initial delivery is for
+  filtering, sorting, recommendations, and manual/batch deletion only.
+- Treat automatic media deletion, "leaving soon" workflows, optional historical
+  providers, and scheduled rule execution as a later opt-in stage requiring a
+  separate preview, exclusions, cooling period, migration, recovery, and
+  end-to-end safety gate.
+
+### Post-1.0 acceptance gates
+
+- Establish required frontend interaction tests (component plus browser level)
+  for single-click submission, duplicate prevention, batch confirmation,
+  keyboard/focus behavior, loading/error/retry, themes, reduced motion,
+  responsive overflow, and English/Russian copy.
+- Keep the complete backend, frontend, package, container, supply-chain, upgrade,
+  and Tier 1 compatibility gates green. New adapter commands require fake,
+  protocol, and pinned real-service evidence before a compatibility claim.
+- Version and test every new persisted job, policy, playback, or batch schema;
+  provide backup and rollback/restore instructions.
+- Do not mark a workstream item complete from screenshots or a successful build
+  alone. Record reproducible tests and a real browser walkthrough of the exact
+  destructive and recovery flows.
+
 ## Required 1.0 scope
 
 ### 1. Download clients and routing

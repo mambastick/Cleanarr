@@ -57,6 +57,7 @@ export interface DashboardProcessingResult {
   item_type: ItemType
   item_id: string
   name: string
+  display_name?: string | null
   status: OverallStatus
   fingerprint: {
     tmdb_id: number | null

@@ -264,6 +264,95 @@ CleanArr 1.0 — стабильный и безопасный оркестрат
   provenance. Digest image index для `linux/amd64` и `linux/arm64` —
   `sha256:fd039528eed3326ad0c16d8f36630a4dc5b67962e3c93d3687a768e206979dc5`.
 
+## Принятый post-1.0 workstream
+
+Принято **2026-09-01**. Этот раздел фиксирует следующее продуктовое направление,
+но не утверждает, что работа реализована или выпущена. Контракты 1.0 по
+fail-closed, dry-run, совместимости, миграциям и quality gates остаются
+обязательными.
+
+### 1. Надёжное взаимодействие удаления и первоначальная настройка
+
+- Одно подтверждённое нажатие должно создавать ровно одну задачу удаления.
+  Интерфейс явно показывает состояния загрузки плана, готовности, отправки,
+  успеха, ошибки и повтора; duplicate submit блокируется, повторные нажатия не
+  являются способом продолжить сценарий.
+- Пользовательское имя из медиатеки остаётся одинаковым в preview, фоновой
+  задаче, activity, retry и batch results. Локализованное display name является
+  presentation data и не заменяет стабильные media identifiers или ownership
+  evidence.
+- Шаг torrent-клиентов в мастере первого запуска учитывает отдельные URL,
+  authentication fields, validation, help и connection evidence для
+  qBittorrent, Transmission, Deluge и rTorrent. Он позволяет настроить несколько
+  клиентов и не выдаёт первый клиент за полную runtime topology.
+
+### 2. Единая design system и доступный destructive UX
+
+- Провести аудит всех frontend surfaces и свести color, status, surface, focus,
+  radius, spacing, motion и scrollbar behavior к semantic tokens с проверенной
+  согласованностью light, dark и system themes.
+- Использовать shadcn/ui как основу accessible components, Animate UI для
+  совместимых animated tabs и взаимодействий с Lucide icons, а ограниченный
+  набор React Bits — только для presentation polish. Не добавлять независимую
+  четвёртую component system и не заменять декоративными компонентами критичные
+  form semantics.
+- Заменить несогласованные native selects, checkboxes, ad-hoc dialogs, buttons и
+  scroll containers проверенными локальными primitives. Соблюдать keyboard
+  access, focus restoration, reduced motion, responsive reflow и WCAG 2.2 AA
+  contrast/semantics.
+- Вместо технического dump показывать progressive deletion plan: понятное
+  резюме того, что будет удалено, сохранено, пропущено или заблокировано, а
+  technical identifiers и diagnostics раскрывать отдельно.
+
+### 3. Ограниченное массовое удаление
+
+- Добавить явный выбор карточек, видимое количество выбранных элементов,
+  действия select-visible/clear и постоянную batch action bar, не превращая всю
+  карточку в неоднозначный destructive control.
+- Для каждого выбранного элемента строить mutation-free plan, затем привязывать
+  точный упорядоченный batch к одному confirmation hash. Изменившийся, failed,
+  ambiguous или stale дочерний plan блокирует этот элемент и требует нового
+  подтверждения.
+- Использовать отдельный accessible confirmation dialog с item types, count,
+  estimated size, affected systems, retained torrents и safety blocks. Batch
+  submission ограничен на backend, идемпотентен и показывает per-item progress
+  и partial outcomes, а не притворяется атомарным между внешними сервисами.
+
+### 4. Загрузки и сигналы для очистки
+
+- Добавить верхнеуровневый раздел **«Загрузки»** с двумя разными представлениями:
+  текущее состояние скачивания/раздачи и кандидаты на очистку медиатеки. Не
+  смешивать torrent state и watch-derived eligibility в один непрозрачный score.
+- Нормализовать read-only state всех четырёх Tier 1 клиентов: client, state,
+  progress, size, ratio, seeding time, activity, category/tags при наличии и
+  freshness данных. Идемпотентные pause/stop и resume добавляются только после
+  документированных semantics и contract tests каждого adapter.
+- Добавить явную policy остановки раздачи по заданным ratio/time conditions.
+  Evaluation, изменения состояния, failures и retries персистентны и доступны
+  для аудита; остановка не является удалением torrent entry или данных.
+- Сформировать объяснимые Jellyfin cleanup signals: watched/never-watched/
+  unknown, aggregate play count, last played time, library age, size и seeding
+  readiness. Missing/stale history остаётся unknown. Первый этап использует эти
+  данные только для filters, sorting, recommendations и manual/batch deletion.
+- Automatic media deletion, «Скоро удалим», дополнительные historical providers
+  и scheduled rules являются последующим opt-in этапом с отдельными preview,
+  exclusions, cooling period, migration, recovery и end-to-end safety gate.
+
+### Acceptance gates post-1.0
+
+- Ввести обязательные frontend interaction tests (component и browser level)
+  для single-click submit, duplicate prevention, batch confirmation, keyboard/
+  focus, loading/error/retry, themes, reduced motion, responsive overflow и
+  English/Russian copy.
+- Сохранять зелёными полный backend, frontend, package, container, supply-chain,
+  upgrade и Tier 1 compatibility gates. Новая adapter command требует fake,
+  protocol и pinned real-service evidence до заявления совместимости.
+- Версионировать и тестировать каждую новую persisted job, policy, playback или
+  batch schema; документировать backup и rollback/restore.
+- Не отмечать пункт выполненным только по screenshot или успешному build.
+  Требуются воспроизводимые tests и browser walkthrough точных destructive и
+  recovery flows.
+
 ## Обязательный scope 1.0
 
 ### 1. Torrent-клиенты и маршрутизация

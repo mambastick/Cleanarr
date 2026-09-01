@@ -9,7 +9,6 @@ from typing import Protocol, TypeVar
 from cleanarr.domain.config import (
     BaseServiceConfig,
     DelugeServiceConfig,
-    DownloaderServiceConfig,
     GeneralConfig,
     JellyfinServiceConfig,
     QbittorrentServiceConfig,
@@ -19,18 +18,9 @@ from cleanarr.domain.config import (
     SeerrServiceConfig,
     ServiceKind,
     SonarrServiceConfig,
+    SSOAuthMode,
     TransmissionServiceConfig,
 )
-from cleanarr.domain.errors import ExternalServiceError
-from cleanarr.infrastructure.clients import (
-    JellyfinServerClient,
-    QbittorrentClient,
-    RadarrClient,
-    SeerrClient,
-    SonarrClient,
-)
-from cleanarr.infrastructure.downloaders import DelugeClient, RTorrentClient, TransmissionClient
-from cleanarr.infrastructure.settings import Settings
 
 AnyServiceConfig = (
     RadarrServiceConfig
@@ -43,6 +33,29 @@ AnyServiceConfig = (
     | JellyfinServiceConfig
 )
 TService = TypeVar("TService", bound=BaseServiceConfig)
+
+
+class RuntimeBootstrapSettings(Protocol):
+    """Settings values required to create the first persisted runtime config."""
+
+    dry_run: bool
+    log_level: str
+    webhook_shared_token: str | None
+    http_timeout_seconds: float
+    jellyfin_language: str
+    ui_language: str
+    sso_mode: SSOAuthMode
+    sso_enabled: bool
+    sso_issuer_url: str | None
+    sso_client_id: str | None
+    sso_client_secret: str | None
+    sso_redirect_uri: str | None
+    sso_scopes: str
+    sso_allowed_users: str
+    sso_allowed_groups: str
+    sso_group_claim: str
+    sso_required_claim: str | None
+    sso_required_value: str | None
 
 
 class RuntimeConfigStore(Protocol):
@@ -63,11 +76,24 @@ class ConnectionTestResult:
     message: str
 
 
+class ServiceConnectionTesterPort(Protocol):
+    """Infrastructure-owned downstream connection test adapter."""
+
+    async def test(self, payload: AnyServiceConfig, *, timeout_seconds: float) -> ConnectionTestResult: ...
+
+
 class RuntimeConfigurationService:
     """Own persisted runtime settings and service definitions."""
 
-    def __init__(self, *, store: RuntimeConfigStore, settings: Settings) -> None:
+    def __init__(
+        self,
+        *,
+        store: RuntimeConfigStore,
+        settings: RuntimeBootstrapSettings,
+        connection_tester: ServiceConnectionTesterPort | None = None,
+    ) -> None:
         self._store = store
+        self._connection_tester = connection_tester
         self._config = self._normalize(
             self._store.load() or self._bootstrap_general_from_settings(settings),
         )
@@ -212,71 +238,14 @@ class RuntimeConfigurationService:
     ) -> ConnectionTestResult:
         """Run a minimal connectivity test for a single service definition."""
 
-        timeout = self._config.general.http_timeout_seconds
-        try:
-            if isinstance(payload, RadarrServiceConfig):
-                radarr_client = RadarrClient(
-                    base_url=payload.url,
-                    api_key=payload.api_key,
-                    timeout_seconds=timeout,
-                )
-                try:
-                    await radarr_client.list_movies()
-                finally:
-                    await radarr_client.close()
-                return ConnectionTestResult(ok=True, message="Radarr responded successfully.")
+        if self._connection_tester is None:
+            return ConnectionTestResult(ok=False, message="Connection testing is unavailable.")
+        return await self._connection_tester.test(
+            payload,
+            timeout_seconds=self._config.general.http_timeout_seconds,
+        )
 
-            if isinstance(payload, SonarrServiceConfig):
-                sonarr_client = SonarrClient(
-                    base_url=payload.url,
-                    api_key=payload.api_key,
-                    timeout_seconds=timeout,
-                )
-                try:
-                    await sonarr_client.list_series()
-                finally:
-                    await sonarr_client.close()
-                return ConnectionTestResult(ok=True, message="Sonarr responded successfully.")
-
-            if isinstance(payload, SeerrServiceConfig):
-                seerr_client = SeerrClient(
-                    base_url=payload.url,
-                    api_key=payload.api_key,
-                    timeout_seconds=timeout,
-                )
-                try:
-                    await seerr_client.list_media()
-                finally:
-                    await seerr_client.close()
-                return ConnectionTestResult(ok=True, message="Seerr responded successfully.")
-
-            if isinstance(payload, JellyfinServiceConfig):
-                jellyfin_client = JellyfinServerClient(
-                    base_url=payload.url,
-                    api_key=payload.api_key,
-                    timeout_seconds=timeout,
-                )
-                try:
-                    await jellyfin_client.ping()
-                finally:
-                    await jellyfin_client.close()
-                return ConnectionTestResult(ok=True, message="Jellyfin responded successfully.")
-
-            downloader_client = build_downloader_client(payload, timeout_seconds=timeout)
-            try:
-                version = await downloader_client.get_version()
-            finally:
-                await downloader_client.close()
-            return ConnectionTestResult(
-                ok=True,
-                message=f"{payload.name} responded successfully (version {version}).",
-            )
-        except ExternalServiceError as exc:
-            return ConnectionTestResult(ok=False, message=exc.message)
-        except Exception as exc:  # pragma: no cover
-            return ConnectionTestResult(ok=False, message=f"Unexpected connection test error: {exc}")
-
-    def _bootstrap_general_from_settings(self, settings: Settings) -> RuntimeConfig:
+    def _bootstrap_general_from_settings(self, settings: RuntimeBootstrapSettings) -> RuntimeConfig:
         return RuntimeConfig(
             general=GeneralConfig(
                 dry_run=settings.dry_run,
@@ -371,58 +340,4 @@ def _is_downloader_payload(kind: ServiceKind, payload: AnyServiceConfig) -> bool
             (QbittorrentServiceConfig, TransmissionServiceConfig, DelugeServiceConfig, RTorrentServiceConfig),
         )
         and payload.kind is kind
-    )
-
-
-def build_downloader_client(
-    payload: DownloaderServiceConfig,
-    *,
-    timeout_seconds: float,
-) -> QbittorrentClient | TransmissionClient | DelugeClient | RTorrentClient:
-    if isinstance(payload, QbittorrentServiceConfig):
-        return QbittorrentClient(
-            base_url=payload.url,
-            timeout_seconds=timeout_seconds,
-            service_id=payload.id,
-            service_name=payload.name,
-            username=payload.username,
-            password=payload.password,
-            api_key=payload.api_key,
-            seeding_policy=payload.seeding_policy,
-            min_seed_ratio=payload.min_seed_ratio,
-            min_seed_time_minutes=payload.min_seed_time_minutes,
-        )
-    if isinstance(payload, TransmissionServiceConfig):
-        return TransmissionClient(
-            base_url=payload.url,
-            timeout_seconds=timeout_seconds,
-            service_id=payload.id,
-            service_name=payload.name,
-            username=payload.username,
-            password=payload.password,
-            seeding_policy=payload.seeding_policy,
-            min_seed_ratio=payload.min_seed_ratio,
-            min_seed_time_minutes=payload.min_seed_time_minutes,
-        )
-    if isinstance(payload, DelugeServiceConfig):
-        return DelugeClient(
-            base_url=payload.url,
-            timeout_seconds=timeout_seconds,
-            service_id=payload.id,
-            service_name=payload.name,
-            password=payload.password,
-            seeding_policy=payload.seeding_policy,
-            min_seed_ratio=payload.min_seed_ratio,
-            min_seed_time_minutes=payload.min_seed_time_minutes,
-        )
-    return RTorrentClient(
-        base_url=payload.url,
-        timeout_seconds=timeout_seconds,
-        service_id=payload.id,
-        service_name=payload.name,
-        username=payload.username,
-        password=payload.password,
-        seeding_policy=payload.seeding_policy,
-        min_seed_ratio=payload.min_seed_ratio,
-        min_seed_time_minutes=payload.min_seed_time_minutes,
     )

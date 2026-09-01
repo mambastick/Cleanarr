@@ -6,8 +6,15 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from cleanarr.domain import (
+    DownloadActionClaim,
+    DownloadActionStatus,
+    DownloadControlAction,
+    DownloaderControlResult,
+    DownloaderListing,
     DownloaderRemovalResult,
+    JellyfinCleanupItem,
     JellyfinItem,
+    PlaybackObservation,
     RadarrHistoryRecord,
     RadarrMovie,
     SeerrIssue,
@@ -17,7 +24,75 @@ from cleanarr.domain import (
     SonarrEpisodeFile,
     SonarrHistoryRecord,
     SonarrSeries,
+    TorrentSnapshot,
 )
+
+
+class DownloadsRepositoryPort(Protocol):
+    """Persistence boundary for normalized observations and action claims."""
+
+    def save_listing(self, snapshots: tuple[TorrentSnapshot, ...], successful_clients: set[str]) -> None: ...
+    def mark_all_stale(self, reason: str = "refresh_not_confirmed") -> None: ...
+    def list_snapshots(self) -> list[TorrentSnapshot]: ...
+    def get_snapshot(self, client_id: str, info_hash: str) -> TorrentSnapshot | None: ...
+    def claim_action(
+        self,
+        *,
+        idempotency_key: str,
+        canonical_request: str,
+        client_id: str,
+        info_hash: str,
+        action: DownloadControlAction,
+        max_attempts: int,
+        allow_retry: bool = False,
+        source: str = "manual",
+    ) -> DownloadActionClaim: ...
+    def action_status(self, action_id: str) -> DownloadActionStatus | None: ...
+    def action_record(self, action_id: str) -> DownloadActionClaim | None: ...
+    def increment_attempt(self, action_id: str) -> int: ...
+    def update_action(
+        self, action_id: str, status: DownloadActionStatus, *, code: str | None = None, result: object = None
+    ) -> None: ...
+    def recover_running_actions(self) -> int: ...
+    def record_policy_evaluation(
+        self,
+        *,
+        revision: str,
+        snapshot: TorrentSnapshot,
+        facts: dict[str, object],
+        reason_code: str,
+        decision: str,
+    ) -> None: ...
+    def action_status_counts(self) -> dict[str, int]: ...
+    def policy_decision_counts(self) -> dict[str, int]: ...
+    def latest_policy_evaluations(self) -> dict[tuple[str, str], dict[str, object]]: ...
+    def latest_action_projections(self, keys: set[tuple[str, str]]) -> dict[tuple[str, str], dict[str, object]]: ...
+
+
+class DownloaderReadPort(Protocol):
+    """Non-destructive downloader observations, separate from deletion."""
+
+    async def list_torrents(self) -> DownloaderListing:
+        """Return normalized snapshots and structured partial read failures."""
+
+
+class DownloaderControlPort(Protocol):
+    """Reversible single-torrent controls, separate from deletion."""
+
+    async def control_torrent(self, info_hash: str, *, action: DownloadControlAction) -> DownloaderControlResult:
+        """Reconcile and apply a pause or resume operation exactly once."""
+
+
+class DownloaderFleetPort(Protocol):
+    """Application boundary for a configured downloader fleet."""
+
+    async def list_torrents(self) -> DownloaderListing: ...
+
+    async def control_torrent(
+        self, client_id: str, info_hash: str, *, action: DownloadControlAction
+    ) -> DownloaderControlResult: ...
+
+    def configured_client_ids(self) -> set[str]: ...
 
 
 class JellyfinServerClientPort(Protocol):
@@ -30,6 +105,20 @@ class JellyfinServerClientPort(Protocol):
         accept_language: str | None = None,
     ) -> Sequence[JellyfinItem]:
         """Return current Jellyfin items of the requested types."""
+
+
+class JellyfinPlaybackReadPort(Protocol):
+    """Read-only standard-Jellyfin playback boundary for future providers."""
+
+    async def list_cleanup_items(
+        self, *, accept_language: str | None = None, max_items: int = 200
+    ) -> tuple[tuple[JellyfinCleanupItem, ...], bool]: ...
+
+    async def list_playback_users(self, *, max_users: int = 20) -> tuple[tuple[str, ...], bool]: ...
+
+    async def list_user_playback(
+        self, *, user_id: str, item_ids: tuple[str, ...], accept_language: str | None = None
+    ) -> tuple[PlaybackObservation, ...]: ...
 
 
 class RadarrClientPort(Protocol):

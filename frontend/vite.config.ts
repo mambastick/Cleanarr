@@ -3,7 +3,7 @@ import path from 'node:path'
 
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 
 const repositoryBackend = path.resolve(import.meta.dirname, '../backend/src')
 const backendSource = existsSync(repositoryBackend)
@@ -28,5 +28,10 @@ export default defineConfig({
   build: {
     outDir: path.join(backendSource, 'cleanarr/ui/static'),
     emptyOutDir: true,
+  },
+  test: {
+    environment: "jsdom",
+    setupFiles: ["./src/test/setup.ts"],
+    globals: true,
   },
 })

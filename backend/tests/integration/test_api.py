@@ -6,7 +6,9 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 import respx
@@ -14,6 +16,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from cleanarr.api.app import create_app
+from cleanarr.application.deletion_events import event_key_for
 from cleanarr.application.strategies import DeletionStrategyFactory
 from cleanarr.domain import (
     ActionResult,
@@ -26,9 +29,11 @@ from cleanarr.domain import (
     ProcessingResult,
     RadarrHistoryRecord,
     RadarrMovie,
+    SeerrMedia,
 )
 from cleanarr.domain.config import GeneralConfig, RadarrServiceConfig, RuntimeConfig
 from cleanarr.infrastructure.container import ServiceContainer
+from cleanarr.infrastructure.deletion_repository import SQLiteDeletionRepository
 from cleanarr.infrastructure.settings import Settings
 from tests.fakes import (
     FakeDownloaderClient,
@@ -257,7 +262,13 @@ async def test_manual_delete_requires_and_persists_exact_preflight(tmp_path: Pat
         episodes_by_series={},
         episode_files_by_series={},
     )
-    seerr = FakeSeerrClient(media=[], requests=[], issues=[])
+    seerr = FakeSeerrClient(
+        media=[
+            SeerrMedia(id=1, media_type="movie", tmdb_id=700, tvdb_id=None, imdb_id="tt700", jellyfin_media_id=None)
+        ],
+        requests=[],
+        issues=[],
+    )
     downloader = FakeDownloaderClient(existing_hashes={"HASH700"})
     container.radarr = radarr  # type: ignore[attr-defined]
     container.sonarr = sonarr  # type: ignore[attr-defined]
@@ -272,7 +283,7 @@ async def test_manual_delete_requires_and_persists_exact_preflight(tmp_path: Pat
         downloader=downloader,
     )
     app = create_app(container=container)
-    request = {"item_type": "Movie", "radarr_movie_id": 7}
+    request = {"item_type": "Movie", "radarr_movie_id": 7, "display_name": "Selected Jellyfin title"}
     headers = {"X-Admin-Token": "admin-token"}
 
     async with app_client(app) as client:
@@ -291,10 +302,47 @@ async def test_manual_delete_requires_and_persists_exact_preflight(tmp_path: Pat
             headers=headers,
             json=request,
         )
+        queued_payload = {
+            **request,
+            "confirmed_plan_hash": preview.json()["plan_hash"],
+            "idempotency_key": str(uuid4()),
+        }
         queued = await client.post(
             "/api/actions/delete/jobs",
             headers=headers,
-            json={**request, "confirmed_plan_hash": preview.json()["plan_hash"]},
+            json=queued_payload,
+        )
+        duplicate_one, duplicate_two = await asyncio.gather(
+            client.post("/api/actions/delete/jobs", headers=headers, json=queued_payload),
+            client.post("/api/actions/delete/jobs", headers=headers, json=queued_payload),
+        )
+        conflict = await client.post(
+            "/api/actions/delete/jobs",
+            headers=headers,
+            json={**queued_payload, "radarr_movie_id": 8},
+        )
+        batch_preview = await client.post(
+            "/api/actions/delete/batches/preview",
+            headers=headers,
+            json={"children": [request]},
+        )
+        batch_unauthorized = await client.post("/api/actions/delete/batches/preview", json={"children": [request]})
+        batch_payload = {
+            "children": [request],
+            "idempotency_key": str(uuid4()),
+            "confirmed_batch_hash": batch_preview.json()["batch_hash"],
+            "confirmed_item_count": 1,
+        }
+        batch_queued = await client.post("/api/actions/delete/batches", headers=headers, json=batch_payload)
+        batch_conflict = await client.post(
+            "/api/actions/delete/batches",
+            headers=headers,
+            json={**batch_payload, "children": [{**request, "radarr_movie_id": 8}]},
+        )
+        batch_too_many = await client.post(
+            "/api/actions/delete/batches/preview",
+            headers=headers,
+            json={"children": [request] * 51},
         )
 
         for _ in range(100):
@@ -307,14 +355,34 @@ async def test_manual_delete_requires_and_persists_exact_preflight(tmp_path: Pat
             await asyncio.sleep(0.01)
         else:
             raise AssertionError("manual deletion job did not complete")
+        dashboard = await client.get("/api/dashboard", headers=headers)
+        batch_detail = await client.get(f"/api/actions/delete/batches/{batch_queued.json()['id']}", headers=headers)
+        batch_list = await client.get("/api/actions/delete/batches?limit=1", headers=headers)
 
     assert preview.status_code == 200
     assert preview.json()["plan"]["item_id"] == "manual:radarr:7"
     assert preview.json()["plan"]["fingerprint"]["path"] == "/media/preflight-movie"
     assert any(action["details"].get("hash") == "HASH700" for action in preview.json()["plan"]["actions"])
     assert unconfirmed.status_code == 409
+    assert unconfirmed.json()["detail"]["code"] == "idempotency_key_required"
     assert unconfirmed_legacy.status_code == 409
+    assert unconfirmed_legacy.json()["detail"]["code"] == "confirmation_required"
     assert queued.status_code == 202
+    assert queued.json()["display_name"] == "Selected Jellyfin title"
+    assert duplicate_one.status_code == duplicate_two.status_code == 202
+    assert duplicate_one.json()["id"] == duplicate_two.json()["id"] == queued.json()["id"]
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
+    assert batch_unauthorized.status_code in {401, 403}
+    assert batch_preview.status_code == 200
+    assert batch_preview.json()["ready_count"] == 1
+    assert batch_queued.status_code == 202
+    assert batch_conflict.status_code == 409
+    assert batch_conflict.json()["detail"]["code"] == "idempotency_key_conflict"
+    assert batch_too_many.status_code == 422
+    assert batch_detail.status_code == 200
+    assert batch_list.status_code == 200
+    assert batch_list.json()["batches"][0]["id"] == batch_queued.json()["id"]
     assert job.json()["attempt_count"] == 1
     persisted_preflight = job.json()["preflight"]
     original_plan = preview.json()["plan"]
@@ -322,6 +390,10 @@ async def test_manual_delete_requires_and_persists_exact_preflight(tmp_path: Pat
         key: value for key, value in original_plan.items() if key != "correlation_id"
     }
     assert persisted_preflight["correlation_id"]
+    assert persisted_preflight["display_name"] == "Selected Jellyfin title"
+    assert job.json()["result"]["display_name"] == "Selected Jellyfin title"
+    assert dashboard.status_code == 200
+    assert dashboard.json()["recent_activity"][0]["result"]["display_name"] == "Selected Jellyfin title"
     assert radarr.deleted_movie_ids == []
     assert downloader.deleted_hashes == []
 
@@ -419,6 +491,49 @@ async def test_webhook_endpoint_suppresses_completed_duplicate_delivery(tmp_path
     assert len(service.seen_events) == 1
     assert len(dashboard.json()["recent_activity"]) == 1
     assert "suppressed 1 completed duplicate" in dashboard.json()["webhook_status"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_webhook_restart_blocks_an_incomplete_delivery_without_replaying_it(tmp_path: Path) -> None:
+    db_path = tmp_path / "cleanarr.db"
+    event = MediaDeletionEvent(
+        notification_type="ItemDeleted",
+        item_type=ItemType.MOVIE,
+        item_id="interrupted-movie",
+        name="Private interrupted title",
+        fingerprint=MediaFingerprint(tmdb_id=88),
+    )
+    repository = SQLiteDeletionRepository(db_path)
+    repository.initialize()
+    repository.mark_webhook_processing(
+        event_key_for(event),
+        event,
+        purge_before=datetime(2026, 8, 25, tzinfo=UTC),
+    )
+    service = FakeService(results=[])
+    app = create_app(container=FakeContainer(service, db_path=db_path))
+    payload = {
+        "notification_type": "ItemDeleted",
+        "item_type": "Movie",
+        "item_id": "interrupted-movie",
+        "name": "Private interrupted title",
+        "tmdb_id": 88,
+    }
+
+    async with app_client(app) as client:
+        response = await client.post(
+            "/webhook/jellyfin",
+            headers={"X-Webhook-Token": "secret-token"},
+            json=payload,
+        )
+        dashboard = await client.get("/api/dashboard", headers={"X-Admin-Token": "admin-token"})
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "interrupted_unknown"
+    assert service.seen_events == []
+    assert "Private interrupted title" not in response.text
+    assert dashboard.json()["webhook_status"]["outcome"] == "interrupted_unknown"
+    assert dashboard.json()["webhook_status"]["item_name"] is None
 
 
 @pytest.mark.asyncio

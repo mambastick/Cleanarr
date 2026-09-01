@@ -10,9 +10,10 @@ administrator token системам Prometheus, backup jobs или support tool
 ## Метрики Prometheus
 
 `GET /metrics` возвращает Prometheus text format. Labels намеренно ограничены
-типом интеграции, health state, item type, статусом операции, результатом webhook
-и статусом задания. Media names и IDs, пути, имена профилей, URL, hashes и
-credentials в labels не попадают.
+типом интеграции, health state, item type, статусом операции, результатом webhook,
+статусом задания, ограниченным статусом download action и ограниченным policy
+decision. Media names и IDs, пути, имена профилей, URL, hashes и credentials в
+labels не попадают.
 
 Значения операций являются gauges по сохраняемой истории, а не lifetime
 counters: они могут уменьшаться после очистки activity retention или истории
@@ -36,7 +37,8 @@ scrape_configs:
 `GET /api/support/bundle` возвращает JSON с версиями CleanArr, config schema и
 database schema; количеством настроенных и включённых профилей, health и
 downstream versions для типов интеграций; последними структурированными кодами
-ошибок/actions и correlation IDs; агрегатами webhook и manual jobs.
+ошибок/actions и correlation IDs; агрегатами webhook/manual jobs, download actions
+и policy decisions.
 
 Ответ исключает media names и IDs, пути, имена профилей, URL, credentials,
 free-form messages и action details. Перед отправкой всё равно проверьте файл:
@@ -51,6 +53,14 @@ curl --fail --silent --show-error \
 
 Каждый новый deletion cascade получает `correlation_id`. По нему можно связать
 API result или activity record с редактированной записью ошибки в support bundle.
+
+## Operational evidence для Downloads
+
+Агрегаты download actions и policy являются gauges по сохраняемой истории, а не
+доказательством завершения отдельного pause/resume. Action projection намеренно
+не включает idempotency keys и canonical request bodies. При расследовании
+сохраните action ID, ограниченные status/code, source status и freshness
+observation; не считайте один HTTP response доказательством успеха.
 
 ## Редактированный перенос конфигурации
 

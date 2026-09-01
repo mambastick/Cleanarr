@@ -20,6 +20,20 @@ export interface GeneralConfig {
   sso_group_claim: string
   sso_required_claim: string | null
   sso_required_value: string | null
+  seeding_stop_policy: SeedingStopPolicyConfig
+}
+
+export interface SeedingStopPolicyConfig {
+  enabled: boolean
+  mode: "all" | "any"
+  min_ratio: number | null
+  min_seeding_minutes: number | null
+  include_categories: string[]
+  exclude_categories: string[]
+  include_tags: string[]
+  exclude_tags: string[]
+  interval_seconds: number
+  max_attempts: number
 }
 
 export interface BaseServiceConfig {

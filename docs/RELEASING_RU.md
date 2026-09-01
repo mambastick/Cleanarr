@@ -28,6 +28,13 @@
    [матрицы совместимости](COMPATIBILITY_RU.md).
 4. Влейте релизный коммит в `main`.
 
+Для будущего релиза с post-1.0 Downloads/deletion slice запустите candidate
+compatibility profile, доказывающий normalized reads и pause/resume для всех
+четырёх adapters, затем выполните upgrade с последней stable v1.0.0 до candidate
+schema v5/config-v3 и rollback через проверенный backup. Direct populated
+migration test v4-to-v5 остаётся отдельным evidence. Не называйте эти contracts
+сертифицированными, пока весь evidence не пройдёт из release commit.
+
 ## Публикация
 
 ```bash

@@ -106,7 +106,8 @@
 - **Автонастройка webhook** — конфигурация Jellyfin Webhook из интерфейса CleanArr.
 - **Журнал действий** — поиск по названию, системе, действию и результату.
 - **Мастер первого запуска** — последовательное подключение сервисов.
-- **Несколько профилей** — несколько конфигураций каждого типа сервиса с выбором активной.
+- **Несколько профилей torrent-клиентов** — одновременное сохранение qBittorrent, Transmission, Deluge и rTorrent; включённые профили участвуют в работе, а один предпочитаемый профиль сохраняется для настройки и отображения.
+- **Загрузки и рекомендации очистки** — просмотр ограниченных нормализованных наблюдений раздач и кандидатов Jellyfin без превращения неизвестных данных в разрешение на удаление.
 - **Локальный вход и SSO** — пароль и строгая проверка OpenID Connect с PKCE, nonce и явной политикой users/groups/claims.
 - **Светлая и тёмная темы** — автоматический выбор по настройкам системы.
 
@@ -222,6 +223,13 @@ SSO не включается, пока не задан хотя бы один �
 либо пара обязательного claim/value. Перед включением `both` или `sso_only`
 прочитайте полное [руководство по OIDC и reverse proxy](docs/SSO_RU.md).
 
+На шаге torrent-клиента можно сохранить несколько профилей qBittorrent,
+Transmission, Deluge и rTorrent. Профиль разрешено сохранить отключённым для
+последующей настройки; **включён** и **предпочитаемый/default** — разные
+состояния. Не считайте профиль готовым без проверки именно текущего draft:
+смена типа клиента, URL или credentials делает сохранённый frontend fingerprint
+проверки подключения недействительным.
+
 ---
 
 ## Настройка webhook Jellyfin
@@ -306,6 +314,16 @@ SSO не включается, пока не задан хотя бы один �
 | `GET` | `/api/support/bundle` | сессия | Редактированный operational snapshot |
 | `GET` | `/metrics` | сессия или admin token | Privacy-safe метрики Prometheus |
 | `POST` | `/api/config/jellyfin/setup-webhook` | сессия | Автонастройка Jellyfin Webhook |
+| `POST` | `/api/actions/delete/preview` | сессия | Mutation-free preview удаления одного объекта |
+| `POST` / `GET` | `/api/actions/delete/jobs` | сессия | Создание или список hash-bound заданий удаления |
+| `GET` / `DELETE` | `/api/actions/delete/jobs/{job_id}` | сессия | Просмотр или удаление terminal job |
+| `POST` | `/api/actions/delete/batches/preview` | сессия | Mutation-free item-level preview batch |
+| `POST` / `GET` | `/api/actions/delete/batches` | сессия | Отправка или список ограниченных hash-bound batch |
+| `GET` | `/api/actions/delete/batches/{batch_id}` | сессия | Просмотр результата batch и дочерних объектов |
+| `GET` / `POST` | `/api/downloads`, `/api/downloads/refresh` | сессия | Ограниченная cursor-модель чтения и обновление |
+| `GET` | `/api/downloads/{client_id}/{info_hash}` | сессия | Одно нормализованное наблюдение раздачи |
+| `POST` | `/api/downloads/actions` | сессия | Только обратимые pause/resume; idempotency обязательна |
+| `GET` | `/api/downloads/cleanup-candidates` | сессия | Ограниченные рекомендации очистки на основе Jellyfin |
 | `POST` | `/api/auth/login` | — | Локальный вход |
 | `GET` | `/api/auth/status` | — | Возможности входа и состояние сессии |
 | `GET` | `/api/auth/sso/login` | — | Начало входа OpenID Connect |
@@ -372,8 +390,17 @@ pnpm dev
 ### Тесты
 
 ```bash
-cd backend && pytest
-cd frontend && pnpm build
+cd backend
+ruff format --check src tests
+ruff check src tests
+mypy src
+pytest -q
+
+cd ../frontend
+pnpm lint
+pnpm test -- --run
+pnpm build
+pnpm exec playwright test --project=chromium
 ```
 
 Правила двуязычных релизов описаны в [руководстве по выпуску](docs/RELEASING_RU.md).

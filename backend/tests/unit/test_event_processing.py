@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from cleanarr.api.event_processing import DeletionExecutionCoordinator
+from cleanarr.application.deletion_events import DeletionExecutionCoordinator, WebhookInterruptedUnknownError
 from cleanarr.domain import (
     ActionResult,
     ActionStatus,
@@ -18,6 +18,11 @@ from cleanarr.domain import (
     OverallStatus,
     ProcessingResult,
 )
+from cleanarr.infrastructure.deletion_repository import SQLiteDeletionRepository
+
+
+def _coordinator(db_path: Path) -> DeletionExecutionCoordinator:
+    return DeletionExecutionCoordinator(SQLiteDeletionRepository(db_path))
 
 
 def _event(
@@ -60,7 +65,7 @@ async def test_completed_event_is_suppressed_in_memory_and_after_restart(tmp_pat
         calls += 1
         return _result(event)
 
-    coordinator = DeletionExecutionCoordinator(db_path)
+    coordinator = _coordinator(db_path)
     await coordinator.initialize()
     event = _event()
 
@@ -72,7 +77,7 @@ async def test_completed_event_is_suppressed_in_memory_and_after_restart(tmp_pat
     assert second == first
     assert calls == 1
 
-    restarted = DeletionExecutionCoordinator(db_path)
+    restarted = _coordinator(db_path)
     await restarted.initialize()
     third, third_duplicate = await restarted.process_webhook(event, processor)
     assert third_duplicate is True
@@ -90,7 +95,7 @@ async def test_partial_failure_remains_retryable_then_success_is_suppressed(tmp_
         status = OverallStatus.PARTIAL_FAILURE if calls == 1 else OverallStatus.SUCCESS
         return _result(event, status)
 
-    coordinator = DeletionExecutionCoordinator(tmp_path / "cleanarr.db")
+    coordinator = _coordinator(tmp_path / "cleanarr.db")
     await coordinator.initialize()
     event = _event()
 
@@ -116,7 +121,7 @@ async def test_ignored_event_remains_retryable_when_source_state_changes(tmp_pat
         status = OverallStatus.IGNORED if calls == 1 else OverallStatus.SUCCESS
         return _result(event, status)
 
-    coordinator = DeletionExecutionCoordinator(tmp_path / "cleanarr.db")
+    coordinator = _coordinator(tmp_path / "cleanarr.db")
     await coordinator.initialize()
     event = _event()
 
@@ -131,7 +136,7 @@ async def test_ignored_event_remains_retryable_when_source_state_changes(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_processor_exception_clears_marker_for_retry(tmp_path: Path) -> None:
+async def test_processor_exception_leaves_an_interrupted_unknown_tombstone_after_restart(tmp_path: Path) -> None:
     calls = 0
 
     async def processor(event: MediaDeletionEvent) -> ProcessingResult:
@@ -141,17 +146,50 @@ async def test_processor_exception_clears_marker_for_retry(tmp_path: Path) -> No
             raise RuntimeError("activity persistence failed")
         return _result(event)
 
-    coordinator = DeletionExecutionCoordinator(tmp_path / "cleanarr.db")
+    db_path = tmp_path / "cleanarr.db"
+    coordinator = _coordinator(db_path)
     await coordinator.initialize()
     event = _event()
 
     with pytest.raises(RuntimeError, match="activity persistence failed"):
         await coordinator.process_webhook(event, processor)
-    result, duplicate = await coordinator.process_webhook(event, processor)
 
-    assert result.status is OverallStatus.SUCCESS
-    assert duplicate is False
-    assert calls == 2
+    restarted = _coordinator(db_path)
+    await restarted.initialize()
+    with pytest.raises(WebhookInterruptedUnknownError) as raised:
+        await restarted.process_webhook(event, processor)
+
+    assert raised.value.code == "interrupted_unknown"
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_cancelled_processor_leaves_an_interrupted_unknown_tombstone_after_restart(tmp_path: Path) -> None:
+    db_path = tmp_path / "cleanarr.db"
+    entered = asyncio.Event()
+    never_release = asyncio.Event()
+    calls = 0
+
+    async def processor(event: MediaDeletionEvent) -> ProcessingResult:
+        nonlocal calls
+        calls += 1
+        entered.set()
+        await never_release.wait()
+        return _result(event)
+
+    coordinator = _coordinator(db_path)
+    await coordinator.initialize()
+    task = asyncio.create_task(coordinator.process_webhook(_event(), processor))
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    restarted = _coordinator(db_path)
+    await restarted.initialize()
+    with pytest.raises(WebhookInterruptedUnknownError):
+        await restarted.process_webhook(_event(), processor)
+    assert calls == 1
 
 
 @pytest.mark.asyncio
@@ -163,7 +201,7 @@ async def test_same_item_with_a_new_source_timestamp_is_not_suppressed(tmp_path:
         calls += 1
         return _result(event)
 
-    coordinator = DeletionExecutionCoordinator(tmp_path / "cleanarr.db")
+    coordinator = _coordinator(tmp_path / "cleanarr.db")
     await coordinator.initialize()
 
     _, first_duplicate = await coordinator.process_webhook(
@@ -193,7 +231,7 @@ async def test_process_wide_lock_serializes_events_sharing_a_path(tmp_path: Path
         active -= 1
         return _result(event)
 
-    coordinator = DeletionExecutionCoordinator(tmp_path / "cleanarr.db")
+    coordinator = _coordinator(tmp_path / "cleanarr.db")
     await coordinator.initialize()
 
     await asyncio.gather(

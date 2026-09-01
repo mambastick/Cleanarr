@@ -8,6 +8,8 @@ import React, {
   type ReactNode,
 } from "react"
 import { motion, AnimatePresence, type Variants } from "motion/react"
+import { useReducedMotion } from "motion/react"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 interface StepperProps extends HTMLAttributes<HTMLDivElement> {
@@ -23,6 +25,8 @@ interface StepperProps extends HTMLAttributes<HTMLDivElement> {
   nextButtonProps?: React.ButtonHTMLAttributes<HTMLButtonElement>
   backButtonText?: string
   nextButtonText?: string
+  completeButtonText?: string
+  stepLabel?: string
   disableStepIndicators?: boolean
   renderStepIndicator?: (props: {
     step: number
@@ -44,6 +48,8 @@ export default function Stepper({
   nextButtonProps = {},
   backButtonText = "Back",
   nextButtonText = "Continue",
+  completeButtonText = nextButtonText,
+  stepLabel = "Step",
   disableStepIndicators = false,
   renderStepIndicator,
   ...rest
@@ -54,6 +60,7 @@ export default function Stepper({
   const totalSteps = stepsArray.length
   const isCompleted = currentStep > totalSteps
   const isLastStep = currentStep === totalSteps
+  const reduceMotion = useReducedMotion()
 
   const updateStep = (newStep: number) => {
     setCurrentStep(newStep)
@@ -84,11 +91,11 @@ export default function Stepper({
   }
 
   return (
-    <div className="flex flex-col" {...rest}>
+    <div className="flex flex-col" data-reduced-motion={reduceMotion ? "true" : "false"} {...rest}>
       <div
         className={`w-full rounded-2xl border bg-card shadow-sm ${stepCircleContainerClassName}`}
       >
-        <div className={`${stepContainerClassName} flex w-full items-center px-8 py-6`}>
+        <div className={`${stepContainerClassName} flex w-full items-center px-2 py-6 sm:px-8`}>
           {stepsArray.map((_, index) => {
             const stepNumber = index + 1
             const isNotLastStep = index < totalSteps - 1
@@ -106,6 +113,7 @@ export default function Stepper({
                 ) : (
                   <StepIndicator
                     step={stepNumber}
+                    stepLabel={stepLabel}
                     disableStepIndicators={disableStepIndicators}
                     currentStep={currentStep}
                     onClickStep={(clicked) => {
@@ -114,7 +122,12 @@ export default function Stepper({
                     }}
                   />
                 )}
-                {isNotLastStep && <StepConnector isComplete={currentStep > stepNumber} />}
+                {isNotLastStep && (
+                  <StepConnector
+                    isComplete={currentStep > stepNumber}
+                    reduceMotion={Boolean(reduceMotion)}
+                  />
+                )}
               </React.Fragment>
             )
           })}
@@ -124,6 +137,7 @@ export default function Stepper({
           isCompleted={isCompleted}
           currentStep={currentStep}
           direction={direction}
+          reduceMotion={Boolean(reduceMotion)}
           className={`space-y-2 px-8 ${contentClassName}`}
         >
           {stepsArray[currentStep - 1]}
@@ -135,21 +149,21 @@ export default function Stepper({
               className={`mt-8 flex ${currentStep !== 1 ? "justify-between" : "justify-end"}`}
             >
               {currentStep !== 1 && (
-                <button
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={handleBack}
-                  className="rounded px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground"
                   {...backButtonProps}
                 >
                   {backButtonText}
-                </button>
+                </Button>
               )}
-              <button
+              <Button
                 onClick={isLastStep ? handleComplete : handleNext}
-                className="flex items-center justify-center rounded-full bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition hover:opacity-90 active:opacity-80"
                 {...nextButtonProps}
               >
-                {isLastStep ? "Complete" : nextButtonText}
-              </button>
+                {isLastStep ? completeButtonText : nextButtonText}
+              </Button>
             </div>
           </div>
         )}
@@ -162,6 +176,7 @@ interface StepContentWrapperProps {
   isCompleted: boolean
   currentStep: number
   direction: number
+  reduceMotion: boolean
   children: ReactNode
   className?: string
 }
@@ -170,6 +185,7 @@ function StepContentWrapper({
   isCompleted,
   currentStep,
   direction,
+  reduceMotion,
   children,
   className = "",
 }: StepContentWrapperProps) {
@@ -180,13 +196,14 @@ function StepContentWrapper({
     <motion.div
       style={{ position: "relative", overflow: "hidden" }}
       animate={{ height: isCompleted ? 0 : parentHeight }}
-      transition={{ type: "tween", ease: "easeInOut", duration: 0.35 }}
+      transition={{ type: "tween", ease: "easeInOut", duration: reduceMotion ? 0 : 0.35 }}
     >
       <AnimatePresence initial={false} mode="sync" custom={direction}>
         {!isCompleted && (
           <SlideTransition
             key={currentStep}
             direction={direction}
+            reduceMotion={reduceMotion}
             className={className}
             onHeightReady={onHeightReady}
           >
@@ -203,15 +220,17 @@ interface SlideTransitionProps {
   direction: number
   onHeightReady: (height: number) => void
   className?: string
+  reduceMotion: boolean
 }
 
-function SlideTransition({ children, direction, onHeightReady, className = "" }: SlideTransitionProps) {
+function SlideTransition({ children, direction, onHeightReady, className = "", reduceMotion }: SlideTransitionProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
 
   useLayoutEffect(() => {
     const el = containerRef.current
     if (!el) return
     onHeightReady(el.offsetHeight)
+    if (typeof ResizeObserver === "undefined") return
     const observer = new ResizeObserver(() => onHeightReady(el.offsetHeight))
     observer.observe(el)
     return () => observer.disconnect()
@@ -225,7 +244,7 @@ function SlideTransition({ children, direction, onHeightReady, className = "" }:
       initial="enter"
       animate="center"
       exit="exit"
-      transition={{ duration: 0.4 }}
+      transition={{ duration: reduceMotion ? 0 : 0.4 }}
       style={{ position: "absolute", left: 0, right: 0, top: 0 }}
       className={className}
     >
@@ -259,6 +278,7 @@ export function Step({ children }: StepProps) {
 
 interface StepIndicatorProps {
   step: number
+  stepLabel: string
   currentStep: number
   onClickStep: (clicked: number) => void
   disableStepIndicators?: boolean
@@ -266,6 +286,7 @@ interface StepIndicatorProps {
 
 function StepIndicator({
   step,
+  stepLabel,
   currentStep,
   onClickStep,
   disableStepIndicators = false,
@@ -274,13 +295,17 @@ function StepIndicator({
     currentStep === step ? "active" : currentStep < step ? "inactive" : "complete"
 
   return (
-    <div
+    <button
+      type="button"
+      disabled={disableStepIndicators}
+      aria-current={status === "active" ? "step" : undefined}
+      aria-label={`${stepLabel} ${step}`}
       onClick={() => {
         if (step !== currentStep && !disableStepIndicators) {
           onClickStep(step)
         }
       }}
-      className="relative cursor-pointer outline-none focus:outline-none"
+      className="relative rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed"
     >
       <div
         className={cn(
@@ -298,22 +323,23 @@ function StepIndicator({
           <span>{step}</span>
         )}
       </div>
-    </div>
+    </button>
   )
 }
 
 interface StepConnectorProps {
   isComplete: boolean
+  reduceMotion: boolean
 }
 
-function StepConnector({ isComplete }: StepConnectorProps) {
+function StepConnector({ isComplete, reduceMotion }: StepConnectorProps) {
   return (
-    <div className="relative mx-2 h-0.5 flex-1 overflow-hidden rounded bg-muted">
+    <div className="relative mx-0.5 h-0.5 flex-1 overflow-hidden rounded bg-muted sm:mx-2">
       <motion.div
         className="absolute left-0 top-0 h-full bg-primary"
         initial={false}
         animate={{ width: isComplete ? "100%" : "0%" }}
-        transition={{ duration: 0.4 }}
+        transition={{ duration: reduceMotion ? 0 : 0.4 }}
       />
     </div>
   )

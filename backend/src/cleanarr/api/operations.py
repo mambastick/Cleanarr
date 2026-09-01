@@ -11,7 +11,8 @@ from urllib.parse import urlsplit, urlunsplit
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from cleanarr.api.dashboard import ActivityStore, HealthProbeStore, WebhookAttemptStore
-from cleanarr.api.deletion_jobs import ManualDeletionJobStore
+from cleanarr.application.deletion_jobs import ManualDeletionJobService
+from cleanarr.application.ports import DownloadsRepositoryPort
 from cleanarr.domain.config import (
     CURRENT_CONFIG_SCHEMA_VERSION,
     BaseServiceConfig,
@@ -151,6 +152,8 @@ class SupportBundle(BaseModel):
     recent_errors: list[SupportErrorRecord]
     webhook_outcomes: dict[str, int]
     manual_job_statuses: dict[str, int]
+    download_action_statuses: dict[str, int] = Field(default_factory=dict)
+    policy_decisions: dict[str, int] = Field(default_factory=dict)
     redaction_notice: str
 
 
@@ -263,7 +266,8 @@ async def render_metrics(
     activity_store: ActivityStore,
     webhook_attempt_store: WebhookAttemptStore,
     health_probe_store: HealthProbeStore,
-    deletion_jobs: ManualDeletionJobStore,
+    deletion_jobs: ManualDeletionJobService,
+    downloads_repository: DownloadsRepositoryPort | None = None,
 ) -> str:
     """Render Prometheus text with only bounded, non-identifying labels."""
 
@@ -272,6 +276,8 @@ async def render_metrics(
     service_counts = _service_counts(config)
     webhook_counts = Counter(_safe_webhook_outcome(record.outcome) for record in webhook_attempt_store.snapshot(80))
     job_counts = Counter(job.status.value for job in deletion_jobs.list_jobs())
+    download_action_counts = downloads_repository.action_status_counts() if downloads_repository is not None else {}
+    policy_counts = downloads_repository.policy_decision_counts() if downloads_repository is not None else {}
 
     lines = [
         "# HELP cleanarr_info CleanArr build information.",
@@ -322,6 +328,22 @@ async def render_metrics(
     )
     for job_status, count in sorted(job_counts.items()):
         lines.append(f'cleanarr_manual_jobs{{status="{_escape_label(job_status)}"}} {count}')
+    lines.extend(
+        [
+            "# HELP cleanarr_download_actions Reversible download actions by bounded status.",
+            "# TYPE cleanarr_download_actions gauge",
+        ]
+    )
+    for action_status, count in sorted(download_action_counts.items()):
+        lines.append(f'cleanarr_download_actions{{status="{_escape_label(action_status)}"}} {count}')
+    lines.extend(
+        [
+            "# HELP cleanarr_download_policy_decisions Policy evaluations by bounded decision.",
+            "# TYPE cleanarr_download_policy_decisions gauge",
+        ]
+    )
+    for decision, count in sorted(policy_counts.items()):
+        lines.append(f'cleanarr_download_policy_decisions{{decision="{_escape_label(decision)}"}} {count}')
     return "\n".join(lines) + "\n"
 
 
@@ -332,7 +354,8 @@ async def build_support_bundle(
     activity_store: ActivityStore,
     webhook_attempt_store: WebhookAttemptStore,
     health_probe_store: HealthProbeStore,
-    deletion_jobs: ManualDeletionJobStore,
+    deletion_jobs: ManualDeletionJobService,
+    downloads_repository: DownloadsRepositoryPort | None = None,
 ) -> SupportBundle:
     """Build a support snapshot without media names, IDs, URLs, or secrets."""
 
@@ -367,6 +390,8 @@ async def build_support_bundle(
 
     webhook_counts = Counter(_safe_webhook_outcome(record.outcome) for record in webhook_attempt_store.snapshot(80))
     job_counts = Counter(job.status.value for job in deletion_jobs.list_jobs())
+    download_action_counts = downloads_repository.action_status_counts() if downloads_repository is not None else {}
+    policy_counts = downloads_repository.policy_decision_counts() if downloads_repository is not None else {}
     downstream = []
     for display_name, service_key in _DOWNSTREAM_SERVICES.items():
         configured_count = (
@@ -398,6 +423,8 @@ async def build_support_bundle(
         recent_errors=recent_errors,
         webhook_outcomes=dict(sorted(webhook_counts.items())),
         manual_job_statuses=dict(sorted(job_counts.items())),
+        download_action_statuses=dict(sorted(download_action_counts.items())),
+        policy_decisions=dict(sorted(policy_counts.items())),
         redaction_notice=(
             "Media names, media IDs, paths, service names, URLs, credentials, messages, "
             "and action details are excluded."

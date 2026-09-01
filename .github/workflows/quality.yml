@@ -100,9 +100,29 @@ jobs:
         working-directory: frontend
         run: pnpm lint
 
+      - name: Unit test
+        working-directory: frontend
+        run: pnpm test -- --run
+
       - name: Build
         working-directory: frontend
         run: pnpm build
+
+      - name: Install Chromium
+        working-directory: frontend
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Browser test
+        working-directory: frontend
+        run: pnpm exec playwright test --project=chromium
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          if-no-files-found: warn
 
   container-smoke:
     name: Container smoke

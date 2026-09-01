@@ -30,6 +30,7 @@ export function ThemeToggle() {
       size="icon"
       className="size-8"
       title={`Theme: ${current}`}
+      aria-label={`Theme: ${current}`}
       onClick={handleClick}
     >
       <Icon className="size-4" />

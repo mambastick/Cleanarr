@@ -28,6 +28,13 @@ CleanArr release notes are always written in Russian and English. A release tag 
    rehearsal documented in [Compatibility matrix](COMPATIBILITY.md).
 4. Merge the release commit into `main`.
 
+For a future release containing the post-1.0 Downloads/deletion slice, run the
+candidate compatibility profile that proves normalized reads and pause/resume
+for all four adapters, then rehearse the latest stable v1.0.0 state into the
+candidate v5/config-v3 schema and back through a verified backup. Keep the
+direct populated v4-to-v5 migration test as separate evidence. Do not describe
+those contracts as certified until all evidence passes from the release commit.
+
 ## Publish
 
 ```bash

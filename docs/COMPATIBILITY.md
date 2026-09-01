@@ -38,6 +38,11 @@ the reported version and authenticated health contract, and proves that invalid
 credentials fail closed. Each torrent-client test then:
 
 - creates a real deterministic torrent through the native API;
+- reads one normalized snapshot and verifies its state, size, progress, and
+  freshness contract;
+- pauses and resumes it through the native reversible command, verifies the
+  resulting normalized state, and proves that repeating each command is
+  idempotent;
 - verifies a non-mutating dry-run lookup;
 - removes the torrent entry without data;
 - treats a second removal as an idempotent missing result;
@@ -50,9 +55,10 @@ duplicate-event handling, and simultaneous multi-instance routing. The live
 Radarr, Sonarr, Jellyfin, and Seerr fixtures verify the exact authenticated API
 versions and read contracts used by those scenario flows.
 
-The same gate builds the candidate and rehearses both directions with real
-released containers: `v0.2.11 -> candidate -> restored v0.2.11` and
-`v0.9.0 -> candidate -> restored v0.9.0`. It checks the byte-identical verified
+The candidate rehearsal covers both directions with real released containers:
+`v0.2.11 -> candidate -> restored v0.2.11`,
+`v0.9.0 -> candidate -> restored v0.9.0`, and the latest stable
+`v1.0.0 -> candidate -> restored v1.0.0`. It checks the byte-identical verified
 backup, database/config schema migration, retained configuration, and retained
 activity history.
 
@@ -68,6 +74,20 @@ The services bind test ports only to `127.0.0.1`, use disposable volumes, and
 are removed after the run. `CLEANARR_COMPAT_KEEP=1` may be used only for local
 diagnosis; it intentionally retains the stack and prints its generated project
 and runtime paths.
+
+## Post-1.0 command boundary
+
+The candidate profile now exercises normalized Downloads reads and idempotent
+pause/resume mapping for all four torrent adapters. This harness coverage does
+not retroactively extend a published release's certified contract. A release
+may claim these commands only when this exact pinned profile, container/package
+smoke, the latest stable v1.0.0-to-v5/config-v3 backup/restore rehearsal, and the
+populated v4-to-v5 migration test pass from the release commit.
+
+The profile does **not** by itself certify seeding-stop policy execution,
+cleanup-candidate aggregation, first-run workflow, or batch APIs. A successful
+connection test, HTTP response, or cached observation is never compatibility
+evidence for those flows.
 
 ## 1.x compatibility and deprecation policy
 
