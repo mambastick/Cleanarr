@@ -1,7 +1,9 @@
 import { X } from "lucide-react"
-import type { ReactNode } from "react"
+import { useEffect, type ReactNode, type RefObject } from "react"
 
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogBackdrop, DialogClose, DialogDescription, DialogPopup, DialogPortal, DialogTitle } from "@/components/ui/dialog"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 
 export function Modal({
@@ -12,6 +14,8 @@ export function Modal({
   onClose,
   footer,
   className,
+  closeLabel,
+  returnFocusRef,
 }: {
   title: string
   description?: string
@@ -20,43 +24,35 @@ export function Modal({
   onClose: () => void
   footer?: ReactNode
   className?: string
+  closeLabel: string
+  returnFocusRef?: RefObject<HTMLElement | null>
 }) {
-  if (!open) {
-    return null
-  }
+  useEffect(() => {
+    if (!open) return
+    const returnFocusTarget = returnFocusRef?.current
+    return () => returnFocusTarget?.focus()
+  }, [open, returnFocusRef])
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={onClose}
-      role="presentation"
-    >
-      <div
-        className={cn(
-          "w-full max-w-2xl rounded-2xl border bg-background shadow-2xl",
-          className,
-        )}
-        onClick={(event) => {
-          event.stopPropagation()
-        }}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-      >
-        <div className="flex items-start justify-between gap-4 border-b px-6 py-5">
-          <div className="space-y-1">
-            <h2 className="text-xl font-semibold tracking-tight">{title}</h2>
-            {description ? (
-              <p className="text-sm text-muted-foreground">{description}</p>
-            ) : null}
-          </div>
-          <Button variant="ghost" size="icon-sm" onClick={onClose}>
-            <X className="size-4" />
-          </Button>
+    <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose() }}>
+      <DialogPortal>
+        <DialogBackdrop data-testid="modal-backdrop" className="fixed inset-0 z-50 bg-black/50" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <DialogPopup finalFocus={returnFocusRef} className={cn("flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col rounded-2xl border bg-background shadow-2xl outline-none", className)}>
+            <div className="flex items-start justify-between gap-4 border-b px-6 py-5">
+              <div className="space-y-1">
+                <DialogTitle className="text-xl font-semibold tracking-tight">{title}</DialogTitle>
+                {description ? <DialogDescription className="text-sm text-muted-foreground">{description}</DialogDescription> : null}
+              </div>
+              <DialogClose render={<Button autoFocus variant="ghost" size="icon-sm" aria-label={closeLabel} />}>
+                <X />
+              </DialogClose>
+            </div>
+            <ScrollArea className="min-h-0 flex-1" viewportClassName="h-full px-6 py-5">{children}</ScrollArea>
+            {footer ? <div className="border-t px-6 py-4">{footer}</div> : null}
+          </DialogPopup>
         </div>
-        <div className="max-h-[70vh] overflow-y-auto px-6 py-5">{children}</div>
-        {footer ? <div className="border-t px-6 py-4">{footer}</div> : null}
-      </div>
-    </div>
+      </DialogPortal>
+    </Dialog>
   )
 }

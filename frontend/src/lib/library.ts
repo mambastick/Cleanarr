@@ -44,9 +44,20 @@ export interface ManualDeleteRequest {
   season_number?: number | null
   jellyfin_item_id?: string | null
   confirmed_plan_hash?: string | null
+  idempotency_key?: string | null
+  display_name?: string | null
 }
 
-export type ManualDeleteResponse = DashboardProcessingResult
+export interface ManualDeleteResponse extends DashboardProcessingResult {
+  correlation_id: string | null
+  display_name: string
+}
+
+export interface ManualDeleteJobRequest extends ManualDeleteRequest {
+  confirmed_plan_hash: string
+  idempotency_key: string
+  display_name: string
+}
 
 export type ManualDeleteJobStatus = "queued" | "running" | "retry_wait" | "completed" | "failed"
 
@@ -71,6 +82,7 @@ export interface ManualDeleteJob {
   id: string
   item_type: ItemType
   item_name: string | null
+  display_name: string
   status: ManualDeleteJobStatus
   phase: ManualDeleteJobPhase
   progress_percent: number
@@ -88,4 +100,72 @@ export interface ManualDeleteJob {
 
 export interface ManualDeleteJobListResponse {
   jobs: ManualDeleteJob[]
+}
+
+export type BatchChildPreviewStatus = "ready" | "blocked"
+export type BatchChildStatus = "queued" | "running" | "completed" | "blocked" | "failed" | "cancelled"
+export type ManualDeleteBatchStatus = "queued" | "running" | "completed" | "partial" | "failed" | "cancelled"
+
+export interface ManualDeleteBatchChildPreview {
+  mutation_identity: string
+  display_name: string
+  status: BatchChildPreviewStatus
+  plan_hash: string | null
+  plan: ManualDeleteResponse | null
+  blocked_code: string | null
+  blocked_message: string | null
+}
+
+export interface ManualDeleteBatchPreviewResponse {
+  generated_at: string
+  batch_hash: string
+  children: ManualDeleteBatchChildPreview[]
+  ready_count: number
+  blocked_count: number
+}
+
+export interface ManualDeleteBatchChild {
+  id: string
+  mutation_identity: string
+  display_name: string
+  status: BatchChildStatus
+  message: string
+  blocked_code: string | null
+  error_code: string | null
+  error_message: string | null
+  preflight: ManualDeleteResponse | null
+  result: ManualDeleteResponse | null
+  started_at: string | null
+  completed_at: string | null
+}
+
+export interface ManualDeleteBatch {
+  id: string
+  status: ManualDeleteBatchStatus
+  message: string
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+  error_code: string | null
+  error_message: string | null
+  total_count: number
+  queued_count: number
+  running_count: number
+  completed_count: number
+  blocked_count: number
+  failed_count: number
+  cancelled_count: number
+  children: ManualDeleteBatchChild[]
+}
+
+export interface ManualDeleteBatchListResponse {
+  batches: ManualDeleteBatch[]
+  next_before: string | null
+}
+
+export interface ManualDeleteBatchRequest {
+  children: ManualDeleteRequest[]
+  idempotency_key: string
+  confirmed_batch_hash: string
+  confirmed_item_count: number
 }

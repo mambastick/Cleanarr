@@ -11,7 +11,7 @@ __pycache__/
 build/
 develop-eggs/
 dist/
-downloads/
+/downloads/
 eggs/
 .eggs/
 /lib/
@@ -204,6 +204,8 @@ cython_debug/
 # Frontend
 frontend/node_modules/
 frontend/.vite/
+frontend/playwright-report/
+frontend/test-results/
 
 # Backend
 backend/src/cleanarr/ui/static/
