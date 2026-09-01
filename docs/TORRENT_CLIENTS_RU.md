@@ -47,6 +47,27 @@ info hash и не превращает уже отсутствующую раз�
 Dry-run выполняет ту же проверку владельца и политики, но не вызывает удаление,
 поэтому его журнал действий честно отражает решения keep/defer.
 
+## Управление Downloads и остановка сидирования
+
+Read model Downloads нормализует наблюдения всех включённых клиентов. Поле,
+которое клиент не передал, остаётся nullable/unknown; оно никогда не заменяется
+нулём или успешным чтением. Списки ограничены и используют cursor, а partial
+результат source остаётся явно partial.
+
+Downloads предоставляет только обратимые controls **pause** и **resume**, а не
+удаление entry или data. Ручное действие требует fresh managed observation и
+client-generated idempotency key. Состояниями завершения являются только
+`succeeded`, `already_in_state` и dry-run `simulated`. Для `failed`,
+`uncertain` и `reconcile_required` нужен review оператора; ambiguous request
+повторяйте с точно тем же action и idempotency key.
+
+Глобальная automatic seeding-stop policy отделена от per-profile removal policy
+выше и по умолчанию отключена. Она только ставит раздачу на паузу, когда fresh
+managed seeding evidence достигает настроенного порога ratio и/или времени.
+Режим выбирается явно (`all` или `any`), category/tag include/exclude scope
+работает fail closed, а отсутствие обязательной метрики блокирует действие.
+Policy никогда не удаляет torrent entry или локальные data.
+
 ## Безопасность удаления данных в rTorrent
 
 Команда rTorrent `d.erase` удаляет раздачу, но специально не трогает данные. В

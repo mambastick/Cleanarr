@@ -46,6 +46,27 @@ CleanArr normalizes it and derives elapsed time from `d.timestamp.finished`.
 Dry-run performs the same ownership and policy lookup but never calls a removal
 operation, so its action log reflects keep/defer decisions accurately.
 
+## Downloads controls and seeding stop
+
+The Downloads read model normalizes observations from every enabled client. A
+field that a client did not provide remains nullable/unknown; it is never
+presented as zero or a successful read. Listings are bounded and cursor-based,
+and a partial source result remains explicitly partial.
+
+Downloads exposes only reversible **pause** and **resume** controls, never entry
+or data deletion. A manual control needs a fresh managed observation and a
+client-generated idempotency key. Only `succeeded`, `already_in_state`, and
+dry-run `simulated` are completion states. `failed`, `uncertain`, and
+`reconcile_required` require operator review; retry an ambiguous request with
+the exact same action and idempotency key.
+
+The global automatic seeding-stop policy is separate from the per-profile
+removal policy above and is disabled by default. It pauses only when fresh,
+managed, seeding evidence satisfies configured ratio and/or time thresholds.
+The mode is explicit (`all` or `any`), category/tag include/exclude scope is
+fail-closed, and missing required metrics block the action. The policy never
+removes a torrent entry or local data.
+
 ## rTorrent data deletion safety
 
 rTorrent's `d.erase` removes the torrent entry but deliberately leaves its data

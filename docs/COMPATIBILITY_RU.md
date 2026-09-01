@@ -38,6 +38,10 @@ download engines. Другие релизы, включая более нову�
 поведение при неверных credentials. Затем тест каждого torrent-клиента:
 
 - создаёт реальную детерминированную раздачу через нативный API;
+- читает один нормализованный snapshot и проверяет контракт его состояния,
+  размера, progress и freshness;
+- выполняет pause и resume через нативную обратимую команду, проверяет итоговое
+  нормализованное состояние и доказывает идемпотентность повтора каждой команды;
 - проверяет dry-run lookup без мутаций;
 - удаляет запись раздачи без данных;
 - считает повторное удаление идемпотентным отсутствием;
@@ -50,9 +54,10 @@ pack/shared-path/cross-seed отказов, всех media item types, восс�
 fixtures Radarr, Sonarr, Jellyfin и Seerr проверяют точные аутентифицированные
 версии API и read-контракты, используемые этими сценариями.
 
-Тот же gate собирает candidate и репетирует оба направления на реальных
-выпущенных контейнерах: `v0.2.11 -> candidate -> восстановленный v0.2.11` и
-`v0.9.0 -> candidate -> восстановленный v0.9.0`. Проверяются byte-identical
+Репетиция candidate проверяет оба направления на реальных выпущенных
+контейнерах: `v0.2.11 -> candidate -> восстановленный v0.2.11`,
+`v0.9.0 -> candidate -> восстановленный v0.9.0` и последнюю stable
+`v1.0.0 -> candidate -> восстановленный v1.0.0`. Проверяются byte-identical
 верифицированный backup, миграция схем БД/config, сохранность конфигурации и
 истории активности.
 
@@ -68,6 +73,21 @@ backend/.venv/bin/python compatibility/rehearse_upgrade.py cleanarr:compatibilit
 volumes и удаляются после проверки. `CLEANARR_COMPAT_KEEP=1` допустим только для
 локальной диагностики: он намеренно сохраняет stack и выводит сгенерированные
 пути project/runtime.
+
+## Граница post-1.0 commands
+
+Candidate profile теперь проверяет нормализованные Downloads reads и
+идемпотентный mapping pause/resume для всех четырёх torrent adapters. Такое
+покрытие harness не расширяет задним числом сертифицированный контракт уже
+опубликованного релиза. В релизе эти commands можно заявить только после того,
+как из release commit пройдут этот точный pinned profile, container/package
+smoke, репетиция backup/restore с последней stable v1.0.0 до v5/config-v3 и
+populated migration test v4-to-v5.
+
+Сам по себе profile **не** сертифицирует выполнение seeding-stop policy,
+cleanup-candidate aggregation, first-run workflow или batch APIs. Успешная
+проверка подключения, HTTP response или cached observation никогда не являются
+evidence совместимости этих flows.
 
 ## Политика совместимости и deprecation серии 1.x
 

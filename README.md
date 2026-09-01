@@ -106,7 +106,8 @@ Pack torrents, shared files, and anything that can't be safely attributed are al
 - **Webhook auto-configure** — one-click setup of the Jellyfin Webhook plugin directly from the UI
 - **Activity log** — every processed event is stored with full action breakdown; searchable by title, system, action, or status
 - **Guided setup wizard** — first-run wizard walks you through connecting each service step by step
-- **Multi-profile** — save multiple service definitions per type, pick one as the active runtime target
+- **Multi-profile downloaders** — save qBittorrent, Transmission, Deluge, and rTorrent profiles together; enabled profiles participate while one preferred profile is retained for setup and display
+- **Downloads and cleanup recommendations** — inspect bounded, normalized torrent observations and Jellyfin-based cleanup candidates without turning unknown data into deletion permission
 - **Local and SSO authentication** — local password login plus strict OpenID Connect validation, PKCE, nonce, and explicit user/group/claim access policies
 - **Dark / light mode** — follows system preference
 
@@ -222,6 +223,12 @@ SSO remains disabled until at least one explicit user/group allowlist or a
 required claim/value pair is configured. See the complete [OIDC and reverse
 proxy guide](docs/SSO.md) before enabling `both` or `sso_only` mode.
 
+The downloader step can save several qBittorrent, Transmission, Deluge, and
+rTorrent profiles. A profile may be saved disabled for later setup; **enabled**
+and **preferred/default** are separate states. Test the exact current draft
+before treating it as ready: changing its client kind, URL, or credentials
+invalidates the frontend's saved connection-test fingerprint.
+
 ---
 
 ## Jellyfin webhook setup
@@ -306,6 +313,16 @@ The easiest way is to use **Auto-configure** in the Jellyfin service editor (cli
 | `GET` | `/api/support/bundle` | session | Redacted operational support snapshot |
 | `GET` | `/metrics` | session or admin token | Privacy-safe Prometheus metrics |
 | `POST` | `/api/config/jellyfin/setup-webhook` | session | Auto-configure the Jellyfin Webhook plugin |
+| `POST` | `/api/actions/delete/preview` | session | Mutation-free single-item deletion preview |
+| `POST` / `GET` | `/api/actions/delete/jobs` | session | Queue or list hash-bound single deletion jobs |
+| `GET` / `DELETE` | `/api/actions/delete/jobs/{job_id}` | session | Inspect or dismiss a terminal deletion job |
+| `POST` | `/api/actions/delete/batches/preview` | session | Mutation-free item-level batch preview |
+| `POST` / `GET` | `/api/actions/delete/batches` | session | Submit or list bounded hash-bound batches |
+| `GET` | `/api/actions/delete/batches/{batch_id}` | session | Inspect batch and child outcomes |
+| `GET` / `POST` | `/api/downloads`, `/api/downloads/refresh` | session | Bounded cursor read model and refresh |
+| `GET` | `/api/downloads/{client_id}/{info_hash}` | session | One normalized torrent observation |
+| `POST` | `/api/downloads/actions` | session | Reversible pause/resume only; idempotency required |
+| `GET` | `/api/downloads/cleanup-candidates` | session | Bounded Jellyfin-based cleanup recommendations |
 | `POST` | `/api/auth/login` | — | Admin login |
 | `GET` | `/api/auth/status` | — | Current authentication capabilities and session state |
 | `GET` | `/api/auth/sso/login` | — | Start the OpenID Connect login flow |
@@ -379,8 +396,17 @@ pnpm dev
 ### Tests
 
 ```bash
-cd backend && pytest
-cd frontend && pnpm build   # also runs tsc
+cd backend
+ruff format --check src tests
+ruff check src tests
+mypy src
+pytest -q
+
+cd ../frontend
+pnpm lint
+pnpm test -- --run
+pnpm build
+pnpm exec playwright test --project=chromium
 ```
 
 Release notes are maintained in both Russian and English. See [Release process](docs/RELEASING.md).

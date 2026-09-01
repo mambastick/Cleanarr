@@ -48,6 +48,14 @@ decision. Confirmation is bound to the SHA-256 hash of that canonical plan.
 CleanArr rejects a missing, changed, or stale hash and recomputes the plan
 before the first mutation.
 
+Stable service identifiers, hashes, and paths remain the only ownership inputs.
+`display_name` is presentation data only. A batch previews every child without
+mutation, binds its ordered child plans to one batch hash, and rechecks them at
+submit/execution time. A client idempotency key returns only the resource for
+the same canonical confirmed request; reuse for a different request is rejected.
+Blocked children remain visible and a batch can finish partial—there is no
+cross-service all-or-nothing transaction.
+
 Torrent removal is attempted before dependent Arr, Seerr, or Jellyfin removal.
 A torrent failure blocks those dependent mutations so that ownership evidence
 remains available for a safe retry. Successful earlier actions and the
@@ -59,6 +67,18 @@ Completed webhook events are idempotently suppressed for seven days. An
 already absent torrent or downstream entity is treated as an idempotent result.
 Partial failures and safety skips are not marked complete because dependency
 state may change and a later confirmed retry may become safe.
+
+If a restart occurs before a manual job enters a potentially mutating phase,
+CleanArr rechecks its persisted preflight. If it occurs after that point, the
+job is terminal `interrupted_unknown` and is not replayed automatically. A
+webhook exception or cancellation likewise leaves a durable
+`interrupted_unknown` tombstone; automatic reconciliation/replay is blocked
+because the reached downstream stage cannot be proved.
+
+Downloads pause/resume is reversible and distinct from removing a torrent entry
+or data. It requires fresh, managed ownership evidence. Playback/watch and
+download observations that are missing, stale, partial, or conflicting are
+unknown: they can sort or explain a recommendation, never authorize deletion.
 
 A process-wide safety lock serializes destructive webhook and manual work.
 CleanArr 1.0 supports one application replica with one SQLite state volume;

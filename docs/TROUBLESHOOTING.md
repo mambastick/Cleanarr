@@ -52,6 +52,10 @@ Do not add fuzzy matching to work around a skip. Correct the source metadata,
 profile URL, instance ownership, or download history and generate a new dry-run
 preview.
 
+If the response code is `interrupted_unknown`, preserve the database and
+downstream evidence. Do not replay that webhook automatically: it may have
+reached a downstream mutation before interruption.
+
 ## A manual job is partial or retrying
 
 Open the persisted job and compare completed actions with the newly computed
@@ -62,6 +66,24 @@ retry using the newly confirmed plan hash. Do not edit the SQLite job row.
 If the process restarted, wait for readiness and reload the job. The resolved
 event, confirmed preflight, completed actions, attempt count, and next retry
 time are persisted.
+
+For `plan_changed` or `confirmation_required`, make a new preview and confirm
+its current hash. For `idempotency_key_conflict` or a retired key, do not change
+the request body under the same key. A batch can be partial: inspect every child
+and its blocked/error code; `batch_plan_changed` requires a new batch preview.
+An interrupted potentially mutating job is `interrupted_unknown`, not a retry.
+
+## Downloads or cleanup candidates are incomplete
+
+Refresh Downloads and check source status, client failure details, freshness,
+and managed ownership before pause/resume. An HTTP response is not completion:
+`uncertain` and `reconcile_required` need reconciliation. Retry an ambiguous
+action only with the exact same action and idempotency key.
+
+Cleanup candidates are recommendations. `source_status=partial`, `truncated`,
+or `failure_codes` means the list is incomplete; unknown watch/readiness data
+never permits deletion. A candidate without `deletion_link` is non-actionable;
+use a linked item's display name only to start the ordinary preview flow.
 
 ## Login or SSO fails
 

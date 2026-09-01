@@ -11,8 +11,9 @@ not control.
 
 `GET /metrics` returns Prometheus text format. Labels are intentionally bounded
 to integration kind, health state, item type, operation status, webhook outcome,
-and job status. Media names and IDs, paths, profile names, URLs, hashes, and
-credentials are not metrics labels.
+job status, bounded download-action status, and bounded policy decision. Media
+names and IDs, paths, profile names, URLs, hashes, and credentials are not
+metrics labels.
 
 The operation values are retained-store gauges, not lifetime counters: they can
 decrease when activity retention or manual-job history removes old records.
@@ -35,7 +36,8 @@ scrape_configs:
 `GET /api/support/bundle` returns JSON containing the CleanArr, configuration,
 and database schema versions; per-integration configured/enabled counts, health,
 and downstream versions; recent structured error/action codes with correlation
-IDs; and aggregate webhook/manual-job states.
+IDs; and aggregate webhook/manual-job, download-action, and policy-decision
+states.
 
 The response excludes media names and IDs, paths, profile names, URLs,
 credentials, free-form messages, and action details. Review every attachment
@@ -51,6 +53,14 @@ curl --fail --silent --show-error \
 
 Every new deletion cascade receives a `correlation_id`. Use that identifier to
 match an API result or activity record to the redacted support error record.
+
+## Downloads operational evidence
+
+Download action and policy aggregates are retained-store gauges, not proof that
+an individual pause/resume completed. The action projection deliberately omits
+idempotency keys and canonical request bodies. Preserve the action ID, bounded
+status/code, source status, and observation freshness when investigating an
+action; do not infer success from an HTTP response alone.
 
 ## Redacted configuration transfer
 

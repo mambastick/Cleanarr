@@ -98,9 +98,13 @@ sudo dnf install ./cleanarr_<новая-версия>_amd64.rpm
 sudo systemctl restart cleanarr
 ```
 
-Миграция схемы v0.4 аддитивная: старая версия v0.3 игнорирует таблицу ручных
-заданий. Для полного отката остановите CleanArr, восстановите проверенную копию,
-установите предыдущий пакет и запустите сервис:
+Текущая SQLite schema — v5, а схема сохранённой runtime configuration — v3.
+Миграции выполняются только вперёд; SQLite v3/v4 добавляют durable
+deletion idempotency и batch state, а v5 — observations, actions и policy
+evaluations Downloads. Перед обновлением создайте проверенный pre-upgrade backup. Старую версию разрешено
+запускать только после восстановления соответствующей pre-upgrade копии. Для
+полного отката остановите CleanArr, восстановите проверенную копию, установите
+предыдущий пакет и запустите сервис:
 
 ```bash
 sudo systemctl stop cleanarr
