@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import AxeBuilder from "@axe-core/playwright"
-import { boot } from "./fixtures"
+import { boot, navButton } from "./fixtures"
 
 const WCAG_AA_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]
 
@@ -13,6 +13,35 @@ test("setup dialog traps focus, supports escape/backdrop restoration, and remain
 })
 
 test("settings Select is a themed portal and keeps English/Russian copy localized", async ({ page }) => {
-  await boot(page); await page.getByRole("tab", { name: "Settings" }).click(); const theme = page.getByRole("button", { name: /theme:/i }); await theme.click(); const language = page.locator("#settings-ui-language"); await language.focus(); await page.keyboard.press("Enter"); const russian = page.getByRole("option", { name: "Русский" }); await expect(russian).toBeVisible(); const lightPopup = russian.locator("xpath=ancestor::*[contains(@class, 'bg-popover')]").first(); await expect(lightPopup).toHaveClass(/bg-popover/); expect(await lightPopup.evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)"); await page.keyboard.press("Escape")
-  await theme.click(); await language.focus(); await page.keyboard.press("Enter"); await expect(russian).toBeVisible(); const darkPopup = russian.locator("xpath=ancestor::*[contains(@class, 'bg-popover')]").first(); await expect(darkPopup).toHaveClass(/bg-popover/); expect(await darkPopup.evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)"); await page.keyboard.press("ArrowDown"); await page.keyboard.press("Enter"); await page.getByRole("button", { name: /save changes/i }).click(); await expect(page.getByRole("tab", { name: "Настройки" })).toBeVisible(); await expect(page.getByText("Настройки сохранены.")).toBeVisible()
+  await boot(page)
+  const account = page.getByRole("button", { name: "Account: fixture-admin" })
+  await account.click()
+  await page.getByRole("button", { name: /Theme.*System/i }).click()
+  await page.getByRole("button", { name: "Close" }).click()
+  await expect(account).toBeFocused()
+  await navButton(page, "Settings").click()
+  const language = page.locator("#settings-ui-language")
+  await language.focus()
+  await page.keyboard.press("Enter")
+  const russian = page.getByRole("option", { name: "Русский" })
+  await expect(russian).toBeVisible()
+  const lightPopup = russian.locator("xpath=ancestor::*[contains(@class, 'bg-popover')]").first()
+  await expect(lightPopup).toHaveClass(/bg-popover/)
+  expect(await lightPopup.evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)")
+  await page.keyboard.press("Escape")
+
+  await account.click()
+  await page.getByRole("button", { name: /Theme.*Light/i }).click()
+  await page.getByRole("button", { name: "Close" }).click()
+  await expect(account).toBeFocused()
+  await language.focus()
+  await page.keyboard.press("Enter")
+  await expect(russian).toBeVisible()
+  const darkPopup = russian.locator("xpath=ancestor::*[contains(@class, 'bg-popover')]").first()
+  await expect(darkPopup).toHaveClass(/bg-popover/)
+  expect(await darkPopup.evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)")
+  await russian.click()
+  await page.getByRole("button", { name: /save changes/i }).click()
+  await expect(navButton(page, "Настройки")).toBeVisible()
+  await expect(page.getByText("Настройки сохранены.", { exact: true })).toBeVisible()
 })

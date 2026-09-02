@@ -1,40 +1,44 @@
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef, useState } from "react"
 import { toast } from "sonner"
 
-import { AppNavigation } from "@/features/app-shell/app-navigation"
+import { useTheme } from "@/components/theme-provider"
+import { AppShell, type AppShellPage, type StorageHeadline } from "@/features/app-shell/app-shell"
+import { SHELL_COPY } from "@/features/app-shell/shell-copy"
 import { ActivityPanel } from "@/features/activity/activity-panel"
 import { AuthScreen, AuthScreenSkeleton } from "@/features/auth/auth-screen"
 import { DashboardPanel } from "@/features/dashboard/dashboard-panel"
+import { STORAGE_COPY, type StorageCopy } from "@/features/dashboard/storage-copy"
 const DownloadsPanel = lazy(() => import("@/features/downloads/downloads-panel").then((module) => ({ default: module.DownloadsPanel })))
 import { DeleteConfirmationDialog } from "@/features/deletion/delete-confirmation-dialog"
 import { buildConfirmedDeleteRequest, deleteSessionReducer, initialDeleteSession } from "@/features/deletion/delete-session"
 import { BatchDeleteConfirmationDialog } from "@/features/deletion/batch-delete-confirmation-dialog"
 import { batchChildRequests, batchDeleteSessionReducer, buildBatchRequest, initialBatchDeleteSession } from "@/features/deletion/batch-delete-session"
-import { localizedDeletionError, submissionRecovery } from "@/features/deletion/deletion-copy"
+import { DELETION_NOTICES, localizedDeletionError, submissionRecovery } from "@/features/deletion/deletion-copy"
 import { JobsSheet } from "@/features/jobs/jobs-sheet"
 import { batchTransitionAnnouncement, isTerminalBatchStatus } from "@/features/jobs/batch-status"
-import { LibraryPanel as LibraryFeaturePanel, type LibraryCopy } from "@/features/library/library-panel"
-import { buildManualDeleteRequest, type LibraryDeleteTarget } from "@/features/library/library-selection"
+import { LibraryPanelV2 } from "@/features/library/library-v2-panel"
+import { LIBRARY_COPY } from "@/features/library/library-copy"
+import { buildManualDeleteRequest, libraryDeleteTargetFromItem, librarySelectionItemFromItem, type BatchSelectionItem, type LibraryDeleteTarget } from "@/features/library/library-selection"
 import { GeneralSettingsModal, ServiceModal, SettingsPanel } from "@/features/settings/settings-panel"
 import { SetupWizard } from "@/features/setup/setup-wizard"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Tabs, TabsContent } from "@/components/ui/tabs"
 import type { AuthSessionPayload, AuthStatusPayload, SSOLoginPayload } from "@/lib/auth"
 import type { DashboardActivity, DashboardPayload, DashboardWebhookAttempt } from "@/lib/dashboard"
 import { getUiText, resolveUiLanguage, type UiLanguage, type UiTextMap } from "@/lib/i18n"
-import type { LibraryMoviesResponse, LibrarySeriesResponse, ManualDeleteBatch, ManualDeleteBatchListResponse, ManualDeleteJob, ManualDeleteJobListResponse, ManualDeletePreviewResponse } from "@/lib/library"
+import type { LibraryItem, ManualDeleteBatch, ManualDeleteBatchListResponse, ManualDeleteJob, ManualDeleteJobListResponse, ManualDeletePreviewResponse } from "@/lib/library"
 import type { ConnectionTestResponse, GeneralConfig, RuntimeConfigPayload } from "@/lib/runtime-config"
 import { buildServicePayload, DASHBOARD_NAME_TO_FAMILY, EMPTY_DRAFTS, getDownloaderLabel, getServiceEndpoint, getServiceTitle, getServices, isSetupStepReady, resolveActiveService, SERVICE_META, SETUP_STEPS, toDraft, type DownloaderKind, type ServiceDraft, type ServiceFamily, type ServiceModalState } from "@/lib/service-config"
 import { normalizeError } from "@/lib/status-format"
 import { connectionFingerprint } from "@/lib/downloader-profile"
+import { useStorage, type StorageResponse } from "@/lib/storage"
 import { useApiClient } from "@/lib/use-api-client"
 
-type MainTab = "dashboard" | "settings" | "activity" | "library" | "downloads"
 type AuthMode = "register" | "login"
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
 function CleanArrApp() {
+  const { theme, setTheme } = useTheme()
   const [dashboard, setDashboard] = useState<DashboardPayload | null>(null)
   const [config, setConfig] = useState<RuntimeConfigPayload | null>(null)
   const [authStatus, setAuthStatus] = useState<AuthStatusPayload | null>(null)
@@ -46,20 +50,17 @@ function CleanArrApp() {
   const [activityFilter, setActivityFilter] = useState("")
   const [authMode, setAuthMode] = useState<AuthMode>("login")
   const [showWizard, setShowWizard] = useState(false)
-  const [activeTab, setActiveTab] = useState<MainTab>("dashboard")
-  const [downloadsActiveCount, setDownloadsActiveCount] = useState<number | null>(null)
+  const [activeTab, setActiveTab] = useState<AppShellPage>("overview")
+  const [, setDownloadsActiveCount] = useState<number | null>(null)
   const [authForm, setAuthForm] = useState({ username: "", password: "", confirmPassword: "" })
   const [ssoError, setSsoError] = useState<string | null>(null)
   const [generalModalOpen, setGeneralModalOpen] = useState(false)
   const [serviceModal, setServiceModal] = useState<ServiceModalState | null>(null)
   const [testedDownloaderFingerprints, setTestedDownloaderFingerprints] = useState<Set<string>>(() => new Set())
   const [csrfToken, setCsrfToken] = useState("")
+  const [libraryResetKey, setLibraryResetKey] = useState(0)
   const hasAutoNavigated = useRef(false)
 
-  const [library, setLibrary] = useState<LibrarySeriesResponse | null>(null)
-  const [isLibraryLoading, setIsLibraryLoading] = useState(false)
-  const [libraryMovies, setLibraryMovies] = useState<LibraryMoviesResponse | null>(null)
-  const [isLibraryMoviesLoading, setIsLibraryMoviesLoading] = useState(false)
   const [deleteSession, dispatchDeleteSession] = useReducer(deleteSessionReducer<LibraryDeleteTarget>, undefined, initialDeleteSession<LibraryDeleteTarget>)
   const [batchDeleteSession, dispatchBatchDeleteSession] = useReducer(batchDeleteSessionReducer, undefined, initialBatchDeleteSession)
   const [deleteJobs, setDeleteJobs] = useState<ManualDeleteJob[]>([])
@@ -87,6 +88,11 @@ function CleanArrApp() {
   const uiText = useMemo(() => getUiText(uiLanguage), [uiLanguage])
 
   const fetchJson = useApiClient(csrfToken, setCsrfToken)
+  const storage = useStorage({
+    active: Boolean(authStatus?.authenticated),
+    authenticated: Boolean(authStatus?.authenticated),
+    fetchJson,
+  })
 
   const loadDashboard = useCallback(
     async (background = false) => {
@@ -135,30 +141,6 @@ function CleanArrApp() {
     }
   }, [fetchJson])
 
-  const loadLibrary = useCallback(async () => {
-    setIsLibraryLoading(true)
-    try {
-      const payload = await fetchJson<LibrarySeriesResponse>("/api/library/series")
-      setLibrary(payload)
-    } catch (error) {
-      toast.error(normalizeError(error))
-    } finally {
-      setIsLibraryLoading(false)
-    }
-  }, [fetchJson])
-
-  const loadLibraryMovies = useCallback(async () => {
-    setIsLibraryMoviesLoading(true)
-    try {
-      const payload = await fetchJson<LibraryMoviesResponse>("/api/library/movies")
-      setLibraryMovies(payload)
-    } catch (error) {
-      toast.error(normalizeError(error))
-    } finally {
-      setIsLibraryMoviesLoading(false)
-    }
-  }, [fetchJson])
-
   const loadDeleteJobs = useCallback(async () => {
     try {
       const payload = await fetchJson<ManualDeleteJobListResponse>("/api/actions/delete/jobs")
@@ -181,21 +163,18 @@ function CleanArrApp() {
         if (justFinished) {
           const name = job.display_name || job.item_name || job.item_type
           if (job.status === "failed" || job.result?.status === "partial_failure") {
-            toast.error(`${name}: ${uiLanguage === "ru" ? "задача требует внимания." : "job needs attention."}`)
-            setDeleteJobAnnouncement(`${name}: ${uiLanguage === "ru" ? "задача требует внимания." : "job needs attention."}`)
+            const message = `${name}: ${DELETION_NOTICES[uiLanguage === "ru" ? "ru" : "en"].jobNeedsAttention}`
+            toast.error(message)
+            setDeleteJobAnnouncement(message)
             setDeleteJobAnnouncementTone("assertive")
           } else {
-            const completedMessage = uiLanguage === "ru" ? "задача завершена." : "job completed."
+            const completedMessage = DELETION_NOTICES[uiLanguage === "ru" ? "ru" : "en"].jobCompleted
             toast.success(`${name}: ${completedMessage}`)
             setDeleteJobAnnouncement(`${name}: ${completedMessage}`)
             setDeleteJobAnnouncementTone("polite")
           }
           void loadDashboard(true)
-          if (job.item_type === "Movie") {
-            void loadLibraryMovies()
-          } else {
-            void loadLibrary()
-          }
+          setLibraryResetKey((current) => current + 1)
         }
 
         knownDeleteJobStates.current.set(job.id, job.status)
@@ -206,7 +185,7 @@ function CleanArrApp() {
         deleteJobsPollFailed.current = true
       }
     }
-  }, [fetchJson, loadDashboard, loadLibrary, loadLibraryMovies, uiLanguage, uiText.backgroundRefreshFailed])
+  }, [fetchJson, loadDashboard, uiLanguage, uiText.backgroundRefreshFailed])
 
   const loadDeleteBatches = useCallback(async () => {
     try {
@@ -227,8 +206,7 @@ function CleanArrApp() {
           if (announcement.tone === "assertive") toast.error(announcement.message)
           else toast.success(announcement.message)
           void loadDashboard(true)
-          void loadLibrary()
-          void loadLibraryMovies()
+          setLibraryResetKey((current) => current + 1)
         }
         knownDeleteBatchStates.current.set(batch.id, batch.status)
       })
@@ -238,7 +216,7 @@ function CleanArrApp() {
         deleteBatchesPollFailed.current = true
       }
     }
-  }, [fetchJson, loadDashboard, loadLibrary, loadLibraryMovies, uiLanguage, uiText.backgroundRefreshFailed])
+  }, [fetchJson, loadDashboard, uiLanguage, uiText.backgroundRefreshFailed])
 
   useEffect(() => {
     if (deleteSession.phase !== "preparing" || !deleteSession.target) return
@@ -316,7 +294,8 @@ function CleanArrApp() {
       hasLoadedDeleteBatches.current = true
       setDeleteBatches((current) => [batch, ...current.filter((item) => item.id !== batch.id)])
       dispatchBatchDeleteSession({ type: "submitted", batch })
-      toast.success(uiLanguage === "ru" ? "Пакетная задача принята." : "Batch job accepted.")
+      setLibraryResetKey((current) => current + 1)
+      toast.success(DELETION_NOTICES[uiLanguage === "ru" ? "ru" : "en"].batchAccepted)
     } catch (error) {
       const outcome = localizedDeletionError(error, uiLanguage === "ru" ? "ru" : "en")
       dispatchBatchDeleteSession({ type: "submission_failed", code: outcome.code, message: outcome.message, recovery: submissionRecovery(error) })
@@ -390,13 +369,6 @@ function CleanArrApp() {
     }
   }, [authStatus, loadConfig])
 
-  useEffect(() => {
-    if (activeTab === "library" && authStatus?.authenticated) {
-      void loadLibrary()
-      void loadLibraryMovies()
-    }
-  }, [activeTab, authStatus?.authenticated, loadLibrary, loadLibraryMovies])
-
   const setupCompletionCount = useMemo(
     () => SETUP_STEPS.reduce((n, step) => n + (isSetupStepReady(step.id, config, testedDownloaderFingerprints) ? 1 : 0), 0),
     [config, testedDownloaderFingerprints],
@@ -406,7 +378,7 @@ function CleanArrApp() {
   useEffect(() => {
     if (!hasAutoNavigated.current && config && setupCompletionCount === SETUP_STEPS.length) {
       hasAutoNavigated.current = true
-      setActiveTab("dashboard")
+      setActiveTab("overview")
     }
   }, [config, setupCompletionCount])
 
@@ -475,7 +447,7 @@ function CleanArrApp() {
       )
       setCsrfToken(payload.csrf_token)
       setAuthForm({ username: payload.username, password: "", confirmPassword: "" })
-      setActiveTab("dashboard")
+      setActiveTab("overview")
       await loadAuth()
       if (authMode === "register") {
         setShowWizard(true)
@@ -528,6 +500,7 @@ function CleanArrApp() {
     hasLoadedDeleteBatches.current = false
     deleteJobsPollFailed.current = false
     deleteBatchesPollFailed.current = false
+    setLibraryResetKey((current) => current + 1)
     await loadAuth()
   }
 
@@ -537,6 +510,7 @@ function CleanArrApp() {
       body: JSON.stringify(payload),
     })
     setConfig(next)
+    setLibraryResetKey((current) => current + 1)
     await loadAuth()
     toast.success(getUiText(resolveUiLanguage(next.general.ui_language)).runtimeSettingsSaved)
   }
@@ -549,6 +523,7 @@ function CleanArrApp() {
       : await fetchJson<RuntimeConfigPayload>(endpoint, { method: "POST", body })
     setConfig(next)
     await loadDashboard(true)
+    setLibraryResetKey((current) => current + 1)
     setServiceModal(null)
     toast.success(`${getServiceTitle(family, draft)} ${draft.id ? uiText.serviceUpdated : uiText.serviceAdded}.`)
   }
@@ -562,6 +537,7 @@ function CleanArrApp() {
     const next = await fetchJson<RuntimeConfigPayload>("/api/config")
     setConfig(next)
     await loadDashboard(true)
+    setLibraryResetKey((current) => current + 1)
     setServiceModal(null)
     toast.success(`${family === "downloaders" ? getDownloaderLabel(kind) : SERVICE_META[family].title} ${uiText.serviceRemoved}.`)
   }
@@ -609,119 +585,142 @@ function CleanArrApp() {
 
   // ─── Main app ──────────────────────────────────────────────────────────────
 
+  const shellLanguage = uiLanguage === "ru" ? "ru" : "en"
+  const shellStorage = toShellStorage(storage.data, STORAGE_COPY[shellLanguage])
+  const libraryCopy = LIBRARY_COPY[shellLanguage]
+  const openDeletePreview = (target: LibraryDeleteTarget, trigger: HTMLElement) => {
+    deleteReturnFocusRef.current = trigger
+    dispatchDeleteSession({ type: "open", target, displayName: getDeleteTargetLabel(target, uiText), idempotencyKey: createDeleteSessionKey() })
+  }
+  const openLibraryDeletePreview = (item: LibraryItem, trigger: HTMLElement) => {
+    const target = libraryDeleteTargetFromItem(item)
+    if (!target) {
+      toast.error(libraryCopy.itemChanged)
+      return
+    }
+    openDeletePreview(target, trigger)
+  }
+  const openLibraryBatchPreview = (items: LibraryItem[], trigger: HTMLElement) => {
+    const selected: BatchSelectionItem[] = []
+    for (const item of items) {
+      const candidate = librarySelectionItemFromItem(item)
+      if (!candidate) {
+        toast.error(libraryCopy.selectedItemChanged)
+        return
+      }
+      selected.push(candidate)
+    }
+    batchDeleteReturnFocusRef.current = trigger
+    dispatchBatchDeleteSession({ type: "open", items: selected, idempotencyKey: createDeleteSessionKey() })
+  }
+
   return (
-    <Tabs
-      value={activeTab}
-      onValueChange={(v) => setActiveTab(v as MainTab)}
-      className="flex min-h-screen flex-col"
-    >
-      <AppNavigation labels={uiText} live={isLive} username={authStatus.username} showRuntime={Boolean(dashboard)} downloadsActiveCount={downloadsActiveCount} onLogout={() => void logout()} />
-
-      {/* Page content */}
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6">
-        {/* ── Dashboard ── */}
-        <TabsContent value="dashboard" className="mt-0">
-          <DashboardPanel
-            text={uiText}
-            dashboard={dashboard}
-            isDashboardLoading={isDashboardLoading}
-            setupCompletionCount={setupCompletionCount}
-            deletedActions={deletedActions}
-            latestActivity={latestActivity}
-            allServicesConfigured={allServicesConfigured}
-            isLive={isLive}
-            onToggleDryRun={async () => {
-              if (config) await saveGeneralSettings({ ...config.general, dry_run: !config.general.dry_run })
-            }}
-            onOpenWizard={(trigger) => {
-              setupWizardReturnFocusRef.current = trigger
-              setShowWizard(true)
-            }}
-            onEditService={(name, trigger) => {
-              const family = DASHBOARD_NAME_TO_FAMILY[name]
-              if (!family) return
-              settingsModalReturnFocusRef.current = trigger
-              const services = getServices(config, family)
-              const active = resolveActiveService(services)
-              if (active) {
-                setServiceModal({ family, draft: toDraft(active) })
-              } else {
-                setServiceModal({ family, draft: structuredClone(EMPTY_DRAFTS[family]) })
-              }
-            }}
-          />
-        </TabsContent>
-
-        {/* ── Settings ── */}
-        <TabsContent value="settings" className="mt-0">
-          <SettingsPanel
-            text={uiText}
-            language={uiLanguage}
-            config={config}
-            isConfigLoading={isConfigLoading}
-            onSaveGeneral={saveGeneralSettings}
-            onAddService={(family, trigger) => {
-              settingsModalReturnFocusRef.current = trigger
-              setServiceModal({ family, draft: structuredClone(EMPTY_DRAFTS[family]) })
-            }}
-            onEditService={(family, service, trigger) => {
-              settingsModalReturnFocusRef.current = trigger
-              setServiceModal({ family, draft: toDraft(service) })
-            }}
-          />
-        </TabsContent>
-
-        {/* ── Activity ── */}
-        <TabsContent value="activity" className="mt-0">
-          <ActivityPanel
-            text={uiText}
-            filteredActivity={filteredActivity}
-            webhookAttempts={filteredWebhookAttempts}
-            activityFilter={activityFilter}
-            onFilterChange={setActivityFilter}
-          />
-        </TabsContent>
-
-        {/* ── Library ── */}
-        <TabsContent value="library" className="mt-0">
-          <LibraryFeaturePanel
-            text={getLibraryCopy(uiText, uiLanguage)}
-            library={library}
-            isLibraryLoading={isLibraryLoading}
-            libraryMovies={libraryMovies}
-            isLibraryMoviesLoading={isLibraryMoviesLoading}
-            isLive={isLive}
-            onRefreshSeries={() => void loadLibrary()}
-            onRefreshMovies={() => void loadLibraryMovies()}
-            onDelete={(target, trigger) => {
-              deleteReturnFocusRef.current = trigger
-              dispatchDeleteSession({ type: "open", target, displayName: getDeleteTargetLabel(target, uiText), idempotencyKey: createDeleteSessionKey() })
-            }}
-            onBatchPreview={(items, trigger) => { batchDeleteReturnFocusRef.current = trigger; dispatchBatchDeleteSession({ type: "open", items, idempotencyKey: createDeleteSessionKey() }) }}
-          />
-        </TabsContent>
-
-        <TabsContent value="downloads" className="mt-0">
-          <Suspense fallback={<div className="space-y-3"><Skeleton className="h-8 w-40" /><Skeleton className="h-32 w-full" /></div>}>
-            <DownloadsPanel
-              active={activeTab === "downloads"}
-              authenticated={Boolean(authStatus?.authenticated)}
-              language={uiLanguage === "ru" ? "ru" : "en"}
+    <>
+      <AppShell
+        activePage={activeTab}
+        onPageChange={setActiveTab}
+        username={authStatus.username}
+        theme={theme}
+        onThemeChange={setTheme}
+        language={shellLanguage}
+        onLanguageChange={(language) => {
+          if (config && config.general.ui_language !== language) {
+            void saveGeneralSettings({ ...config.general, ui_language: language })
+          }
+        }}
+        onLogout={() => void logout()}
+        dryRun={!isLive}
+        storageHeadline={shellStorage}
+        labels={SHELL_COPY[shellLanguage]}
+      >
+        <div className={activeTab === "library" ? "mx-auto w-full max-w-[100rem]" : "mx-auto w-full max-w-6xl"}>
+          <div hidden={activeTab !== "overview"}>
+            <DashboardPanel
+              text={uiText}
+              dashboard={dashboard}
+              isDashboardLoading={isDashboardLoading}
+              setupCompletionCount={setupCompletionCount}
+              deletedActions={deletedActions}
+              latestActivity={latestActivity}
+              allServicesConfigured={allServicesConfigured}
               isLive={isLive}
-              fetchJson={fetchJson}
-              onActiveCountChange={setDownloadsActiveCount}
-              onDelete={(target, trigger) => {
-                deleteReturnFocusRef.current = trigger
-                dispatchDeleteSession({ type: "open", target, displayName: getDeleteTargetLabel(target, uiText), idempotencyKey: createDeleteSessionKey() })
+              storage={storage.data}
+              storageLoading={storage.loading || storage.refreshing}
+              storageError={storage.error}
+              storageLanguage={shellLanguage}
+              onRefreshStorage={() => void storage.refresh()}
+              onToggleDryRun={async () => {
+                if (config) await saveGeneralSettings({ ...config.general, dry_run: !config.general.dry_run })
               }}
-              onBatchPreview={(items, trigger) => {
-                batchDeleteReturnFocusRef.current = trigger
-                dispatchBatchDeleteSession({ type: "open", items, idempotencyKey: createDeleteSessionKey() })
+              onOpenWizard={(trigger) => {
+                setupWizardReturnFocusRef.current = trigger
+                setShowWizard(true)
+              }}
+              onEditService={(name, trigger) => {
+                const family = DASHBOARD_NAME_TO_FAMILY[name]
+                if (!family) return
+                settingsModalReturnFocusRef.current = trigger
+                const services = getServices(config, family)
+                const active = resolveActiveService(services)
+                setServiceModal({ family, draft: active ? toDraft(active) : structuredClone(EMPTY_DRAFTS[family]) })
               }}
             />
-          </Suspense>
-        </TabsContent>
-      </main>
+          </div>
+
+          <div hidden={activeTab !== "library"}>
+            <LibraryPanelV2
+              key={libraryResetKey}
+              active={activeTab === "library"}
+              authenticated={Boolean(authStatus.authenticated)}
+              language={shellLanguage}
+              fetchJson={fetchJson}
+              resetKey={libraryResetKey}
+              onDeletePreview={openLibraryDeletePreview}
+              onBatchPreview={openLibraryBatchPreview}
+            />
+          </div>
+
+          <div hidden={activeTab !== "downloads"}>
+            <Suspense fallback={<div className="space-y-3"><Skeleton className="h-8 w-40" /><Skeleton className="h-32 w-full" /></div>}>
+              <DownloadsPanel
+                active={activeTab === "downloads"}
+                authenticated={Boolean(authStatus.authenticated)}
+                language={shellLanguage}
+                isLive={isLive}
+                fetchJson={fetchJson}
+                onActiveCountChange={setDownloadsActiveCount}
+                onDelete={openDeletePreview}
+                onBatchPreview={(items, trigger) => {
+                  batchDeleteReturnFocusRef.current = trigger
+                  dispatchBatchDeleteSession({ type: "open", items, idempotencyKey: createDeleteSessionKey() })
+                }}
+              />
+            </Suspense>
+          </div>
+
+          <div hidden={activeTab !== "activity"}>
+            <ActivityPanel text={uiText} filteredActivity={filteredActivity} webhookAttempts={filteredWebhookAttempts} activityFilter={activityFilter} onFilterChange={setActivityFilter} />
+          </div>
+
+          <div hidden={activeTab !== "settings"}>
+            <SettingsPanel
+              text={uiText}
+              language={uiLanguage}
+              config={config}
+              isConfigLoading={isConfigLoading}
+              onSaveGeneral={saveGeneralSettings}
+              onAddService={(family, trigger) => {
+                settingsModalReturnFocusRef.current = trigger
+                setServiceModal({ family, draft: structuredClone(EMPTY_DRAFTS[family]) })
+              }}
+              onEditService={(family, service, trigger) => {
+                settingsModalReturnFocusRef.current = trigger
+                setServiceModal({ family, draft: toDraft(service) })
+              }}
+            />
+          </div>
+        </div>
+      </AppShell>
 
       {/* ── Setup wizard overlay ── */}
       {showWizard && (
@@ -809,7 +808,12 @@ function CleanArrApp() {
           else if (batchDeleteSession.phase === "submission_failed" && batchDeleteSession.recovery === "rotate_session") dispatchBatchDeleteSession({ type: "open", items: batchDeleteSession.items, idempotencyKey: createDeleteSessionKey() })
           else dispatchBatchDeleteSession({ type: "retry_preflight" })
         }}
-        onClose={() => dispatchBatchDeleteSession({ type: "close" })}
+        onClose={() => {
+          if (!batchDeleteReturnFocusRef.current?.isConnected) {
+            batchDeleteReturnFocusRef.current = document.querySelector<HTMLElement>("[data-batch-focus-fallback]")
+          }
+          dispatchBatchDeleteSession({ type: "close" })
+        }}
       />
 
       <JobsSheet
@@ -826,7 +830,7 @@ function CleanArrApp() {
         announcementTone={deleteJobAnnouncementTone}
         onDismiss={(jobId) => void dismissDeleteJob(jobId)}
       />
-    </Tabs>
+    </>
   )
 }
 
@@ -849,27 +853,24 @@ function getDeleteTargetLabel(target: LibraryDeleteTarget, text: UiTextMap): str
     : target.series_title
 }
 
-function getLibraryCopy(text: UiTextMap, language: UiLanguage): LibraryCopy {
-  const russian = language === "ru"
+function toShellStorage(data: StorageResponse | null, text: StorageCopy): StorageHeadline {
+  if (!data) {
+    return { status: "unknown", headline: text.unavailable }
+  }
+  const representative = data.volumes.find((volume) => volume.status === data.status && volume.freshness === "fresh")
+    ?? data.volumes.find((volume) => volume.status === data.status)
+    ?? data.volumes[0]
+  const freePercent = representative?.free_percent
+  const headline = typeof freePercent === "number"
+    ? `${Math.round(freePercent)}% ${text.free.toLocaleLowerCase()}`
+    : text.unknown
   return {
-    library: text.library, libraryDescription: text.libraryDescription, series: text.series, movies: text.movies,
-    season: text.season, seasons: text.seasons, episodes: text.episodes, refresh: text.refresh,
-    delete: text.delete, deleteSeries: text.deleteSeries, deleteItem: text.deleteItem,
-    dryRunModeInfo: text.dryRunModeInfo, noLiveChanges: text.noLiveChanges,
-    select: russian ? "Выбрать" : "Select", selectVisible: russian ? "Выбрать видимые" : "Select visible",
-    clearSelection: russian ? "Очистить выбор" : "Clear selection", batchPreview: russian ? "Проверить пакет" : "Review batch",
-    selected: russian ? "выбрано" : "selected", selectedOne: russian ? "выбран" : "selected", hidden: russian ? "не отображается" : "not visible",
-    movieForms: russian ? ["фильм", "фильма", "фильмов"] : ["movie", "movies", "movies"],
-    seriesForms: russian ? ["сериал", "сериала", "сериалов"] : ["series", "series", "series"],
-    seasonForms: russian ? ["сезон", "сезона", "сезонов"] : ["season", "seasons", "seasons"],
-    maximum: russian ? "Можно выбрать не более 50 элементов." : "A batch can contain at most 50 items.",
-    overlap: russian ? "Нельзя совместить сериал целиком и его сезон." : "A whole series and one of its seasons cannot be selected together.",
-    duplicate: russian ? "Этот целевой Arr-элемент уже выбран." : "This Arr deletion target is already selected.",
-    onDisk: text.onDisk, noFile: text.noFile, noSeriesFound: text.noSeriesFound, noMoviesFound: text.noMoviesFound,
-    noSeriesMatch: text.noSeriesMatch, noMoviesMatch: text.noMoviesMatch, noSeriesSetup: text.noSeriesSetup,
-    noMoviesSetup: text.noMoviesSetup, tryDifferentSearch: text.tryDifferentSearch,
-    searchPlaceholderSeries: text.searchPlaceholderSeries, searchPlaceholderMovies: text.searchPlaceholderMovies,
-    noSeasonsFound: text.noSeasonsFound,
+    status: data.status,
+    headline,
+    detail: representative?.display_label,
+    percent: typeof freePercent === "number" ? 100 - freePercent : undefined,
+    partial: data.partial,
+    freshness: data.freshness === "stale" ? text.stale : undefined,
   }
 }
 

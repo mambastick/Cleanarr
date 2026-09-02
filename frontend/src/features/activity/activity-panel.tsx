@@ -113,7 +113,7 @@ export function ActivityPanel({
 
 
 function WebhookAttemptEntry({ attempt, text }: { attempt: DashboardWebhookAttempt; text: UiTextMap }) {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
   const tone = getWebhookStatusTone(attempt.outcome)
 
   return (
@@ -172,7 +172,7 @@ function WebhookAttemptEntry({ attempt, text }: { attempt: DashboardWebhookAttem
 }
 
 function ActivityEntry({ entry, text }: { entry: DashboardActivity; text: UiTextMap }) {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
   const Icon = entry.result.item_type === "Movie" ? Film : Tv
   const hasActions = entry.result.actions.length > 0
   return (

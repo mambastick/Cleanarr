@@ -21,6 +21,8 @@ export interface GeneralConfig {
   sso_required_claim: string | null
   sso_required_value: string | null
   seeding_stop_policy: SeedingStopPolicyConfig
+  storage_warning_free_percent?: number
+  storage_critical_free_percent?: number
 }
 
 export interface SeedingStopPolicyConfig {

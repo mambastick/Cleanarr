@@ -1,4 +1,4 @@
-import { CircleAlert, KeyRound, LoaderCircle, ShieldCheck, UserRoundPlus } from "lucide-react"
+import { CircleAlert, KeyRound, LoaderCircle, ShieldCheck, UserRoundPlus, Zap } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -53,12 +53,15 @@ export function AuthScreen({
         : text.signInWithSso
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
-      <div className="w-full max-w-sm space-y-6">
-        <div className="flex justify-center">
-          <div className="flex items-center gap-2 text-3xl"><svg width="36" height="36" viewBox="0 0 48 48" fill="none" className="text-primary"><path d="M28,6 L8,28 L24,28 L22,42 L40,20 L24,20 Z" fill="currentColor" /></svg><span><span className="font-light text-foreground">Clean</span><span className="font-bold text-primary">Arr</span></span></div>
+    <main className="flex min-h-screen items-center justify-center bg-background px-4 py-8 sm:px-6">
+      <div className="w-full max-w-md space-y-6">
+        <div className="flex justify-center" aria-label="CleanArr">
+          <div className="flex min-h-11 items-center gap-2 text-3xl tracking-tight">
+            <Zap aria-hidden="true" className="size-8 rotate-12 text-primary" strokeWidth={1.8} />
+            <span><span className="font-light text-foreground">Clean</span><span className="font-bold text-primary">Arr</span></span>
+          </div>
         </div>
-      <Card className="w-full shadow-sm">
+      <Card className="w-full border-border bg-card shadow-sm">
         <CardHeader className="space-y-1.5">
           <CardTitle className="flex items-center gap-2 text-xl">
             {requiresRegistration ? (
@@ -119,7 +122,7 @@ export function AuthScreen({
                 </FormField>
               )}
 
-              <Button className="w-full" disabled={isSubmitting} onClick={onSubmit}>
+              <Button className="min-h-11 w-full" disabled={isSubmitting} onClick={onSubmit}>
                 {isSubmitting ? (
                   <LoaderCircle className="size-4 animate-spin" />
                 ) : authMode === "register" ? (
@@ -142,7 +145,7 @@ export function AuthScreen({
                 </div>
               )}
               <Button
-                className="w-full"
+                className="min-h-11 w-full"
                 variant="outline"
                 disabled={isSsoSubmitting || !ssoConfigured}
                 onClick={onSsoSubmit}
@@ -170,7 +173,7 @@ export function AuthScreen({
         </CardContent>
       </Card>
       </div>
-    </div>
+    </main>
   )
 }
 

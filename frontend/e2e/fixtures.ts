@@ -10,6 +10,7 @@ const general = {
   sso_mode: "password_only", sso_issuer_url: null, sso_client_id: null, sso_client_secret: null,
   sso_redirect_uri: null, sso_scopes: "openid profile", sso_allowed_users: [], sso_allowed_groups: [],
   sso_group_claim: "groups", sso_required_claim: null, sso_required_value: null,
+  storage_warning_free_percent: 15, storage_critical_free_percent: 5,
   seeding_stop_policy: { enabled: false, mode: "all", min_ratio: null, min_seeding_minutes: null, include_categories: [], exclude_categories: [], include_tags: [], exclude_tags: [], interval_seconds: 300, max_attempts: 3 },
 }
 
@@ -23,6 +24,7 @@ export const dashboard = {
 export const fixtureMovie = { radarr_id: 101, title: "Fixture Movie", jellyfin_movie_title: "Fixture Movie", size_bytes: 1_000_000, has_file: true, jellyfin_movie_id: "fixture-movie", has_seerr_request: false }
 export const fixtureSeries = { sonarr_id: 201, title: "Fixture Series", jellyfin_series_title: "Fixture Series", jellyfin_series_id: "fixture-series", has_seerr_request: false, seasons: [{ season_number: 1, episode_count: 1, episode_file_count: 1, size_bytes: 1_000_000, jellyfin_title: "Fixture Series · Season 1", jellyfin_season_id: "fixture-season", has_seerr_request: false }] }
 export const safePlan = { status: "success", display_name: "Fixture Movie", actions: [{ system: "qbittorrent", action: "remove_torrent", details: { client_name: "Fixture downloader", client_kind: "qbittorrent" } }], correlation_id: "fixture-correlation" }
+export const storage = { headline: "Healthy", status: "healthy", freshness: "fresh", partial: false, warning_free_percent: 15, critical_free_percent: 5, observed_at: "2026-01-01T00:00:00Z", volumes: [{ volume_id: "volume-1", service: "radarr", profile_id: "fixture-radarr", display_label: "Media", total_bytes: 1_000_000_000, free_bytes: 500_000_000, free_percent: 50, status: "healthy", freshness: "fresh", observed_at: "2026-01-01T00:00:00Z", error_code: null, possible_duplicate: false }] }
 export function clone<T>(value: T): T { return structuredClone(value) }
 export function downloadItem(overrides: Record<string, unknown> = {}) { return { client_id: "fixture-client", client_name: "Fixture downloader", client_kind: "qbittorrent", info_hash: "fixture-hash", observed_at: "2026-01-01T00:00:00Z", display_name: "Fixture torrent", state: "seeding", freshness: "fresh", ownership: "managed", progress: 1, total_bytes: 1_000_000, downloaded_bytes: 1_000_000, uploaded_bytes: 2_000_000, ratio: 2, seeding_time_seconds: 3600, download_speed_bytes_per_second: 0, upload_speed_bytes_per_second: 0, eta_seconds: null, added_at: null, completed_at: null, activity_at: null, category: null, tags: [], tracker_summary: null, unavailable_reason: null, policy_decision: "eligible", policy_reason_code: null, policy_facts: null, latest_action: null, ...overrides } }
 
@@ -42,11 +44,25 @@ export class ApiController {
     this.handlers = options.handlers ?? []
     this.auth = { authenticated: true, username: "fixture-admin", csrf_token: "fixture-csrf", requires_registration: false, sso_mode: "password_only", sso_configured: false, ui_language: this.config.general.ui_language, ...options.auth }
     const currentDashboard = clone(options.dashboard ?? dashboard); const movies = options.movies ?? []; const series = options.series ?? []; const downloads = options.downloads ?? []; const cleanup = options.cleanup ?? []; const jobs = options.jobs ?? []; const batches = options.batches ?? []
+    const libraryMovies = movies.map((value, index) => toLibraryMovie(value, index))
+    const librarySeries = series.map((value, index) => toLibrarySeries(value, index))
     this.handlers.push((request) => {
       if (request.pathname === "/api/auth/status") return { body: this.auth }
       if (request.pathname === "/api/config") return { body: this.config }
       if (request.pathname === "/api/config/general" && request.method === "PUT") { Object.assign(this.config.general, JSON.parse(request.body ?? "{}")); this.auth.ui_language = this.config.general.ui_language; return { body: this.config } }
       if (request.pathname === "/api/dashboard") return { body: currentDashboard }
+      if (request.pathname === "/api/storage/volumes") return { body: storage }
+      if (request.pathname === "/api/storage/refresh" && request.method === "POST") return { body: storage }
+      if (request.pathname === "/api/library/items") {
+        const items = request.query.get("media_type") === "series" ? librarySeries : libraryMovies
+        return { body: { items, state: "complete", failures: [], next_cursor: null, revision: "fixture-catalog", catalog_revision: "fixture-catalog" } }
+      }
+      if (request.pathname.startsWith("/api/library/items/")) {
+        const resourceId = decodeURIComponent(request.pathname.slice("/api/library/items/".length))
+        const item = [...libraryMovies, ...librarySeries].find((candidate) => candidate.resource_id === resourceId)
+        if (!item) return { status: 404, body: { detail: { code: "library_item_not_found", message: "Fixture item not found" } } }
+        return { body: { item: { ...item, playback_status: "unknown", playback_freshness: "unknown", play_count: null, last_played_at: null, seeding_state: "unknown", seeding_readiness: "unknown", seeding_ratio: null, seeding_time_seconds: null, safety: { status: "unknown", reason: "fixture_unknown" }, unknown_reasons: ["fixture_unknown"] }, state: "complete", failures: [], catalog_revision: "fixture-catalog" } }
+      }
       if (request.pathname === "/api/library/series") return { body: { series } }
       if (request.pathname === "/api/library/movies") return { body: { movies } }
       if (request.pathname === "/api/actions/delete/jobs" && request.method === "GET") return { body: { jobs } }
@@ -109,4 +125,51 @@ const controllers = new WeakMap<Page, ApiController>()
 
 test.afterEach(async ({ page }) => controllers.get(page)?.assertHealthy())
 
-export async function boot(page: Page, options: ConstructorParameters<typeof ApiController>[0] = {}) { const api = new ApiController(options); await api.install(page); await page.goto("/"); await page.getByRole("tab", { name: /dashboard|панель/i }).waitFor(); return api }
+export async function boot(page: Page, options: ConstructorParameters<typeof ApiController>[0] = {}) {
+  const api = new ApiController(options)
+  await api.install(page)
+  await page.goto("/")
+  await page.getByRole("button", { name: /overview|обзор/i }).first().waitFor()
+  return api
+}
+
+export function navButton(page: Page, name: string | RegExp) {
+  return page.getByRole("button", { name }).filter({ visible: true }).first()
+}
+
+function toLibraryMovie(value: unknown, index: number) {
+  const movie = value as typeof fixtureMovie
+  return {
+    resource_id: `library-v1:radarr:fixture:${movie.radarr_id ?? index + 1}`,
+    media_type: "movie",
+    title: movie.title,
+    display_title: movie.jellyfin_movie_title ?? movie.title,
+    year: 2026,
+    size_bytes: movie.size_bytes,
+    has_file: movie.has_file,
+    added_at: "2026-01-01T00:00:00Z",
+    artwork_status: "missing",
+    artwork_url: null,
+    delete_target: { item_type: "Movie", radarr_movie_id: movie.radarr_id, jellyfin_item_id: movie.jellyfin_movie_id },
+    catalog_revision: "fixture-catalog",
+  }
+}
+
+function toLibrarySeries(value: unknown, index: number) {
+  const seriesItem = value as typeof fixtureSeries
+  return {
+    resource_id: `library-v1:sonarr:fixture:${seriesItem.sonarr_id ?? index + 1}`,
+    media_type: "series",
+    title: seriesItem.title,
+    display_title: seriesItem.jellyfin_series_title ?? seriesItem.title,
+    year: 2026,
+    size_bytes: seriesItem.seasons.reduce((sum, season) => sum + season.size_bytes, 0),
+    episode_count: seriesItem.seasons.reduce((sum, season) => sum + season.episode_count, 0),
+    episode_file_count: seriesItem.seasons.reduce((sum, season) => sum + season.episode_file_count, 0),
+    added_at: "2026-01-01T00:00:00Z",
+    artwork_status: "missing",
+    artwork_url: null,
+    delete_target: { item_type: "Series", sonarr_series_id: seriesItem.sonarr_id, jellyfin_item_id: seriesItem.jellyfin_series_id },
+    catalog_revision: "fixture-catalog",
+  }
+}

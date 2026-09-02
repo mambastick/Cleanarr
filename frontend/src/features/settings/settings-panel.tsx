@@ -15,6 +15,7 @@ import type { UiLanguage, UiTextMap } from "@/lib/i18n"
 import type { GeneralConfig, RuntimeConfigPayload } from "@/lib/runtime-config"
 import { generateWebhookToken, getDownloaderLabel, getServiceDescription, getServices, JELLYFIN_LANGUAGE_OPTIONS, LOG_LEVEL_OPTIONS, SERVICE_FAMILIES, SERVICE_META, UI_LANGUAGE_OPTIONS, type DownloaderKind, type ServiceFamily, type ServiceRecord } from "@/lib/service-config"
 import { normalizeError } from "@/lib/status-format"
+import { STORAGE_THRESHOLD_COPY, validateStorageThresholds } from "./storage-thresholds"
 export { GeneralSettingsModal, ServiceModal } from "@/features/settings/settings-modals"
 export { SsoConfigSection } from "@/features/settings/sso-config-section"
 import { SsoConfigSection } from "@/features/settings/sso-config-section"
@@ -48,7 +49,11 @@ export function SettingsPanel({
   }, [general])
 
   const isDirty = draft && general && JSON.stringify(draft) !== JSON.stringify(general)
-  const canSave = Boolean(isDirty && draft && stopPolicyIsValid(draft.seeding_stop_policy))
+  const warningThreshold = draft?.storage_warning_free_percent ?? 15
+  const criticalThreshold = draft?.storage_critical_free_percent ?? 5
+  const thresholdsValid = validateStorageThresholds(warningThreshold, criticalThreshold)
+  const canSave = Boolean(isDirty && draft && stopPolicyIsValid(draft.seeding_stop_policy) && thresholdsValid)
+  const thresholdCopy = STORAGE_THRESHOLD_COPY[language === "ru" ? "ru" : "en"]
 
   const handleSave = async () => {
     if (!draft) return
@@ -111,6 +116,19 @@ export function SettingsPanel({
                 <SelectControl id="settings-ui-language" value={draft.ui_language} onValueChange={(value) => setDraft({ ...draft, ui_language: value })} options={UI_LANGUAGE_OPTIONS} />
                 <FieldHint text={text.uiLanguageHint} />
               </FormField>
+
+              <div className="space-y-2 rounded-lg border border-border p-3">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <FormField label={thresholdCopy.warning} htmlFor="settings-storage-warning">
+                    <Input id="settings-storage-warning" type="number" min={0} max={100} step={1} value={String(warningThreshold)} aria-invalid={!thresholdsValid} onChange={(event) => setDraft({ ...draft, storage_warning_free_percent: Number(event.target.value) })} />
+                  </FormField>
+                  <FormField label={thresholdCopy.critical} htmlFor="settings-storage-critical">
+                    <Input id="settings-storage-critical" type="number" min={0} max={100} step={1} value={String(criticalThreshold)} aria-invalid={!thresholdsValid} onChange={(event) => setDraft({ ...draft, storage_critical_free_percent: Number(event.target.value) })} />
+                  </FormField>
+                </div>
+                <FieldHint text={thresholdCopy.hint} />
+                {!thresholdsValid ? <p role="alert" className="text-xs text-status-danger">{thresholdCopy.invalid}</p> : null}
+              </div>
 
               <FormField label={text.webhookToken} htmlFor="settings-webhook-token">
                 <div className="flex items-center gap-2">
@@ -215,26 +233,10 @@ export function SettingsPanel({
                   </Button>
                 </div>
                 {services.length > 0 ? (
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    {services.map((service) => (
-                      <Button
-                        key={service.id}
-                        variant="outline"
-                        onClick={(event) => onEditService(family, service, event.currentTarget)}
-                        className="h-auto w-full justify-between gap-3 px-3 py-2 text-left"
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm font-medium">{service.name}</span>
-                          <span className="block truncate text-xs text-muted-foreground">
-                            {family === "downloaders" ? getDownloaderLabel(service.kind as DownloaderKind) : service.url}
-                          </span>
-                        </span>
-                        <span className="flex shrink-0 items-center gap-1.5">
-                          {service.is_default && <Badge variant="outline">{text.defaultLabel}</Badge>}
-                          <StatusPill tone={service.enabled ? "green" : "blue"} label={service.enabled ? text.enabled : text.disabled} />
-                        </span>
-                      </Button>
-                    ))}
+                  <div className="mt-3">
+                    <div role="table" className="space-y-2">
+                      {services.map((service) => <div role="row" key={service.id} className="grid gap-2 rounded-lg border bg-card p-2 sm:grid-cols-[minmax(8rem,1fr)_minmax(8rem,1.5fr)_auto] sm:items-center"><div role="cell" className="min-w-0"><p className="truncate text-sm font-medium">{service.name}</p></div><div role="cell" className="truncate text-xs text-muted-foreground">{family === "downloaders" ? getDownloaderLabel(service.kind as DownloaderKind) : service.url}</div><div role="cell" className="flex items-center justify-between gap-2 sm:justify-end">{service.is_default && <Badge variant="outline">{text.defaultLabel}</Badge>}<StatusPill tone={service.enabled ? "green" : "blue"} label={service.enabled ? text.enabled : text.disabled} /><Button variant="ghost" size="sm" onClick={(event) => onEditService(family, service, event.currentTarget)}>{text.edit}</Button></div></div>)}
+                    </div>
                   </div>
                 ) : (
                   <p className="mt-3 text-xs text-muted-foreground">{text.notConfigured}</p>
