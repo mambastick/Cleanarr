@@ -24,6 +24,9 @@ from cleanarr.domain import (
     CleanupDeletionLink,
     CleanupMediaType,
     JellyfinCleanupItem,
+    LibraryEnrichment,
+    LibraryItem,
+    LibraryMediaType,
     ListingFreshness,
     PlaybackAggregate,
     PlaybackObservation,
@@ -235,6 +238,94 @@ class CleanupCandidatesService:
             radarr=radarr,
             sonarr=sonarr,
             downloads_repository=self._downloads_repository,
+        )
+
+    async def enrich_library_item(
+        self,
+        item: LibraryItem,
+        *,
+        accept_language: str | None,
+        config: GeneralConfig,
+    ) -> LibraryEnrichment:
+        """Read bounded detail evidence for one library item.
+
+        The list endpoint deliberately never calls this method.  A detail
+        request may perform one Jellyfin user/playback scope read and one Arr
+        history read, while the downloader repository is already a bounded,
+        independently refreshed snapshot.  Any incomplete evidence remains
+        unknown and carries its machine-readable reason.
+        """
+
+        failure_codes: list[str] = []
+        playback = unknown_playback("jellyfin_item_unavailable")
+        if item.jellyfin_item_id:
+            cleanup_item = JellyfinCleanupItem(
+                item_id=item.jellyfin_item_id,
+                display_name=item.jellyfin_title or item.title,
+                media_type=(
+                    CleanupMediaType.MOVIE if item.media_type is LibraryMediaType.MOVIE else CleanupMediaType.SERIES
+                ),
+                created_at=None,
+                added_at=item.added_at,
+                size_bytes=item.size_bytes,
+            )
+            try:
+                aggregates, playback_codes, _ = await self._playback_aggregates(
+                    (cleanup_item,), accept_language=accept_language
+                )
+                playback = aggregates.get(item.jellyfin_item_id, playback)
+                failure_codes.extend(playback_codes)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - detail evidence is advisory
+                playback = unknown_playback("jellyfin_playback_unavailable")
+                failure_codes.append("jellyfin_playback_unavailable")
+        else:
+            failure_codes.append("jellyfin_item_unavailable")
+
+        history: Sequence[RadarrHistoryRecord | SonarrHistoryRecord] | None
+        try:
+            if item.media_type is LibraryMediaType.MOVIE:
+                history = await asyncio.wait_for(self._radarr.list_movie_history(item.legacy_id), timeout=10)
+            else:
+                history = await asyncio.wait_for(self._sonarr.list_series_history(item.legacy_id), timeout=10)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - missing history is not no-seeding
+            history = None
+            failure_codes.append("arr_history_unavailable")
+        try:
+            seeding = _seeding_summary(
+                history=history,
+                snapshots=self._downloads_repository.list_snapshots(),
+                config=config,
+            )
+        except Exception:  # noqa: BLE001 - malformed evidence remains unknown
+            seeding = SeedingSummary(
+                "unknown",
+                "unknown",
+                "seeding_evidence_invalid",
+                unavailable_reason="seeding_evidence_invalid",
+            )
+            failure_codes.append("seeding_evidence_invalid")
+
+        if playback.unavailable_reason:
+            failure_codes.append(playback.unavailable_reason)
+        if seeding.unavailable_reason:
+            failure_codes.append(seeding.unavailable_reason)
+        playback_freshness = "unknown" if playback.status is PlaybackStatus.UNKNOWN else "fresh"
+        return LibraryEnrichment(
+            playback_status=playback.status.value,
+            playback_freshness=playback_freshness,
+            play_count=playback.play_count,
+            last_played_at=playback.last_played_at,
+            playback_reason=playback.unavailable_reason,
+            seeding_state=seeding.torrent_state,
+            seeding_readiness=seeding.readiness,
+            seeding_ratio=seeding.ratio,
+            seeding_time_seconds=seeding.seeding_time_seconds,
+            seeding_reason=seeding.unavailable_reason or seeding.readiness_reason,
+            failure_codes=tuple(sorted(set(failure_codes))),
         )
 
     async def list_candidates(

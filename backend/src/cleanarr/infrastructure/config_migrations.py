@@ -72,10 +72,21 @@ def _migrate_v3(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _migrate_v4(payload: dict[str, Any]) -> dict[str, Any]:
+    """Add conservative storage free-space alert thresholds."""
+
+    general = payload.get("general")
+    if isinstance(general, dict):
+        general.setdefault("storage_warning_free_percent", 15.0)
+        general.setdefault("storage_critical_free_percent", 5.0)
+    return payload
+
+
 CONFIG_MIGRATIONS = (
     ConfigMigration(version=1, migrate=_migrate_v1),
     ConfigMigration(version=2, migrate=_migrate_v2),
     ConfigMigration(version=3, migrate=_migrate_v3),
+    ConfigMigration(version=4, migrate=_migrate_v4),
 )
 
 

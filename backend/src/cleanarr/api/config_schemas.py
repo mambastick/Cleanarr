@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from math import isfinite
+
 from pydantic import BaseModel, Field, model_validator
 
 from cleanarr.application.configuration import ConnectionTestResult
@@ -55,6 +57,8 @@ class GeneralConfigRequest(BaseModel):
     webhook_shared_token: str | None = None
     http_timeout_seconds: float
     activity_retention_days: int = 30
+    storage_warning_free_percent: float = Field(default=15.0, ge=0.0, le=100.0)
+    storage_critical_free_percent: float = Field(default=5.0, ge=0.0, le=100.0)
     jellyfin_language: str = "en"
     ui_language: str = "en"
     sso_enabled: bool = False
@@ -70,6 +74,14 @@ class GeneralConfigRequest(BaseModel):
     sso_required_claim: str | None = None
     sso_required_value: str | None = None
     seeding_stop_policy: SeedingStopPolicyConfig = Field(default_factory=SeedingStopPolicyConfig)
+
+    @model_validator(mode="after")
+    def validate_storage_thresholds(self) -> GeneralConfigRequest:
+        if not isfinite(self.storage_warning_free_percent) or not isfinite(self.storage_critical_free_percent):
+            raise ValueError("Storage free-space thresholds must be finite numbers.")
+        if not 0 <= self.storage_critical_free_percent < self.storage_warning_free_percent <= 100:
+            raise ValueError("Storage thresholds must satisfy 0 <= critical < warning <= 100.")
+        return self
 
     def to_domain(self) -> GeneralConfig:
         return GeneralConfig.model_validate(self.model_dump())

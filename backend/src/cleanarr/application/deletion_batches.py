@@ -66,6 +66,10 @@ class BatchValidationError(ValueError):
 class BatchPlanChangedError(RuntimeError):
     """The submitted set no longer matches a fresh, mutation-free preview."""
 
+    def __init__(self, message: str, *, code: str = "batch_plan_changed") -> None:
+        super().__init__(message)
+        self.code = code
+
 
 class BatchQueueFullError(RuntimeError):
     """The durable bounded queue cannot accept another parent."""
@@ -141,7 +145,30 @@ class ManualDeletionBatchService:
     async def preview(self, children: Sequence[ManualDeleteRequest]) -> ManualDeleteBatchPreviewResponse:
         await self.start()
         canonical_items = canonical_children(children)
-        previews = [await self._preview_child(request, identity) for identity, request in canonical_items]
+        resolved = [
+            (identity, request, *(await self._resolve_preview_child(request, identity)))
+            for identity, request in canonical_items
+        ]
+        unsafe_scope_indexes = physical_overlap_indexes(resolved)
+        previews: list[ManualDeleteBatchChildPreviewResponse] = []
+        for index, (identity, _request, preview, event) in enumerate(resolved):
+            if index not in unsafe_scope_indexes:
+                previews.append(preview)
+                continue
+            invalid_scope = event is not None and _physical_mutation_scope(event) == ()
+            previews.append(
+                blocked_preview(
+                    identity,
+                    preview.display_name,
+                    "invalid_mutation_scope" if invalid_scope else "overlapping_mutation_scope",
+                    (
+                        "The physical deletion scope is invalid and cannot be verified safely."
+                        if invalid_scope
+                        else "This item overlaps another physical deletion scope in the batch."
+                    ),
+                    plan=preview.plan,
+                )
+            )
         return preview_response(previews)
 
     async def submit(self, payload: ManualDeleteBatchSubmitRequest) -> ManualDeleteBatchResponse:
@@ -157,7 +184,20 @@ class ManualDeletionBatchService:
                 "confirmed_item_count_mismatch", "confirmed_item_count does not match the unique batch items."
             )
         if preview.batch_hash != payload.confirmed_batch_hash:
-            raise BatchPlanChangedError("The batch plan changed after it was reviewed. Preview and confirm it again.")
+            changed_code = (
+                "library_item_changed"
+                if any(child.blocked_code == "library_item_changed" for child in preview.children)
+                else "batch_plan_changed"
+            )
+            raise BatchPlanChangedError(
+                "The batch plan changed after it was reviewed. Preview and confirm it again.",
+                code=changed_code,
+            )
+        if any(child.blocked_code == "library_item_changed" for child in preview.children):
+            raise BatchPlanChangedError(
+                "The library item changed; preview the current item before confirming the batch.",
+                code="library_item_changed",
+            )
         if sum(batch.status in self._ACTIVE for batch in self._batches.values()) >= self._max_pending_parents:
             raise BatchQueueFullError("The bounded deletion batch queue is full. Wait for an active batch to finish.")
 
@@ -243,11 +283,14 @@ class ManualDeletionBatchService:
             event = await self._resolver(request)
         except asyncio.CancelledError:
             raise
-        except ManualDeletionResolutionError:
+        except ManualDeletionResolutionError as exc:
             _logger.warning("Batch child preflight failed for a canonical item identity")
             return (
                 blocked_preview(
-                    mutation_identity, child_display_name, "resolution_failed", "The item could not be resolved safely."
+                    mutation_identity,
+                    child_display_name,
+                    getattr(exc, "code", "resolution_failed"),
+                    "The item could not be resolved safely.",
                 ),
                 None,
             )
@@ -292,7 +335,7 @@ class ManualDeletionBatchService:
                 mutation_identity=mutation_identity,
                 display_name=child_display_name,
                 status=BatchChildPreviewStatus.READY,
-                plan_hash=plan_hash(plan),
+                plan_hash=event_bound_plan_hash(plan, event),
                 plan=plan,
             ),
             event,
@@ -337,8 +380,12 @@ class ManualDeletionBatchService:
                         or verified_event is None
                     ):
                         child.status = BatchChildStatus.BLOCKED
-                        child.blocked_code = "plan_changed"
-                        child.message = "The child plan changed or is no longer safe; no mutation was made."
+                        child.blocked_code = fresh.blocked_code or "plan_changed"
+                        child.message = (
+                            "The library item changed; no mutation was made."
+                            if child.blocked_code == "library_item_changed"
+                            else "The child plan changed or is no longer safe; no mutation was made."
+                        )
                         child.completed_at = datetime.now(UTC)
                         self._repository.save_batch(batch)
                         continue
@@ -533,6 +580,7 @@ def mutation_identity(request: ManualDeleteRequest) -> str:
             "sonarr_series_id": request.sonarr_series_id,
             "season_number": request.season_number,
             "jellyfin_item_id": request.jellyfin_item_id,
+            "library_resource_id": request.library_resource_id,
         },
         separators=(",", ":"),
         sort_keys=True,
@@ -547,7 +595,79 @@ def destructive_overlap_identity(request: ManualDeleteRequest) -> str:
             return f"series:{request.sonarr_series_id}"
         if request.item_type is ItemType.SEASON:
             return f"season:{request.sonarr_series_id}:{request.season_number}"
+    if request.library_resource_id is not None:
+        return f"resource:{request.library_resource_id}"
     return mutation_identity(request)
+
+
+def physical_overlap_indexes(
+    resolved: Sequence[
+        tuple[
+            str,
+            ManualDeleteRequest,
+            ManualDeleteBatchChildPreviewResponse,
+            MediaDeletionEvent | None,
+        ]
+    ],
+) -> set[int]:
+    """Find invalid or intersecting physical scopes without exposing raw paths."""
+
+    blocked: set[int] = set()
+    scopes: list[tuple[str, ...] | None] = []
+    for index, (_identity, _request, preview, event) in enumerate(resolved):
+        if preview.status is not BatchChildPreviewStatus.READY or event is None:
+            scopes.append(None)
+            continue
+        scope = _physical_mutation_scope(event)
+        scopes.append(scope)
+        if scope == ():
+            blocked.add(index)
+
+    for left in range(len(resolved)):
+        left_scope = scopes[left]
+        if not left_scope:
+            continue
+        for right in range(left + 1, len(resolved)):
+            right_scope = scopes[right]
+            if not right_scope or _same_series_season_parent(resolved[left][1], resolved[right][1]):
+                continue
+            if _scope_is_ancestor(left_scope, right_scope) or _scope_is_ancestor(right_scope, left_scope):
+                blocked.update((left, right))
+    return blocked
+
+
+def event_bound_plan_hash(plan: ProcessingResultResponse, event: MediaDeletionEvent) -> str:
+    """Bind confirmation to a privacy-safe digest of the resolved physical scope."""
+
+    scope = _physical_mutation_scope(event)
+    scope_digest = hashlib.sha256("\x00".join(scope).encode()).hexdigest() if scope else None
+    material = {"plan_hash": plan_hash(plan), "physical_scope": scope_digest}
+    return hashlib.sha256(json.dumps(material, separators=(",", ":"), sort_keys=True).encode()).hexdigest()
+
+
+def _physical_mutation_scope(event: MediaDeletionEvent) -> tuple[str, ...]:
+    path = event.fingerprint.path
+    if path is None:
+        return ()
+    if not isinstance(path, str) or not path.strip() or any(ord(character) < 32 for character in path):
+        return ()
+    segments = path.replace("\\", "/").strip().split("/")
+    if any(segment == ".." for segment in segments):
+        return ()
+    normalized = tuple(segment.casefold() for segment in segments if segment not in {"", "."})
+    return normalized or ()
+
+
+def _scope_is_ancestor(parent: tuple[str, ...], child: tuple[str, ...]) -> bool:
+    return len(parent) <= len(child) and child[: len(parent)] == parent
+
+
+def _same_series_season_parent(left: ManualDeleteRequest, right: ManualDeleteRequest) -> bool:
+    if left.item_type is not ItemType.SEASON or right.item_type is not ItemType.SEASON:
+        return False
+    if left.library_resource_id is not None or right.library_resource_id is not None:
+        return left.library_resource_id is not None and left.library_resource_id == right.library_resource_id
+    return left.sonarr_series_id is not None and left.sonarr_series_id == right.sonarr_series_id
 
 
 def canonical_batch_request(children: Sequence[ManualDeleteRequest], *, confirmed_batch_hash: str | None = None) -> str:
@@ -561,6 +681,7 @@ def canonical_batch_request(children: Sequence[ManualDeleteRequest], *, confirme
                     "sonarr_series_id": request.sonarr_series_id,
                     "season_number": request.season_number,
                     "jellyfin_item_id": request.jellyfin_item_id,
+                    "library_resource_id": request.library_resource_id,
                 },
             }
             for identity, request in canonical_children(children)

@@ -23,6 +23,7 @@ from cleanarr.domain import (
     ActionStatus,
     FailureReason,
     ItemType,
+    LibraryMediaType,
     MediaDeletionEvent,
     MediaFingerprint,
     OverallStatus,
@@ -30,6 +31,7 @@ from cleanarr.domain import (
     RadarrHistoryRecord,
     RadarrMovie,
     SeerrMedia,
+    encode_library_resource,
 )
 from cleanarr.domain.config import GeneralConfig, RadarrServiceConfig, RuntimeConfig
 from cleanarr.infrastructure.container import ServiceContainer
@@ -396,6 +398,75 @@ async def test_manual_delete_requires_and_persists_exact_preflight(tmp_path: Pat
     assert dashboard.json()["recent_activity"][0]["result"]["display_name"] == "Selected Jellyfin title"
     assert radarr.deleted_movie_ids == []
     assert downloader.deleted_hashes == []
+
+
+@pytest.mark.asyncio
+async def test_library_resource_mismatch_fails_before_deletion_preflight(tmp_path: Path) -> None:
+    service = FakeService(results=[])
+    container = FakeContainer(service, db_path=tmp_path / "cleanarr.db")
+    container.config = RuntimeConfig(
+        general=container.config.general,
+        radarr=[
+            RadarrServiceConfig(
+                id="radarr-one",
+                name="Radarr",
+                url="http://radarr/api/v3",
+                api_key="key",
+            )
+        ],
+    )
+    radarr = FakeRadarrClient(
+        movies=[RadarrMovie(id=7, title="Stable Movie", path="/media/stable", tmdb_id=700, imdb_id=None)],
+        history_by_movie={7: []},
+    )
+    container.radarr = radarr  # type: ignore[attr-defined]
+    container.sonarr = FakeSonarrClient(  # type: ignore[attr-defined]
+        series=[], history_by_series={}, episodes_by_series={}, episode_files_by_series={}
+    )
+    container.seerr = FakeSeerrClient(media=[], requests=[], issues=[])  # type: ignore[attr-defined]
+    container.downloader = FakeDownloaderClient(existing_hashes=set())  # type: ignore[attr-defined]
+    container.strategy_factory = DeletionStrategyFactory(  # type: ignore[attr-defined]
+        dry_run=True,
+        logger=logging.getLogger("tests.integration.stable-library-id"),
+        radarr=container.radarr,  # type: ignore[attr-defined]
+        sonarr=container.sonarr,  # type: ignore[attr-defined]
+        seerr=container.seerr,  # type: ignore[attr-defined]
+        downloader=container.downloader,  # type: ignore[attr-defined]
+    )
+    app = create_app(container=container)
+    headers = {"X-Admin-Token": "admin-token"}
+    valid_resource = encode_library_resource(LibraryMediaType.MOVIE, "radarr-one", 7)
+
+    async with app_client(app) as client:
+        legacy = await client.post(
+            "/api/actions/delete/preview",
+            headers=headers,
+            json={"item_type": "Movie", "radarr_movie_id": 7},
+        )
+        valid = await client.post(
+            "/api/actions/delete/preview",
+            headers=headers,
+            json={
+                "item_type": "Movie",
+                "radarr_movie_id": 7,
+                "library_resource_id": valid_resource,
+            },
+        )
+        changed = await client.post(
+            "/api/actions/delete/preview",
+            headers=headers,
+            json={
+                "item_type": "Movie",
+                "radarr_movie_id": 7,
+                "library_resource_id": encode_library_resource(LibraryMediaType.MOVIE, "radarr-one", 8),
+            },
+        )
+
+    assert legacy.status_code == 200
+    assert valid.status_code == 200
+    assert changed.status_code == 409
+    assert changed.json()["detail"]["code"] == "library_item_changed"
+    assert radarr.deleted_movie_ids == []
 
 
 @pytest.mark.asyncio

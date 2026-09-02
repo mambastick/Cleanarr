@@ -152,9 +152,11 @@ class RadarrMovie:
     tmdb_id: int | None
     imdb_id: str | None
     size_on_disk: int | None = None
-    has_file: bool = False
+    has_file: bool | None = None
     service_id: str | None = None
     service_name: str | None = None
+    added_at: datetime | None = None
+    year: int | None = None
 
 
 @dataclass(frozen=True)
@@ -194,6 +196,12 @@ class SonarrSeries:
     imdb_id: str | None
     service_id: str | None = None
     service_name: str | None = None
+    added_at: datetime | None = None
+    size_on_disk: int | None = None
+    has_file: bool | None = None
+    year: int | None = None
+    episode_count: int | None = None
+    episode_file_count: int | None = None
 
 
 @dataclass(frozen=True)
