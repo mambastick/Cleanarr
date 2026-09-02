@@ -21,13 +21,13 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import type { AuthSessionPayload, AuthStatusPayload, SSOLoginPayload } from "@/lib/auth"
 import type { DashboardActivity, DashboardPayload, DashboardWebhookAttempt } from "@/lib/dashboard"
-import { apiErrorFromResponse } from "@/lib/api-client"
 import { getUiText, resolveUiLanguage, type UiLanguage, type UiTextMap } from "@/lib/i18n"
 import type { LibraryMoviesResponse, LibrarySeriesResponse, ManualDeleteBatch, ManualDeleteBatchListResponse, ManualDeleteJob, ManualDeleteJobListResponse, ManualDeletePreviewResponse } from "@/lib/library"
 import type { ConnectionTestResponse, GeneralConfig, RuntimeConfigPayload } from "@/lib/runtime-config"
 import { buildServicePayload, DASHBOARD_NAME_TO_FAMILY, EMPTY_DRAFTS, getDownloaderLabel, getServiceEndpoint, getServiceTitle, getServices, isSetupStepReady, resolveActiveService, SERVICE_META, SETUP_STEPS, toDraft, type DownloaderKind, type ServiceDraft, type ServiceFamily, type ServiceModalState } from "@/lib/service-config"
 import { normalizeError } from "@/lib/status-format"
 import { connectionFingerprint } from "@/lib/downloader-profile"
+import { useApiClient } from "@/lib/use-api-client"
 
 type MainTab = "dashboard" | "settings" | "activity" | "library" | "downloads"
 type AuthMode = "register" | "login"
@@ -86,44 +86,7 @@ function CleanArrApp() {
   )
   const uiText = useMemo(() => getUiText(uiLanguage), [uiLanguage])
 
-  const fetchJson = useCallback(
-    async <T,>(url: string, init?: RequestInit): Promise<T> => {
-      const headers = new Headers(init?.headers)
-      headers.set("Accept", "application/json")
-      if (init?.body && !headers.has("Content-Type")) {
-        headers.set("Content-Type", "application/json")
-      }
-      const method = (init?.method ?? "GET").toUpperCase()
-      if (csrfToken && !["GET", "HEAD", "OPTIONS"].includes(method)) {
-        headers.set("X-CSRF-Token", csrfToken)
-      }
-
-      const response = await fetch(url, { ...init, headers })
-
-      if (!response.ok) {
-        if (
-          (response.status === 401 || response.status === 403) &&
-          url.startsWith("/api/config")
-        ) {
-          setCsrfToken("")
-        }
-        let body: unknown = null
-        try {
-          body = await response.json()
-        } catch {
-          // A non-JSON proxy response still receives a stable API error shape.
-        }
-        throw apiErrorFromResponse(response.status, response.statusText, body)
-      }
-
-      if (response.status === 204) {
-        return undefined as T
-      }
-
-      return (await response.json()) as T
-    },
-    [csrfToken],
-  )
+  const fetchJson = useApiClient(csrfToken, setCsrfToken)
 
   const loadDashboard = useCallback(
     async (background = false) => {
