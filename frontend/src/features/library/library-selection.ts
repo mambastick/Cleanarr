@@ -1,9 +1,9 @@
 import type { ItemType } from "@/lib/dashboard"
-import type { ManualDeleteRequest } from "@/lib/library"
+import type { LibraryItem, ManualDeleteRequest } from "@/lib/library"
 
 export type LibraryDeleteTarget =
-  | { kind: "movie"; radarr_movie_id: number; movie_title: string; jellyfin_movie_id?: string | null }
-  | { kind: "series"; sonarr_series_id: number; series_title: string; item_type: "Series" | "Season"; season_number?: number; jellyfin_item_id?: string | null }
+  | { kind: "movie"; radarr_movie_id: number; movie_title: string; jellyfin_movie_id?: string | null; library_resource_id?: string | null }
+  | { kind: "series"; sonarr_series_id: number; series_title: string; item_type: "Series" | "Season"; season_number?: number; jellyfin_item_id?: string | null; library_resource_id?: string | null }
 
 export interface BatchSelectionItem {
   key: string
@@ -21,11 +21,12 @@ export interface BatchSelection {
 export const emptyBatchSelection = (): BatchSelection => ({ order: [], items: {} })
 
 export function buildManualDeleteRequest(target: LibraryDeleteTarget, displayName: string): ManualDeleteRequest {
-  if (target.kind === "movie") return { item_type: "Movie", radarr_movie_id: target.radarr_movie_id, jellyfin_item_id: target.jellyfin_movie_id ?? null, display_name: displayName }
-  return { item_type: target.item_type, sonarr_series_id: target.sonarr_series_id, season_number: target.season_number ?? null, jellyfin_item_id: target.jellyfin_item_id ?? null, display_name: displayName }
+  if (target.kind === "movie") return { item_type: "Movie", radarr_movie_id: target.radarr_movie_id, jellyfin_item_id: target.jellyfin_movie_id ?? null, ...(target.library_resource_id ? { library_resource_id: target.library_resource_id } : {}), display_name: displayName }
+  return { item_type: target.item_type, sonarr_series_id: target.sonarr_series_id, season_number: target.season_number ?? null, jellyfin_item_id: target.jellyfin_item_id ?? null, ...(target.library_resource_id ? { library_resource_id: target.library_resource_id } : {}), display_name: displayName }
 }
 
 export function selectionKey(request: ManualDeleteRequest): string {
+  if (request.library_resource_id) return `resource:${request.library_resource_id}`
   if (request.radarr_movie_id != null) return `movie:${request.radarr_movie_id}`
   if (request.sonarr_series_id != null && request.item_type === "Series") return `series:${request.sonarr_series_id}`
   if (request.sonarr_series_id != null && request.item_type === "Season" && request.season_number != null) return `season:${request.sonarr_series_id}:${request.season_number}`
@@ -37,14 +38,62 @@ export function selectionItem(target: LibraryDeleteTarget, displayName: string, 
   return { key: selectionKey(request), request, displayName, itemType: request.item_type as BatchSelectionItem["itemType"], estimatedBytes }
 }
 
+/**
+ * Convert the untrusted Library API delete target into the existing manual
+ * deletion contract. The v2 UI requires both a stable resource id and the
+ * current Arr id so topology changes fail closed during backend preflight.
+ */
+export function libraryDeleteTargetFromItem(item: LibraryItem): LibraryDeleteTarget | null {
+  if (!item.resource_id.trim()) return null
+  const target = item.delete_target
+  if (!target || typeof target !== "object") return null
+  const jellyfinItemId = typeof target.jellyfin_item_id === "string" && target.jellyfin_item_id.length > 0
+    ? target.jellyfin_item_id
+    : null
+
+  if (item.media_type === "movie") {
+    const radarrMovieId = routedOrLegacyInteger(target.radarr_movie_id)
+    if (radarrMovieId == null) return null
+    return {
+      kind: "movie",
+      radarr_movie_id: radarrMovieId,
+      movie_title: item.display_name,
+      jellyfin_movie_id: jellyfinItemId,
+      library_resource_id: item.resource_id,
+    }
+  }
+
+  const sonarrSeriesId = routedOrLegacyInteger(target.sonarr_series_id)
+  if (sonarrSeriesId == null) return null
+  return {
+    kind: "series",
+    sonarr_series_id: sonarrSeriesId,
+    series_title: item.display_name,
+    item_type: "Series",
+    jellyfin_item_id: jellyfinItemId,
+    library_resource_id: item.resource_id,
+  }
+}
+
+export function librarySelectionItemFromItem(item: LibraryItem): BatchSelectionItem | null {
+  const target = libraryDeleteTargetFromItem(item)
+  return target ? selectionItem(target, item.display_name, item.size) : null
+}
+
+function routedOrLegacyInteger(value: unknown): number | null {
+  // Multi-profile Arr routers intentionally encode the routed legacy ID as a
+  // negative safe integer. Zero is never a valid Arr resource identity.
+  return typeof value === "number" && Number.isSafeInteger(value) && value !== 0 ? value : null
+}
+
 export function selectionConflict(selection: BatchSelection, candidate: BatchSelectionItem): string | null {
   if (selection.items[candidate.key]) return "duplicate_mutation_identity"
   const seriesId = candidate.request.sonarr_series_id
   if (seriesId == null) return null
-  const whole = `series:${seriesId}`
-  const hasWhole = Boolean(selection.items[whole])
+  const sameSeries = selection.order.flatMap((key) => selection.items[key] ? [selection.items[key]] : []).filter((item) => item.request.sonarr_series_id === seriesId)
+  const hasWhole = sameSeries.some((item) => item.itemType === "Series")
   const selectingWhole = candidate.itemType === "Series"
-  const hasSeason = selection.order.some((key) => key.startsWith(`season:${seriesId}:`))
+  const hasSeason = sameSeries.some((item) => item.itemType === "Season")
   return (selectingWhole && hasSeason) || (!selectingWhole && hasWhole) ? "overlapping_mutation_scope" : null
 }
 

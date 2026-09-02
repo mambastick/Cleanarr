@@ -1,4 +1,4 @@
-import { Activity, Download, Film, PenSquare, Play, Server, ShieldAlert, Star, Tv, Webhook, Zap, type LucideIcon } from "lucide-react"
+import { Activity, Download, Film, PenSquare, Play, RefreshCw, Server, ShieldAlert, Star, Tv, Webhook, Zap, type LucideIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -10,6 +10,8 @@ import type { UiTextMap } from "@/lib/i18n"
 import { getStatusLabel, SETUP_STEPS } from "@/lib/service-config"
 import { formatMediaTitle } from "@/lib/status-format"
 import { cn } from "@/lib/utils"
+import { useStorage, type StorageFetchJson, type StorageResponse, type StorageVolume } from "@/lib/storage"
+import { STORAGE_COPY, type StorageCopy } from "./storage-copy"
 
 const DOWNSTREAM_META: Partial<Record<string, { icon: LucideIcon; color: string }>> = {
   Radarr: { icon: Film, color: "text-primary" },
@@ -99,6 +101,12 @@ export function DashboardPanel({
   onToggleDryRun,
   onOpenWizard,
   onEditService,
+  storage,
+  storageLoading = false,
+  storageError = null,
+  onRefreshStorage,
+  storageLanguage = "en",
+  fetchJson,
 }: {
   text: UiTextMap
   dashboard: DashboardPayload | null
@@ -111,11 +119,23 @@ export function DashboardPanel({
   onToggleDryRun: () => Promise<void>
   onOpenWizard: (trigger: HTMLButtonElement) => void
   onEditService: (name: string, trigger: HTMLButtonElement) => void
+  storage?: StorageResponse | null
+  storageLoading?: boolean
+  storageError?: string | null
+  onRefreshStorage?: () => void
+  storageLanguage?: "en" | "ru"
+  fetchJson?: StorageFetchJson
 }) {
   const webhookStatus = dashboard?.webhook_status
+  const internalStorage = useStorage({ active: Boolean(fetchJson) && storage === undefined, authenticated: Boolean(fetchJson) && storage === undefined, fetchJson: fetchJson ?? (async () => { throw new Error("storage client unavailable") }) })
+  const storageData = storage === undefined ? internalStorage.data : storage
+  const storageCopy = STORAGE_COPY[storageLanguage]
+  const effectiveStorageLoading = storage === undefined ? internalStorage.loading : storageLoading
+  const effectiveStorageError = storage === undefined ? internalStorage.error : storageError
 
   return (
     <section className="space-y-5">
+      <div><h1 className="text-xl font-semibold">{text.dashboard}</h1><p className="text-sm text-muted-foreground">{text.status}</p></div>
       {/* Status bar */}
       <div
         className={cn(
@@ -162,7 +182,7 @@ export function DashboardPanel({
             <button
               onClick={() => isLive ? void onToggleDryRun() : undefined}
               className={cn(
-                "flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors",
+                "flex min-h-11 items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors",
                 !isLive
                   ? "bg-status-warning-bg text-status-warning"
                   : "text-muted-foreground hover:text-foreground",
@@ -174,7 +194,7 @@ export function DashboardPanel({
             <button
               onClick={() => !isLive ? void onToggleDryRun() : undefined}
               className={cn(
-                "flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors",
+                "flex min-h-11 items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors",
                 isLive
                   ? "bg-status-success-bg text-status-success"
                   : "text-muted-foreground hover:text-foreground",
@@ -186,6 +206,8 @@ export function DashboardPanel({
           </div>
         </div>
       </div>
+
+      <StorageHealthCard data={storageData} loading={effectiveStorageLoading} error={effectiveStorageError} text={storageCopy} onRefresh={onRefreshStorage ?? (() => void internalStorage.refresh())} />
 
       {/* Connected services */}
       <div>
@@ -291,5 +313,12 @@ export function DashboardPanel({
     </section>
   )
 }
+
+function StorageHealthCard({ data, loading, error, text, onRefresh }: { data: StorageResponse | null | undefined; loading: boolean; error: string | null; text: StorageCopy; onRefresh: () => void }) {
+  return <Card><CardHeader className="flex flex-row items-start justify-between gap-3 pb-3"><div><CardTitle className="text-base">{text.title}</CardTitle>{data ? <CardDescription>{storageStatusLabel(data.status, text)}</CardDescription> : null}</div><Button variant="outline" size="sm" onClick={onRefresh} disabled={loading}><RefreshCw className={cn(loading && "animate-spin")} />{text.refresh}</Button></CardHeader><CardContent>{error ? <div className="flex items-center justify-between gap-3 rounded-lg border border-status-danger/30 bg-status-danger/5 p-3 text-sm"><span>{text.unavailable}</span><Button variant="outline" size="sm" onClick={onRefresh}>{text.retry}</Button></div> : loading && !data ? <p className="text-sm text-muted-foreground">{text.loading}</p> : data ? <div className="space-y-3"><div className="flex flex-wrap items-center gap-2"><StatusPill tone={data.status === "critical" ? "red" : data.status === "warning" ? "yellow" : data.status === "healthy" ? "green" : "blue"} label={storageStatusLabel(data.status, text)} />{data.partial || data.freshness !== "fresh" ? <span className="text-xs text-muted-foreground">{data.partial ? text.partial : text.stale}</span> : null}</div><div role="table" aria-label={text.title} className="grid gap-2">{data.volumes.map((volume) => <StorageVolumeRow key={volume.volume_id} volume={volume} text={text} />)}</div></div> : <p className="text-sm text-muted-foreground">{text.unknown}</p>}</CardContent></Card>
+}
+function StorageVolumeRow({ volume, text }: { volume: StorageVolume; text: StorageCopy }) { const total = volume.total_bytes ?? volume.total; const free = volume.free_bytes ?? volume.free; const capacity = free != null ? `${text.free} ${formatBytes(free)}${volume.free_percent != null ? ` · ${volume.free_percent.toFixed(1)}%` : ""}` : volume.free_percent == null ? text.unknown : `${text.free} ${volume.free_percent.toFixed(1)}%`; return <div role="row" className="grid gap-2 rounded-lg border p-3 text-sm sm:grid-cols-[minmax(0,1.4fr)_minmax(8rem,1fr)_auto] sm:items-center"><div role="cell" className="min-w-0"><p className="truncate font-medium">{volume.display_label}</p><p className="truncate text-xs text-muted-foreground">{volume.service_type} · {volume.service_id}</p></div><div role="cell" className="text-xs text-muted-foreground">{capacity}{total != null ? ` / ${formatBytes(total)}` : ""}</div><div role="cell" className="flex items-center gap-2 sm:justify-end"><StatusPill tone={volume.status === "critical" ? "red" : volume.status === "warning" ? "yellow" : volume.status === "healthy" ? "green" : "blue"} label={storageStatusLabel(volume.status, text)} />{volume.possible_duplicate ? <span className="sr-only">{text.possibleDuplicate}</span> : null}</div></div> }
+function storageStatusLabel(status: StorageResponse["status"] | StorageVolume["status"], text: StorageCopy) { return status === "critical" ? text.critical : status === "warning" ? text.warning : status === "healthy" ? text.healthy : text.unknown }
+function formatBytes(bytes: number) { if (!bytes) return "0 B"; const index = Math.min(4, Math.floor(Math.log(bytes) / Math.log(1024))); return `${(bytes / 1024 ** index).toFixed(1)} ${["B", "KB", "MB", "GB", "TB"][index]}` }
 
 // ─── Activity panel ───────────────────────────────────────────────────────────

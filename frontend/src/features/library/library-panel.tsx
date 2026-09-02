@@ -10,12 +10,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import type { LibraryMoviesResponse, LibrarySeriesResponse } from "@/lib/library"
 import { batchTypeSummary, emptyBatchSelection, hiddenSelectionCount, selectionItem, selectVisible, selectedItems, toggleSelection, totalKnownBytes, type BatchSelection, type BatchSelectionItem, type LibraryDeleteTarget } from "./library-selection"
+import { LibraryPanelV2, type LibraryPanelV2Props } from "./library-v2-panel"
+export { LibraryPanelV2 }
+export type { LibraryPanelV2Props }
 
 export interface LibraryCopy {
   library: string; libraryDescription: string; series: string; movies: string; season: string; seasons: string; episodes: string; refresh: string; delete: string; deleteSeries: string; deleteItem: string; dryRunModeInfo: string; noLiveChanges: string; select: string; selectVisible: string; clearSelection: string; batchPreview: string; selected: string; selectedOne: string; hidden: string; movieForms: readonly [string, string, string]; seriesForms: readonly [string, string, string]; seasonForms: readonly [string, string, string]; maximum: string; overlap: string; duplicate: string; onDisk: string; noFile: string; noSeriesFound: string; noMoviesFound: string; noSeriesMatch: string; noMoviesMatch: string; noSeriesSetup: string; noMoviesSetup: string; tryDifferentSearch: string; searchPlaceholderSeries: string; searchPlaceholderMovies: string; noSeasonsFound: string
 }
 
-export function LibraryPanel({ text, library, isLibraryLoading, libraryMovies, isLibraryMoviesLoading, isLive, onRefreshSeries, onRefreshMovies, onDelete, onBatchPreview }: { text: LibraryCopy; library: LibrarySeriesResponse | null; isLibraryLoading: boolean; libraryMovies: LibraryMoviesResponse | null; isLibraryMoviesLoading: boolean; isLive: boolean; onRefreshSeries: () => void; onRefreshMovies: () => void; onDelete: (target: LibraryDeleteTarget, trigger: HTMLElement) => void; onBatchPreview: (items: BatchSelectionItem[], trigger: HTMLElement) => void }) {
+export interface LegacyLibraryPanelProps { text: LibraryCopy; library: LibrarySeriesResponse | null; isLibraryLoading: boolean; libraryMovies: LibraryMoviesResponse | null; isLibraryMoviesLoading: boolean; isLive: boolean; onRefreshSeries: () => void; onRefreshMovies: () => void; onDelete: (target: LibraryDeleteTarget, trigger: HTMLElement) => void; onBatchPreview: (items: BatchSelectionItem[], trigger: HTMLElement) => void }
+
+export function LibraryPanel({ text, library, isLibraryLoading, libraryMovies, isLibraryMoviesLoading, isLive, onRefreshSeries, onRefreshMovies, onDelete, onBatchPreview }: LegacyLibraryPanelProps) {
   const [selection, setSelection] = useState<BatchSelection>(emptyBatchSelection)
   const [selectionError, setSelectionError] = useState<string | null>(null)
   const [tab, setTab] = useState("series")
