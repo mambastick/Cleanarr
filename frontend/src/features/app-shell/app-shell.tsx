@@ -2,30 +2,38 @@ import {
   Activity,
   BookOpen,
   Download,
+  FlaskConical,
   HardDrive,
   Home,
   Languages,
   LibraryBig,
   LogOut,
-  Menu,
   MoreHorizontal,
   Plug,
+  RadioTower,
   ShieldCheck,
   SlidersHorizontal,
   Settings,
-  Star,
   Trash2,
   Users,
   X,
   Zap,
   type LucideIcon,
 } from "lucide-react"
-import { Laptop as LaptopData, Moon as MoonData, Sun as SunData } from "lucide"
+import {
+  Laptop as LaptopData,
+  Moon as MoonData,
+  PanelLeftClose as PanelLeftCloseData,
+  PanelLeftOpen as PanelLeftOpenData,
+  Sun as SunData,
+} from "lucide"
 import { MorphIcon } from "morphicons/react"
-import { LayoutGroup, motion } from "motion/react"
+import { motion } from "motion/react"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 
 import { AnimateIcon, AnimatedIcon, type IconAnimation } from "@/components/animate-ui/animated-icon"
+import { GitHubStarsButton } from "@/components/animate-ui/components/buttons/github-stars"
+import { Highlight, HighlightItem } from "@/components/animate-ui/primitives/effects/highlight"
 import type { ThemeMode } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -190,67 +198,76 @@ function mergeLabels(labels?: AppShellProps["labels"]): AppShellLabels {
 }
 
 function Brand({ labels, collapsed, onToggle }: { labels: AppShellLabels; collapsed?: boolean; onToggle?: () => void }) {
+  const sidebarIcon = collapsed ? PanelLeftOpenData : PanelLeftCloseData
   return (
     <AnimateIcon><div className="app-shell__brand" aria-label={labels.logo}>
       <AnimatedIcon animation="wiggle"><Zap className="app-shell__brand-mark" /></AnimatedIcon>
       <span className="app-shell__brand-name"><span>Clean</span><strong>Arr</strong></span>
-      {onToggle ? <Tooltip><TooltipTrigger render={<button type="button" className="app-shell__collapse" onClick={onToggle} aria-label={collapsed ? labels.expandSidebar : labels.collapseSidebar}><Menu /></button>} /><TooltipContent side="right">{collapsed ? labels.expandSidebar : labels.collapseSidebar}</TooltipContent></Tooltip> : null}
-      {!onToggle ? <AnimateIcon><a
-          className="app-shell__brand-github"
-          href="https://github.com/mambastick/Cleanarr"
-          target="_blank"
-          rel="noreferrer noopener"
-          aria-label={`GitHub: ${labels.githubStars}`}
-          title={`GitHub: ${labels.githubStars}`}
-        >
-          <AnimatedIcon animation="pulse"><Star /></AnimatedIcon>
-          <span>15</span>
-        </a></AnimateIcon> : null}
+      <GitHubStarsButton
+        className="app-shell__brand-github"
+        username="mambastick"
+        repo="Cleanarr"
+        value={15}
+        variant="ghost"
+        size="sm"
+        aria-label={`GitHub: ${labels.githubStars}`}
+      />
+      {onToggle ? <Tooltip><TooltipTrigger render={<button type="button" className="app-shell__collapse" onClick={onToggle} aria-label={collapsed ? labels.expandSidebar : labels.collapseSidebar}><MorphIcon icon={sidebarIcon} reducedMotion="user" size={19} /></button>} /><TooltipContent side="right">{collapsed ? labels.expandSidebar : labels.collapseSidebar}</TooltipContent></Tooltip> : null}
     </div></AnimateIcon>
   )
 }
 
 function RuntimeStatus({ dryRun, labels }: { dryRun: boolean; labels: AppShellLabels }) {
+  const statusLabel = `${labels.status}: ${dryRun ? labels.dryRun : labels.live}`
   return (
-    <div className={cn("app-shell__runtime-status", dryRun ? "app-shell__runtime-status--dry" : "app-shell__runtime-status--live")} aria-label={`${labels.status}: ${dryRun ? labels.dryRun : labels.live}`}>
-      <span className="app-shell__status-dot" aria-hidden="true" />
-      <span>{dryRun ? labels.dryRun : labels.live}</span>
-    </div>
+    <Tooltip>
+      <TooltipTrigger render={<div className={cn("app-shell__runtime-status", dryRun ? "app-shell__runtime-status--dry" : "app-shell__runtime-status--live")} role="status" tabIndex={0} aria-label={statusLabel} />}>
+        {dryRun ? <FlaskConical className="app-shell__status-icon" aria-hidden="true" /> : <RadioTower className="app-shell__status-icon" aria-hidden="true" />}
+        <span>{dryRun ? labels.dryRun : labels.live}</span>
+      </TooltipTrigger>
+      <TooltipContent side="right">{statusLabel}</TooltipContent>
+    </Tooltip>
   )
 }
 
 function StorageCard({ storage, labels }: { storage: StorageHeadline; labels: AppShellLabels }) {
   const percent = storage.percent == null ? null : Math.max(0, Math.min(100, storage.percent))
+  const tooltipLabel = `${labels.storage}: ${labels.storageStatus[storage.status]} — ${storage.headline}`
   return (
-    <section className={cn("app-shell__storage", `app-shell__storage--${storage.status}`)} aria-label={labels.storage}>
-      <div className="app-shell__storage-heading">
-        <HardDrive aria-hidden="true" />
-        <span>{labels.storage}</span>
-        <span className="app-shell__storage-state">{labels.storageStatus[storage.status]}</span>
-      </div>
-      <p className="app-shell__storage-headline">{storage.headline}</p>
-      {storage.detail ? <p className="app-shell__storage-detail">{storage.detail}</p> : null}
-      {percent != null ? <div className="app-shell__storage-meter" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label={`${labels.storageUsed}: ${percent}%`}><span style={{ transform: `scaleX(${percent / 100})` }} /></div> : null}
-      {storage.partial || storage.freshness ? <p className="app-shell__storage-meta">{storage.partial ? labels.storagePartial : null}{storage.partial && storage.freshness ? " · " : null}{storage.freshness}</p> : null}
-    </section>
+    <Tooltip>
+      <TooltipTrigger render={<section className={cn("app-shell__storage", `app-shell__storage--${storage.status}`)} aria-label={labels.storage} tabIndex={0} />}>
+        <div className="app-shell__storage-heading">
+          <HardDrive aria-hidden="true" />
+          <span>{labels.storage}</span>
+          <span className="app-shell__storage-state">{labels.storageStatus[storage.status]}</span>
+        </div>
+        <p className="app-shell__storage-headline">{storage.headline}</p>
+        {storage.detail ? <p className="app-shell__storage-detail">{storage.detail}</p> : null}
+        {percent != null ? <div className="app-shell__storage-meter" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label={`${labels.storageUsed}: ${percent}%`}><span style={{ transform: `scaleX(${percent / 100})` }} /></div> : null}
+        {storage.partial || storage.freshness ? <p className="app-shell__storage-meta">{storage.partial ? labels.storagePartial : null}{storage.partial && storage.freshness ? " · " : null}{storage.freshness}</p> : null}
+      </TooltipTrigger>
+      <TooltipContent side="right">{tooltipLabel}</TooltipContent>
+    </Tooltip>
   )
 }
 
-function NavigationItems({ items, activePage, labels, onNavigate, mobile = false, collapsed = false }: { items: NavItem[]; activePage: AppShellPage; labels: AppShellLabels; onNavigate: (page: AppShellPage) => void; mobile?: boolean; collapsed?: boolean }) {
+function NavigationItems({ items, activePage, labels, onNavigate, mobile = false, collapsed = false, highlight = false }: { items: NavItem[]; activePage: AppShellPage; labels: AppShellLabels; onNavigate: (page: AppShellPage) => void; mobile?: boolean; collapsed?: boolean; highlight?: boolean }) {
   return (
     <div className={cn("app-shell__nav-list", mobile && "app-shell__nav-list--mobile")}>
       {items.map(({ page, icon: Icon }) => {
         const active = activePage === page
-        return (
+        const button = <button type="button" className={cn("app-shell__nav-item", active && "app-shell__nav-item--active")} aria-current={active ? "page" : undefined} aria-label={labels.nav[page]} onClick={() => onNavigate(page)}>
+          {mobile && active ? <motion.span layoutId="mobile-active-navigation" initial={false} transition={{ type: "spring", stiffness: 350, damping: 35 }} className="app-shell__nav-active-indicator" /> : null}
+          <AnimatedIcon animation={NAV_ICON_ANIMATION[page]}><Icon /></AnimatedIcon>
+          <span>{labels.nav[page]}</span>
+        </button>
+        const tooltip = (
           <Tooltip key={page}>
-            <AnimateIcon><TooltipTrigger render={<button type="button" className={cn("app-shell__nav-item", active && "app-shell__nav-item--active")} aria-current={active ? "page" : undefined} aria-label={labels.nav[page]} onClick={() => onNavigate(page)}>
-              {active ? <motion.span layoutId={mobile ? "mobile-active-navigation" : "sidebar-active-navigation"} initial={false} transition={{ type: "spring", stiffness: 310, damping: 30 }} className="app-shell__nav-active-indicator" /> : null}
-              <AnimatedIcon animation={NAV_ICON_ANIMATION[page]}><Icon /></AnimatedIcon>
-              <span>{labels.nav[page]}</span>
-            </button>} /></AnimateIcon>
+            <AnimateIcon><TooltipTrigger render={button} /></AnimateIcon>
             {collapsed && !mobile ? <TooltipContent side="right">{labels.nav[page]}</TooltipContent> : null}
           </Tooltip>
         )
+        return highlight ? <HighlightItem key={page} value={page} className="app-shell__nav-highlight-item">{tooltip}</HighlightItem> : tooltip
       })}
     </div>
   )
@@ -273,7 +290,7 @@ function SettingsNavigation({ activePage, settingsSection = "cleanarr", labels, 
 
   return (
     <div className="app-shell__settings-group">
-      <Tooltip><AnimateIcon><TooltipTrigger render={<button
+      <HighlightItem value="settings" className="app-shell__nav-highlight-item"><Tooltip><AnimateIcon><TooltipTrigger render={<button
           type="button"
           className={cn("app-shell__nav-item", expanded && "app-shell__nav-item--active")}
           aria-current={expanded ? "page" : undefined}
@@ -282,10 +299,9 @@ function SettingsNavigation({ activePage, settingsSection = "cleanarr", labels, 
           aria-label={labels.nav.settings}
           onClick={() => selectSection(settingsSection)}
         >
-          {expanded ? <motion.span layoutId="sidebar-active-navigation" initial={false} transition={{ type: "spring", stiffness: 310, damping: 30 }} className="app-shell__nav-active-indicator" /> : null}
           <AnimatedIcon animation="wiggle"><Settings /></AnimatedIcon>
           <span>{labels.nav.settings}</span>
-        </button>} /></AnimateIcon>{collapsed ? <TooltipContent side="right">{labels.nav.settings}</TooltipContent> : null}</Tooltip>
+        </button>} /></AnimateIcon>{collapsed ? <TooltipContent side="right">{labels.nav.settings}</TooltipContent> : null}</Tooltip></HighlightItem>
       {expanded ? (
         <div id="app-shell-settings-sections" className="app-shell__settings-sections" role="group" aria-label={labels.settings}>
           {SETTINGS_ITEMS.map(({ section, label, icon: Icon, animation }) => <Tooltip key={section}><AnimateIcon><TooltipTrigger render={<button
@@ -414,10 +430,10 @@ export function AppShell({ activePage, onPageChange, onNavigate, settingsSection
       <aside className="app-shell__sidebar" aria-label={labels.navigation}>
         <Brand labels={labels} collapsed={collapsed} onToggle={() => setCollapsed((value) => !value)} />
         <div className="app-shell__navigation-scroll" role="region" aria-label={labels.navigation} tabIndex={0}>
-          <LayoutGroup id="desktop-sidebar-navigation">
-            <NavigationItems items={NAV_ITEMS.filter(({ page }) => page !== "settings" && (canAdmin || page !== "users"))} activePage={activePage} labels={labels} onNavigate={navigate} collapsed={collapsed} />
+          <Highlight mode="parent" controlledItems value={activePage} hover={false} click={false} transition={{ type: "spring", stiffness: 350, damping: 35 }} className="app-shell__nav-active-indicator" containerClassName="app-shell__navigation-highlight">
+            <NavigationItems items={NAV_ITEMS.filter(({ page }) => page !== "settings" && (canAdmin || page !== "users"))} activePage={activePage} labels={labels} onNavigate={navigate} collapsed={collapsed} highlight />
             {canAdmin ? <SettingsNavigation activePage={activePage} settingsSection={settingsSection} labels={labels} onNavigate={navigate} onSettingsSectionChange={onSettingsSectionChange} collapsed={collapsed} /> : null}
-          </LayoutGroup>
+          </Highlight>
         </div>
         <div className="app-shell__sidebar-bottom">
           <RuntimeStatus dryRun={dryRun} labels={labels} />

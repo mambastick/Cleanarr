@@ -17,6 +17,7 @@ describe("LibraryPanelV2", () => {
     render(<LibraryPanelV2 active authenticated fetchJson={fetchJson} copy={LIBRARY_COPY.en} onDeletePreview={onDeletePreview} />)
     await waitFor(() => expect(screen.getByText("Dune: Part Two")).toBeInTheDocument())
     const trash = screen.getByRole("button", { name: /Review deletion plan: Dune/ })
+    expect(trash).toHaveClass("library-card__delete", "bg-destructive!")
     await user.click(trash)
     expect(onDeletePreview).toHaveBeenCalledTimes(1)
     await user.click(screen.getByText("Dune: Part Two").closest("button")!)

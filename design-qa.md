@@ -3,6 +3,7 @@
 ## Visual truth and test state
 
 - Source visual truth: `/home/golodn1y/.codex/attachments/f3f8988c-612d-437d-a9a8-82cd2fad4ecd/codex-clipboard-4c7a1314-829a-4aa1-8968-07f491f3c538.png`
+- Second annotation source: `/home/golodn1y/.codex/attachments/0a3782a0-017f-417c-9382-8f232b8b15d7/codex-clipboard-e41ab5d2-321a-4532-a9ac-48026d3bc307.png`
 - Source pixels: 1176 × 1697 (approximately 588 × 848.5 CSS pixels at 2× density).
 - Matching implementation capture: `/tmp/cleanarr-mobile-final-light.png`
 - Implementation pixels and browser viewport: 590 × 850 at 1× density.
@@ -35,6 +36,11 @@ Focused desktop comparison confirmed that the collapsed rail retains every desti
 6. **P2 — the disabled SSO Client Secret icon action had an accessible name but no hover tooltip.** Moved the tooltip trigger to a non-disabled wrapper so the localized explanation is available even while SSO is disabled; verified with a real pointer hover.
 7. **P1 — the browser fixture and assertions still reflected the pre-role, pre-account-redesign shell.** Added the explicit administrator fixture role, updated theme checks for the new directly accessible desktop controls, localized the downloader profile expectation, and retargeted the setup-wizard scroll assertion to its labelled native region.
 8. **P1 — expanding the five-section Settings tree at a 720 px desktop height pushed the account actions outside the viewport.** The sidebar navigation is now its own keyboard-focusable scroll region while runtime, storage, theme, language, and logout controls remain pinned and reachable.
+9. **P1 — the expanded Settings tree exposed a browser scrollbar inside the sidebar.** The navigation keeps its independent wheel and keyboard scrolling, while both Firefox and WebKit scrollbar rendering are suppressed. Browser coverage asserts real overflow together with `scrollbar-width: none` and the hidden WebKit pseudo-element.
+10. **P1 — destructive card actions competed with artwork in the top-right corner.** The solid destructive control now appears at the poster center on pointer hover or keyboard focus; it stays visible on touch-only devices and retains its accessible name and tooltip.
+11. **P2 — the shared-layout sidebar selection could stretch in from an unrelated origin.** Desktop navigation now uses the measured Animate UI Highlight primitive and the same `350/35` spring as the Files reference, so the surface follows the destination bounds directly and does not animate in on first render.
+12. **P2 — the collapsed rail reduced runtime and storage to ambiguous marks.** Dry-run/live and storage now keep recognizable Lucide icons, focusable semantic labels, and full status tooltips. Navigation icons receive a compact square hover/focus surface, matching the rest of the icon-button language.
+13. **P2 — the brand and account footer remained visually fragmented.** The sidebar toggle now morphs between Lucide panel states through Morphicons, the lightning mark is separated vertically in the collapsed header, the official Animate UI GitHub Stars pattern is restored beside the brand, and account identity/actions share one compact row instead of two boxed blocks.
 
 No actionable P0, P1, or P2 visual or interaction findings remain. The production build reports only the existing large-chunk advisory; it does not affect this visual acceptance pass.
 

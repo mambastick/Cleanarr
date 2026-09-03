@@ -155,6 +155,14 @@ it("wires tooltip triggers for icon-only destinations in the collapsed sidebar",
   expect(screen.getAllByRole("button", { name: "Activity" })[0]).toHaveAttribute("data-base-ui-tooltip-trigger")
 })
 
+it("uses the measured Animate UI highlight for the active desktop destination", () => {
+  const { container } = renderShell({ activePage: "library" })
+  const activeItem = container.querySelector('[data-slot="motion-highlight-item-container"][data-value="library"]')
+
+  expect(container.querySelector('[data-slot="motion-highlight-container"]')).toBeInTheDocument()
+  expect(activeItem).toHaveAttribute("data-active", "true")
+})
+
 it("keeps administration destinations out of a viewer workspace", async () => {
   const user = userEvent.setup()
   renderShell({ canAdmin: false })
@@ -185,4 +193,6 @@ it("renders semantic runtime and storage status with an accessible meter", () =>
   expect(screen.getAllByText("Live").length).toBeGreaterThan(0)
   expect(screen.getByRole("progressbar", { name: "Used: 98%" })).toHaveAttribute("aria-valuenow", "98")
   expect(screen.getByText("Clear space soon")).toBeInTheDocument()
+  expect(screen.getAllByRole("status", { name: "Runtime status: Live" })[0]).toHaveAttribute("data-base-ui-tooltip-trigger")
+  expect(screen.getAllByRole("region", { name: "Storage" })[0]).toHaveAttribute("data-base-ui-tooltip-trigger")
 })
