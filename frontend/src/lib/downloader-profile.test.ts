@@ -1,5 +1,5 @@
 import { connectionFingerprint, hasCurrentConnectionEvidence } from "@/lib/downloader-profile"
-import { isSetupStepReady } from "@/lib/service-config"
+import { isSetupStepConfigured, isSetupStepReady } from "@/lib/service-config"
 import type { RuntimeConfigPayload } from "@/lib/runtime-config"
 
 const draft = { downloader_kind: "qbittorrent" as const, url: " https://qbit.example ", username: "admin", password: "secret", api_key: "" }
@@ -68,5 +68,6 @@ describe("downloader connection evidence", () => {
     expect(isSetupStepReady("downloaders", config, new Set([firstEvidence]))).toBe(false)
     expect(isSetupStepReady("downloaders", config, new Set([firstEvidence, secondEvidence]))).toBe(true)
     expect(isSetupStepReady("downloaders", { ...config, downloaders: [first, { ...second, enabled: false }] }, new Set([firstEvidence]))).toBe(true)
+    expect(isSetupStepConfigured("downloaders", config)).toBe(true)
   })
 })

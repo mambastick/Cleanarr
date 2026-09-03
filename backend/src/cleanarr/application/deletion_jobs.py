@@ -303,7 +303,7 @@ class ManualDeletionJobService:
         try:
             async with self._execution_lock:
                 verified_event = job.event
-                if job.request.library_resource_id is not None:
+                if job.request.library_resource_id is not None or job.request.jellyfin_only:
                     try:
                         verified_event = await self._resolver(job.request)
                     except asyncio.CancelledError:
@@ -521,6 +521,7 @@ def canonical_submission_request(payload: ManualDeleteRequest) -> str:
             "radarr_movie_id": payload.radarr_movie_id,
             "season_number": payload.season_number,
             "jellyfin_item_id": payload.jellyfin_item_id,
+            "jellyfin_only": payload.jellyfin_only,
             "library_resource_id": payload.library_resource_id,
             "confirmed_plan_hash": payload.confirmed_plan_hash,
         },

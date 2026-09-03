@@ -128,6 +128,50 @@ async def test_candidate_read_does_not_invoke_mutation_ports() -> None:
 
 
 @pytest.mark.asyncio
+async def test_unmapped_movie_gets_direct_jellyfin_link_only_after_complete_radarr_catalog() -> None:
+    class EmptyArr(Arr):
+        async def list_movies(self):  # type: ignore[no-untyped-def]
+            return []
+
+    complete = await service(Playback("one"), EmptyArr()).list_candidates(
+        accept_language="en",
+        jellyfin_configured=True,
+        radarr_configured=True,
+        sonarr_configured=False,
+        config=GeneralConfig(),
+    )
+    assert complete.candidates[0].deletion_link is not None
+    assert complete.candidates[0].deletion_link.jellyfin_only is True
+
+    class BrokenArr(Arr):
+        async def list_movies(self):  # type: ignore[no-untyped-def]
+            raise RuntimeError("unavailable")
+
+    unavailable = await service(Playback("one"), BrokenArr()).list_candidates(
+        accept_language="en",
+        jellyfin_configured=True,
+        radarr_configured=True,
+        sonarr_configured=False,
+        config=GeneralConfig(),
+    )
+    assert unavailable.candidates[0].deletion_link is None
+    assert "radarr_catalog_unavailable" in unavailable.failure_codes
+
+    class NoProviderIdentity(Playback):
+        async def list_cleanup_items(self, **_: object):  # type: ignore[no-untyped-def]
+            return (JellyfinCleanupItem("one", "one", CleanupMediaType.MOVIE, None, None, None),), False
+
+    unprovable = await service(NoProviderIdentity("one"), EmptyArr()).list_candidates(
+        accept_language="en",
+        jellyfin_configured=True,
+        radarr_configured=True,
+        sonarr_configured=False,
+        config=GeneralConfig(),
+    )
+    assert unprovable.candidates[0].deletion_link is None
+
+
+@pytest.mark.asyncio
 async def test_cancelled_playback_read_propagates() -> None:
     class Cancelled(Playback):
         async def list_cleanup_items(self, **_: object):  # type: ignore[no-untyped-def]

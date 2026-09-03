@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { expect, it, vi } from "vitest"
 
@@ -24,4 +24,28 @@ it("uses controlled runtime tabs once and keeps service URLs behind disclosure",
   await user.dblClick(screen.getByRole("tab", { name: "Real deletion" }))
   expect(onToggleDryRun).toHaveBeenCalledTimes(1)
   resolveToggle?.()
+  await waitFor(() => expect(screen.getByRole("tab", { name: "Real deletion" })).not.toBeDisabled())
+})
+
+it("explains recent skipped actions without exposing raw status keys", async () => {
+  const latestActivity = {
+    processed_at: "2026-01-01T00:00:00Z",
+    action_summary: { skipped: 2 },
+    result: {
+      item_type: "Movie" as const,
+      item_id: "item",
+      name: "Example",
+      status: "success" as const,
+      fingerprint: { tmdb_id: null, tvdb_id: null, imdb_id: null, path: null },
+      season_number: null,
+      episode_number: null,
+      episode_end_number: null,
+      actions: [],
+    },
+  }
+  render(<DashboardPanel text={getUiText("ru")} dashboard={dashboard} isDashboardLoading={false} setupCompletionCount={5} deletedActions={2} latestActivity={latestActivity} allServicesConfigured isLive={false} onToggleDryRun={async () => {}} onOpenWizard={() => {}} onEditService={() => {}} storage={null} storageLanguage="ru" />)
+
+  await userEvent.click(screen.getByText("Что произошло"))
+  expect(screen.getByText("2 безопасно пропущено")).toBeInTheDocument()
+  expect(screen.queryByText(/skipped:/)).not.toBeInTheDocument()
 })

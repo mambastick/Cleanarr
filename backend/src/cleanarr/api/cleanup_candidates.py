@@ -34,6 +34,7 @@ class DeletionLinkResponse(BaseModel):
     sonarr_series_id: int | None
     jellyfin_item_id: str
     display_name: str
+    jellyfin_only: bool = False
 
 
 class SeedingResponse(BaseModel):

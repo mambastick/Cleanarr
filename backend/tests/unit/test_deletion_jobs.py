@@ -179,6 +179,49 @@ async def test_submit_rejects_missing_or_changed_preflight(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+async def test_jellyfin_only_job_revalidates_target_before_execution(tmp_path: Path) -> None:
+    resolve_calls = 0
+    runner_called = False
+
+    async def changing_resolver(payload: ManualDeleteRequest) -> MediaDeletionEvent:
+        nonlocal resolve_calls
+        resolve_calls += 1
+        event = _event(payload.item_type)
+        return MediaDeletionEvent(
+            notification_type=event.notification_type,
+            item_type=event.item_type,
+            item_id="manual:jellyfin:jf-direct",
+            name="Movie" if resolve_calls < 3 else "Changed movie",
+            fingerprint=event.fingerprint,
+        )
+
+    async def runner(payload, event, report):  # type: ignore[no-untyped-def]
+        nonlocal runner_called
+        runner_called = True
+        return _result(event)
+
+    store = _job_service(changing_resolver, _previewer, runner, db_path=tmp_path / "cleanarr.db")
+    request = await _confirmed_request(
+        store,
+        ManualDeleteRequest(
+            item_type=ItemType.MOVIE,
+            jellyfin_item_id="jf-direct",
+            jellyfin_only=True,
+        ),
+    )
+    queued = await store.submit(request)
+
+    try:
+        await _wait_for_status(store, queued.id, ManualDeleteJobStatus.FAILED)
+        failed = store.get(queued.id)
+        assert resolve_calls == 3
+        assert runner_called is False
+        assert failed.error == "The deletion plan changed while the job was queued. Preview it and confirm again."
+    finally:
+        await store.stop()
+
+
+@pytest.mark.asyncio
 async def test_submit_rejects_preflight_with_downstream_failure(tmp_path: Path) -> None:
     async def failed_previewer(payload, event):  # type: ignore[no-untyped-def]
         return _result(event, OverallStatus.PARTIAL_FAILURE)

@@ -30,7 +30,7 @@ import { getUiText, resolveUiLanguage, type UiLanguage, type UiTextMap } from "@
 import { createClientIdempotencyKey } from "@/lib/idempotency"
 import type { LibraryItem, ManualDeleteBatch, ManualDeleteBatchListResponse, ManualDeleteJob, ManualDeleteJobListResponse, ManualDeletePreviewResponse } from "@/lib/library"
 import type { ConnectionTestResponse, GeneralConfig, RuntimeConfigPayload } from "@/lib/runtime-config"
-import { buildServicePayload, DASHBOARD_NAME_TO_FAMILY, EMPTY_DRAFTS, getDownloaderLabel, getServiceEndpoint, getServiceTitle, getServices, isSetupStepReady, resolveActiveService, SERVICE_META, SETUP_STEPS, toDraft, type DownloaderKind, type ServiceDraft, type ServiceFamily, type ServiceModalState } from "@/lib/service-config"
+import { buildServicePayload, DASHBOARD_NAME_TO_FAMILY, EMPTY_DRAFTS, getDownloaderLabel, getServiceEndpoint, getServiceTitle, getServices, isSetupStepConfigured, resolveActiveService, SERVICE_META, SETUP_STEPS, toDraft, type DownloaderKind, type ServiceDraft, type ServiceFamily, type ServiceModalState } from "@/lib/service-config"
 import { normalizeError } from "@/lib/status-format"
 import { connectionFingerprint } from "@/lib/downloader-profile"
 import { useStorage, type StorageResponse } from "@/lib/storage"
@@ -378,8 +378,8 @@ function CleanArrApp() {
   }, [authStatus, loadConfig])
 
   const setupCompletionCount = useMemo(
-    () => SETUP_STEPS.reduce((n, step) => n + (isSetupStepReady(step.id, config, testedDownloaderFingerprints) ? 1 : 0), 0),
-    [config, testedDownloaderFingerprints],
+    () => SETUP_STEPS.reduce((n, step) => n + (isSetupStepConfigured(step.id, config) ? 1 : 0), 0),
+    [config],
   )
 
   // Auto-navigate to Dashboard once setup is fully complete (one-time)
@@ -429,7 +429,7 @@ function CleanArrApp() {
   )
 
   const allServicesConfigured = SETUP_STEPS.every((step) =>
-    isSetupStepReady(step.id, config, testedDownloaderFingerprints),
+    isSetupStepConfigured(step.id, config),
   )
 
   const deletedActions = (dashboard?.recent_activity ?? []).reduce(
@@ -646,6 +646,21 @@ function CleanArrApp() {
         storageHeadline={shellStorage}
         labels={SHELL_COPY[shellLanguage]}
         canAdmin={isAdmin}
+        jobsSlot={deleteJobs.length || deleteBatches.length ? <JobsSheet
+          jobs={deleteJobs}
+          batches={deleteBatches}
+          title={uiText.backgroundTasks}
+          activeLabel={uiText.active}
+          recentLabel={uiText.recent}
+          dismissLabel={uiText.dismiss}
+          closeLabel={uiLanguage === "ru" ? "Закрыть" : "Close"}
+          progressLabel={uiText.progress}
+          language={uiLanguage === "ru" ? "ru" : "en"}
+          announcement={deleteJobAnnouncement}
+          announcementTone={deleteJobAnnouncementTone}
+          canDismiss={isAdmin}
+          onDismiss={(jobId) => void dismissDeleteJob(jobId)}
+        /> : null}
       >
         <div className={activeTab === "library" ? "mx-auto w-full max-w-[100rem]" : "mx-auto w-full max-w-6xl"}>
           <div hidden={activeTab !== "overview"}>
@@ -715,7 +730,7 @@ function CleanArrApp() {
           </div>
 
           <div hidden={activeTab !== "activity"}>
-            <ActivityPanel text={uiText} filteredActivity={filteredActivity} webhookAttempts={filteredWebhookAttempts} activityFilter={activityFilter} onFilterChange={setActivityFilter} />
+            <ActivityPanel text={uiText} language={shellLanguage} filteredActivity={filteredActivity} webhookAttempts={filteredWebhookAttempts} activityFilter={activityFilter} onFilterChange={setActivityFilter} />
           </div>
 
           {isAdmin ? <div hidden={activeTab !== "users"}>
@@ -838,21 +853,6 @@ function CleanArrApp() {
         }}
       />
 
-      <JobsSheet
-        jobs={deleteJobs}
-        batches={deleteBatches}
-        title={uiText.backgroundTasks}
-        activeLabel={uiText.active}
-        recentLabel={uiText.recent}
-        dismissLabel={uiText.dismiss}
-        closeLabel={uiLanguage === "ru" ? "Закрыть" : "Close"}
-        progressLabel={uiText.progress}
-        language={uiLanguage === "ru" ? "ru" : "en"}
-        announcement={deleteJobAnnouncement}
-        announcementTone={deleteJobAnnouncementTone}
-        canDismiss={isAdmin}
-        onDismiss={(jobId) => void dismissDeleteJob(jobId)}
-      />
     </>
   )
 }
@@ -868,7 +868,7 @@ function CleanArrApp() {
 const createDeleteSessionKey = createClientIdempotencyKey
 
 function getDeleteTargetLabel(target: LibraryDeleteTarget, text: UiTextMap): string {
-  if (target.kind === "movie") return target.movie_title
+  if (target.kind === "movie" || target.kind === "jellyfin_movie") return target.movie_title
   return target.item_type === "Season"
     ? text.seasonOfSeries.replace("{{season}}", String(target.season_number)).replace("{{series}}", target.series_title)
     : target.series_title

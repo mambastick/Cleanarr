@@ -580,6 +580,7 @@ def mutation_identity(request: ManualDeleteRequest) -> str:
             "sonarr_series_id": request.sonarr_series_id,
             "season_number": request.season_number,
             "jellyfin_item_id": request.jellyfin_item_id,
+            "jellyfin_only": request.jellyfin_only,
             "library_resource_id": request.library_resource_id,
         },
         separators=(",", ":"),
@@ -597,6 +598,8 @@ def destructive_overlap_identity(request: ManualDeleteRequest) -> str:
             return f"season:{request.sonarr_series_id}:{request.season_number}"
     if request.library_resource_id is not None:
         return f"resource:{request.library_resource_id}"
+    if request.jellyfin_only and request.jellyfin_item_id is not None:
+        return f"jellyfin-movie:{request.jellyfin_item_id.strip().casefold()}"
     return mutation_identity(request)
 
 
@@ -681,6 +684,7 @@ def canonical_batch_request(children: Sequence[ManualDeleteRequest], *, confirme
                     "sonarr_series_id": request.sonarr_series_id,
                     "season_number": request.season_number,
                     "jellyfin_item_id": request.jellyfin_item_id,
+                    "jellyfin_only": request.jellyfin_only,
                     "library_resource_id": request.library_resource_id,
                 },
             }

@@ -366,6 +366,14 @@ class CleanupCandidatesService:
         candidates: list[CleanupCandidate] = []
         for item in items:
             arr_id = mappings.get(item.item_id)
+            has_movie_identity = item.tmdb_id is not None or bool(item.imdb_id)
+            direct_jellyfin_removal_available = (
+                item.media_type is CleanupMediaType.MOVIE
+                and arr_id is None
+                and (
+                    not radarr_configured or (has_movie_identity and "radarr_catalog_unavailable" not in mapping_codes)
+                )
+            )
             link = (
                 CleanupDeletionLink(
                     item_type="Movie" if item.media_type is CleanupMediaType.MOVIE else "Series",
@@ -373,8 +381,9 @@ class CleanupCandidatesService:
                     sonarr_series_id=arr_id if item.media_type is CleanupMediaType.SERIES else None,
                     jellyfin_item_id=item.item_id,
                     display_name=item.display_name,
+                    jellyfin_only=arr_id is None,
                 )
-                if arr_id is not None
+                if arr_id is not None or direct_jellyfin_removal_available
                 else None
             )
             candidates.append(

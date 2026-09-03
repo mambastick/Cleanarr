@@ -141,10 +141,33 @@ class ManualDeleteRequest(BaseModel):
     radarr_movie_id: int | None = None
     season_number: int | None = None
     jellyfin_item_id: str | None = None
+    jellyfin_only: bool = False
     library_resource_id: str | None = Field(default=None, min_length=1, max_length=256)
     confirmed_plan_hash: str | None = None
     idempotency_key: UUID | None = None
     display_name: str | None = Field(default=None, max_length=256)
+
+    @model_validator(mode="after")
+    def validate_jellyfin_only_scope(self) -> ManualDeleteRequest:
+        """Keep the direct Jellyfin-only command narrow and unambiguous."""
+
+        if not self.jellyfin_only:
+            return self
+        if self.item_type is not ItemType.MOVIE:
+            raise ValueError("Jellyfin-only deletion currently supports movies only.")
+        if not self.jellyfin_item_id or not self.jellyfin_item_id.strip():
+            raise ValueError("jellyfin_item_id is required for Jellyfin-only deletion.")
+        if any(
+            value is not None
+            for value in (
+                self.radarr_movie_id,
+                self.sonarr_series_id,
+                self.season_number,
+                self.library_resource_id,
+            )
+        ):
+            raise ValueError("Jellyfin-only deletion cannot include an Arr or Library target.")
+        return self
 
     @field_validator("display_name", mode="before")
     @classmethod

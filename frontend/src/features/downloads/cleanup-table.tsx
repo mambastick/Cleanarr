@@ -27,13 +27,14 @@ export function CleanupTable({ candidates, language, text, selected, onToggle, o
         <TableBody>
           {candidates.map((candidate) => {
             const target = cleanupTarget(candidate)
+            const batchTarget = target?.kind === "jellyfin_movie" ? null : target
             const displayName = candidate.deletion_link?.display_name ?? candidate.display_name
-            const selection = target ? selectionItem(target, displayName, candidate.size_bytes) : null
+            const selection = batchTarget ? selectionItem(batchTarget, displayName, candidate.size_bytes) : null
             return (
               <TableRow key={candidate.jellyfin_item_id}>
                 <TableCell className="px-4">{selection ? <Checkbox checked={Boolean(selected.items[selection.key])} disabled={!canMutate} aria-label={`${text.select}: ${candidate.deletion_link?.display_name ?? candidate.display_name}`} onCheckedChange={() => onToggle(candidate)} /> : null}</TableCell>
                 <TableCell className="max-w-72 whitespace-normal"><button type="button" className="line-clamp-2 min-h-11 rounded text-left font-medium hover:text-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50" onClick={(event) => onInspect(candidate, event.currentTarget)}>{candidate.deletion_link?.display_name ?? candidate.display_name}</button></TableCell>
-                <TableCell>{candidate.media_type === "movie" ? text.movies : text.series}</TableCell>
+                <TableCell><p>{candidate.media_type === "movie" ? text.movies : text.series}</p>{target?.kind === "jellyfin_movie" ? <p className="mt-1 text-xs text-muted-foreground">{text.jellyfinOnly}</p> : null}</TableCell>
                 <TableCell>{candidate.playback_status === "watched" ? text.watched : candidate.playback_status === "never_watched" ? text.neverWatched : text.cleanupUnknown}</TableCell>
                 <TableCell className="tabular-nums">{bytes(candidate.size_bytes, text)}</TableCell>
                 <TableCell><p className="tabular-nums">{knownNumber(candidate.seeding.ratio, (number) => number.toFixed(2), text)}</p><p className="text-xs text-muted-foreground">{duration(candidate.seeding.seeding_time_seconds, text)}</p></TableCell>

@@ -76,6 +76,7 @@ export interface CleanupDeletionLink {
   sonarr_series_id: number | null
   jellyfin_item_id: string
   display_name: string
+  jellyfin_only?: boolean
 }
 export interface CleanupCandidate {
   jellyfin_item_id: string

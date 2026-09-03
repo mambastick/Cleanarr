@@ -23,12 +23,14 @@ from cleanarr.application.storage import (
     volume_freshness,
 )
 from cleanarr.domain import (
+    ActionStatus,
     ArtworkData,
     ItemType,
     JellyfinItem,
     LibraryDetail,
     LibraryMediaType,
     LibraryReadState,
+    OverallStatus,
     RadarrMovie,
     SonarrEpisode,
     SonarrEpisodeFile,
@@ -433,6 +435,7 @@ class LibraryJellyfinFake:
         self.artwork_value = artwork
         self.catalog_calls = 0
         self.artwork_calls = 0
+        self.deleted_items: list[str] = []
 
     async def list_items(self, *, include_types: list[str], accept_language: str | None = None) -> list[JellyfinItem]:
         self.catalog_calls += 1
@@ -441,6 +444,17 @@ class LibraryJellyfinFake:
     async def get_primary_artwork(self, item_id: str) -> ArtworkData | None:
         self.artwork_calls += 1
         return self.artwork_value
+
+    async def delete_item(self, item_id: str) -> None:
+        self.deleted_items.append(item_id)
+
+
+class LibraryActivityRecorderFake:
+    def __init__(self) -> None:
+        self.records: list[tuple[object, str | None]] = []
+
+    async def record(self, result: object, *, display_name: str | None = None) -> None:
+        self.records.append((result, display_name))
 
 
 class LibrarySonarrFake:
@@ -1021,3 +1035,170 @@ async def test_manual_deletion_rejects_one_jellyfin_item_owned_by_multiple_arr_r
                 library_resource_id=encode_library_resource(LibraryMediaType.MOVIE, "radarr-one", 1),
             )
         )
+
+
+def test_jellyfin_only_request_rejects_arr_and_series_scopes() -> None:
+    with pytest.raises(ValueError, match="movies only"):
+        ManualDeleteRequest(
+            item_type=ItemType.SERIES,
+            jellyfin_item_id="jf-show",
+            jellyfin_only=True,
+        )
+    with pytest.raises(ValueError, match="cannot include"):
+        ManualDeleteRequest(
+            item_type=ItemType.MOVIE,
+            jellyfin_item_id="jf-movie",
+            jellyfin_only=True,
+            radarr_movie_id=1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_jellyfin_only_movie_preview_and_dry_run_are_single_service_and_mutation_free() -> None:
+    radarr = LibraryRadarrFake([])
+    jellyfin = LibraryJellyfinFake([JellyfinItem(id="jf-direct", name="Direct movie", type="Movie", tmdb_id=55)])
+    recorder = LibraryActivityRecorderFake()
+    service = ManualDeletionService(
+        radarr=lambda: cast(Any, radarr),
+        sonarr=lambda: cast(Any, object()),
+        jellyfin=lambda: cast(Any, jellyfin),
+        strategy_factory=lambda: pytest.fail("Jellyfin-only removal must not create a cascade strategy"),
+        is_dry_run=lambda: True,
+        activity_recorder=cast(Any, recorder),
+        config=lambda: _config(radarr=[_radarr_profile()]),
+    )
+    request = ManualDeleteRequest(
+        item_type=ItemType.MOVIE,
+        jellyfin_item_id="jf-direct",
+        jellyfin_only=True,
+    )
+
+    event = await service.resolve(request)
+    preview = await service.preview(request, event)
+    result = await service.execute(request, event)
+
+    assert event.item_id == "manual:jellyfin:jf-direct"
+    assert preview.status is OverallStatus.SUCCESS
+    assert [(action.system, action.status) for action in preview.actions] == [("jellyfin", ActionStatus.DRY_RUN)]
+    assert result.status is OverallStatus.SUCCESS
+    assert jellyfin.deleted_items == []
+    assert len(recorder.records) == 1
+    assert recorder.records[0][1] == "Direct movie"
+
+
+@pytest.mark.asyncio
+async def test_jellyfin_only_movie_live_execution_deletes_only_verified_jellyfin_id() -> None:
+    radarr = LibraryRadarrFake([])
+    jellyfin = LibraryJellyfinFake([JellyfinItem(id="jf-direct", name="Direct movie", type="Movie", tmdb_id=55)])
+    recorder = LibraryActivityRecorderFake()
+    service = ManualDeletionService(
+        radarr=lambda: cast(Any, radarr),
+        sonarr=lambda: cast(Any, object()),
+        jellyfin=lambda: cast(Any, jellyfin),
+        strategy_factory=lambda: pytest.fail("Jellyfin-only removal must not create a cascade strategy"),
+        is_dry_run=lambda: False,
+        activity_recorder=cast(Any, recorder),
+        config=lambda: _config(radarr=[_radarr_profile()]),
+    )
+    request = ManualDeleteRequest(
+        item_type=ItemType.MOVIE,
+        jellyfin_item_id="jf-direct",
+        jellyfin_only=True,
+    )
+
+    event = await service.resolve(request)
+    result = await service.execute(request, event)
+
+    assert jellyfin.deleted_items == ["jf-direct"]
+    assert [(action.system, action.status) for action in result.actions] == [("jellyfin", ActionStatus.DELETED)]
+    assert len(recorder.records) == 1
+
+
+@pytest.mark.asyncio
+async def test_jellyfin_only_movie_fails_closed_when_radarr_link_exists_or_catalogs_are_invalid() -> None:
+    movie = _movie(1, "Now managed", added=datetime(2025, 1, 1, tzinfo=UTC), size=20, tmdb_id=55)
+    jellyfin = LibraryJellyfinFake([JellyfinItem(id="jf-direct", name="Direct movie", type="Movie", tmdb_id=55)])
+    request = ManualDeleteRequest(
+        item_type=ItemType.MOVIE,
+        jellyfin_item_id="jf-direct",
+        jellyfin_only=True,
+    )
+    service = ManualDeletionService(
+        radarr=lambda: cast(Any, LibraryRadarrFake([movie])),
+        sonarr=lambda: cast(Any, object()),
+        jellyfin=lambda: cast(Any, jellyfin),
+        strategy_factory=lambda: cast(Any, object()),
+        is_dry_run=lambda: True,
+        activity_recorder=cast(Any, object()),
+        config=lambda: _config(radarr=[_radarr_profile()]),
+    )
+
+    with pytest.raises(LibraryItemChangedError, match="linked to Radarr"):
+        await service.resolve(request)
+
+    malformed_radarr = LibraryRadarrFake([])
+    malformed_radarr.movies = cast(Any, [object()])
+    malformed_service = ManualDeletionService(
+        radarr=lambda: cast(Any, malformed_radarr),
+        sonarr=lambda: cast(Any, object()),
+        jellyfin=lambda: cast(Any, jellyfin),
+        strategy_factory=lambda: cast(Any, object()),
+        is_dry_run=lambda: True,
+        activity_recorder=cast(Any, object()),
+        config=lambda: _config(radarr=[_radarr_profile()]),
+    )
+    with pytest.raises(LibraryItemChangedError, match="Radarr relationship could not be verified"):
+        await malformed_service.resolve(request)
+
+    jellyfin.items = cast(Any, [object()])
+    with pytest.raises(LibraryItemChangedError, match="could not be verified"):
+        await service.resolve(request)
+
+
+@pytest.mark.asyncio
+async def test_jellyfin_only_movie_requires_provider_identity_when_radarr_is_configured() -> None:
+    jellyfin = LibraryJellyfinFake([JellyfinItem(id="jf-direct", name="Direct movie", type="Movie")])
+    service = ManualDeletionService(
+        radarr=lambda: cast(Any, LibraryRadarrFake([])),
+        sonarr=lambda: cast(Any, object()),
+        jellyfin=lambda: cast(Any, jellyfin),
+        strategy_factory=lambda: cast(Any, object()),
+        is_dry_run=lambda: True,
+        activity_recorder=cast(Any, object()),
+        config=lambda: _config(radarr=[_radarr_profile()]),
+    )
+
+    with pytest.raises(LibraryItemChangedError, match="stable provider identifier"):
+        await service.resolve(
+            ManualDeleteRequest(
+                item_type=ItemType.MOVIE,
+                jellyfin_item_id="jf-direct",
+                jellyfin_only=True,
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_jellyfin_only_movie_without_enabled_radarr_does_not_require_provider_identity() -> None:
+    radarr = LibraryRadarrFake([])
+    jellyfin = LibraryJellyfinFake([JellyfinItem(id="jf-direct", name="Direct movie", type="Movie")])
+    service = ManualDeletionService(
+        radarr=lambda: cast(Any, radarr),
+        sonarr=lambda: cast(Any, object()),
+        jellyfin=lambda: cast(Any, jellyfin),
+        strategy_factory=lambda: cast(Any, object()),
+        is_dry_run=lambda: True,
+        activity_recorder=cast(Any, object()),
+        config=_config,
+    )
+
+    event = await service.resolve(
+        ManualDeleteRequest(
+            item_type=ItemType.MOVIE,
+            jellyfin_item_id="jf-direct",
+            jellyfin_only=True,
+        )
+    )
+
+    assert event.item_id == "manual:jellyfin:jf-direct"
+    assert radarr.catalog_calls == 0
