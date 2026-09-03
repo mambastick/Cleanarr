@@ -56,10 +56,12 @@ fixtures Radarr, Sonarr, Jellyfin и Seerr проверяют точные ау�
 
 Репетиция candidate проверяет оба направления на реальных выпущенных
 контейнерах: `v0.2.11 -> candidate -> восстановленный v0.2.11`,
-`v0.9.0 -> candidate -> восстановленный v0.9.0` и последнюю stable
-`v1.0.0 -> candidate -> восстановленный v1.0.0`. Проверяются byte-identical
-верифицированный backup, миграция схем БД/config, сохранность конфигурации и
-истории активности.
+`v0.9.0 -> candidate -> восстановленный v0.9.0`,
+`v1.0.0 -> candidate -> восстановленный v1.0.0` и последнюю stable
+`v1.1.0 -> candidate -> восстановленный v1.1.0`. Проверяются верифицированный
+backup, миграция схем БД/config, сохранность конфигурации и истории активности.
+В пути v1.1.0 дополнительно восстанавливается автоматический sidecar schema v3,
+созданный до записи candidate configuration schema 4 или database schema 6.
 
 Полный локальный запуск из чистого checkout:
 
@@ -74,29 +76,32 @@ volumes и удаляются после проверки. `CLEANARR_COMPAT_KEEP
 локальной диагностики: он намеренно сохраняет stack и выводит сгенерированные
 пути project/runtime.
 
-## Граница post-1.0 commands
+## Граница совместимости 2.0
 
-Candidate profile теперь проверяет нормализованные Downloads reads и
-идемпотентный mapping pause/resume для всех четырёх torrent adapters. Такое
-покрытие harness не расширяет задним числом сертифицированный контракт уже
-опубликованного релиза. В релизе эти commands можно заявить только после того,
-как из release commit пройдут этот точный pinned profile, container/package
-smoke, репетиция backup/restore с последней stable v1.0.0 до v5/config-v3 и
-populated migration test v4-to-v5.
+CleanArr v1.1.0 сертифицировал нормализованные Downloads reads и идемпотентный
+mapping pause/resume для всех четырёх torrent adapters. Candidate v2.0 сохраняет
+эти contracts без добавления destructive authority. Заявлять непрерывность
+можно только после того, как из release commit пройдут этот точный pinned
+profile, container/package smoke, репетиция backup/restore с последней stable
+v1.1.0 до v6/config-v4, а также populated migration tests v5-to-v6 и
+config-v3-to-v4.
 
 Сам по себе profile **не** сертифицирует выполнение seeding-stop policy,
 cleanup-candidate aggregation, first-run workflow или batch APIs. Успешная
 проверка подключения, HTTP response или cached observation никогда не являются
 evidence совместимости этих flows.
 
-## Политика совместимости и deprecation серии 1.x
+## Политика совместимости и deprecation серий 1.x и 2.x
 
 - Точные строки выше являются проверенным support floor для 1.0. Совместимость
   с patch-релизом зависимости не заявляется молча: сначала его должен
   сертифицировать CI.
-- CleanArr 1.x сохраняет обратную совместимость документированных webhook,
-  configuration-export, database и adapter contracts. Minor-релизы могут
-  добавлять поля и миграции.
+- CleanArr 2.0 сохраняет документированные webhook, configuration-export,
+  database, adapter и fail-closed safety contracts серии 1.x. Major-версия
+  обозначает новый production UI и authenticated-границу administrator/viewer;
+  она не удаляет Tier 1 integration и не обходит объявленное deprecation window.
+- CleanArr 2.x сохраняет обратную совместимость этих документированных
+  contracts. Minor-релизы могут добавлять поля и ordered migrations.
 - Планируемое удаление или несовместимое изменение объявляется на двух языках
   минимум за один minor-релиз CleanArr и за 90 дней до удаления.
 - Устаревший configuration key остаётся читаемым в течение этого срока и

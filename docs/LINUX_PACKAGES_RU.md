@@ -98,13 +98,15 @@ sudo dnf install ./cleanarr_<новая-версия>_amd64.rpm
 sudo systemctl restart cleanarr
 ```
 
-Текущая SQLite schema — v5, а схема сохранённой runtime configuration — v3.
+Текущая SQLite schema — v6, а схема сохранённой runtime configuration — v4.
 Миграции выполняются только вперёд; SQLite v3/v4 добавляют durable
-deletion idempotency и batch state, а v5 — observations, actions и policy
-evaluations Downloads. Перед обновлением создайте проверенный pre-upgrade backup. Старую версию разрешено
-запускать только после восстановления соответствующей pre-upgrade копии. Для
-полного отката остановите CleanArr, восстановите проверенную копию, установите
-предыдущий пакет и запустите сервис:
+deletion idempotency и batch state, v5 — observations, actions и policy
+evaluations Downloads, а v6 — проекцию учётных записей administrator/viewer.
+Config schema v4 добавляет storage thresholds и создаёт автоматический rollback
+sidecar v3. Перед обновлением создайте проверенный pre-upgrade backup. Старую
+версию разрешено запускать только после восстановления соответствующей
+pre-upgrade копии. Для полного отката остановите CleanArr, восстановите
+проверенную копию, установите предыдущий пакет и запустите сервис:
 
 ```bash
 sudo systemctl stop cleanarr

@@ -98,10 +98,12 @@ sudo dnf install ./cleanarr_<new-version>_amd64.rpm
 sudo systemctl restart cleanarr
 ```
 
-The current SQLite schema is v5 and the persisted runtime configuration schema
-is v3. Migrations are forward-only; SQLite v3/v4 add durable deletion
-idempotency and batch state, while v5 adds Downloads observations, actions, and
-policy evaluations. Create a verified pre-upgrade backup before upgrading.
+The current SQLite schema is v6 and the persisted runtime configuration schema
+is v4. Migrations are forward-only; SQLite v3/v4 add durable deletion
+idempotency and batch state, v5 adds Downloads observations, actions, and policy
+evaluations, and v6 adds the administrator/viewer account projection. Config
+schema v4 adds storage thresholds and creates an automatic v3 rollback sidecar.
+Create a verified pre-upgrade backup before upgrading.
 Start an older build only after restoring the matching pre-upgrade backup. For
 a complete rollback, stop CleanArr, restore the verified backup, install the
 previous package, and start the service:

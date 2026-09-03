@@ -18,8 +18,10 @@ from pathlib import Path
 V0211_IMAGE = "ghcr.io/mambastick/cleanarr:0.2.11@sha256:a7c8c64f102e134c30a385ed42d3951766cf1a97891d9af2de133d93f7f95aa6"
 V090_IMAGE = "ghcr.io/mambastick/cleanarr:0.9.0@sha256:c77bffd72ca49279b95a5c1b82e3b20938d702d7016ab759ce11fc39be29de67"
 V100_IMAGE = "ghcr.io/mambastick/cleanarr:1.0.0@sha256:fd039528eed3326ad0c16d8f36630a4dc5b67962e3c93d3687a768e206979dc5"
-CANDIDATE_DATABASE_SCHEMA_VERSION = 5
-CANDIDATE_CONFIG_SCHEMA_VERSION = 3
+V110_IMAGE = "ghcr.io/mambastick/cleanarr:1.1.0@sha256:67cadfe8caa795ec5c6a5d9daaf61df25260ffce1f54bf72199aec47f5e37336"
+CANDIDATE_DATABASE_SCHEMA_VERSION = 6
+CANDIDATE_CONFIG_SCHEMA_VERSION = 4
+AUTOMATIC_V3_BACKUP_NAME = "cleanarr.config-v3.backup.db"
 
 
 @dataclass(frozen=True)
@@ -113,6 +115,35 @@ SOURCES = (
                 "sso_allowed_users": [],
                 "sso_allowed_groups": [],
                 "sso_group_claim": "groups",
+            },
+            "radarr": [],
+            "sonarr": [],
+            "seerr": [],
+            "downloaders": [],
+            "jellyfin": [],
+        },
+    ),
+    SourceRelease(
+        version="1.1.0",
+        image=V110_IMAGE,
+        schema_version=5,
+        config={
+            "config_schema_version": 3,
+            "admin": {
+                "username": "upgrade-admin",
+                "password_salt": "upgrade-salt",
+                "password_hash": "upgrade-hash",
+            },
+            "general": {
+                "dry_run": False,
+                "log_level": "WARNING",
+                "webhook_shared_token": "upgrade-marker-1.1.0",
+                "ui_language": "ru",
+                "sso_mode": "password_only",
+                "sso_allowed_users": [],
+                "sso_allowed_groups": [],
+                "sso_group_claim": "groups",
+                "seeding_stop_policy": {},
             },
             "radarr": [],
             "sonarr": [],
@@ -288,6 +319,7 @@ def _assert_candidate_state(
             "download_observations",
             "download_actions",
             "policy_evaluations",
+            "user_accounts",
         } <= tables
         config = json.loads(
             connection.execute(
@@ -296,12 +328,19 @@ def _assert_candidate_state(
         )
         assert config["config_schema_version"] == CANDIDATE_CONFIG_SCHEMA_VERSION
         assert config["general"]["seeding_stop_policy"]["enabled"] is False
+        assert config["general"]["storage_warning_free_percent"] == 15.0
+        assert config["general"]["storage_critical_free_percent"] == 5.0
+        account = connection.execute(
+            "SELECT username, role, auth_source FROM user_accounts WHERE username_key = ?",
+            ("upgrade-admin",),
+        ).fetchone()
         activity_count = int(
             connection.execute(
                 "SELECT COUNT(*) FROM activity WHERE result_json LIKE ?",
                 (f"%upgrade-activity-{source.version}%",),
             ).fetchone()[0]
         )
+    assert account == ("upgrade-admin", "admin", "local")
     assert activity_count == 1
 
 
@@ -334,9 +373,25 @@ def _rehearse(source: SourceRelease, candidate_image: str, work_dir: Path) -> No
         _assert_candidate_state(candidate_name, source, database)
         _remove_container(candidate_name)
 
+        automatic_rollback: Path | None = None
+        if source.version == "1.1.0":
+            generated_backup = state_dir / AUTOMATIC_V3_BACKUP_NAME
+            if not generated_backup.is_file():
+                raise AssertionError(
+                    "The v1.1.0 upgrade did not create its automatic v3 rollback backup."
+                )
+            _assert_source_state(source, generated_backup)
+            automatic_rollback = work_dir / f"automatic-rollback-{source.version}.db"
+            shutil.copy2(generated_backup, automatic_rollback)
+
         shutil.rmtree(state_dir)
-        shutil.copytree(backup_dir, state_dir)
-        assert _database_digest(state_dir / "cleanarr.db") == backup_digest
+        if automatic_rollback is None:
+            shutil.copytree(backup_dir, state_dir)
+            assert _database_digest(state_dir / "cleanarr.db") == backup_digest
+        else:
+            state_dir.mkdir(mode=0o777)
+            shutil.copy2(automatic_rollback, state_dir / "cleanarr.db")
+            os.chmod(state_dir / "cleanarr.db", 0o666)
         _start_container(rollback_name, source.image, state_dir)
         _assert_source_state(source, state_dir / "cleanarr.db")
         _remove_container(rollback_name)

@@ -433,6 +433,27 @@ tooltips for icon-only actions. These are implementation targets, not release
 claims, and they do not relax preflight, ownership, freshness, or dry-run
 contracts.
 
+## v2.0.0 release-candidate preparation — 2026-09-03
+
+- The five UI-v2 delivery changes were merged in order through PRs
+  [#9](https://github.com/mambastick/Cleanarr/pull/9),
+  [#10](https://github.com/mambastick/Cleanarr/pull/10),
+  [#11](https://github.com/mambastick/Cleanarr/pull/11),
+  [#12](https://github.com/mambastick/Cleanarr/pull/12), and
+  [#13](https://github.com/mambastick/Cleanarr/pull/13), completing the
+  production cutover tracked by
+  [Epic #8](https://github.com/mambastick/Cleanarr/issues/8).
+- Version 2.0.0 is selected because this delivery replaces the production UI
+  and introduces a persisted administrator/viewer authorization boundary. It
+  does not remove a Tier 1 adapter, weaken fail-closed deletion behavior, or use
+  the major boundary to bypass the published deprecation policy.
+- The release candidate advances SQLite from schema v5 to v6 and runtime
+  configuration from schema v3 to v4. Publication remains gated on the complete
+  quality, package, container, security, pinned real-service compatibility, and
+  latest-stable v1.1.0 upgrade/automatic-backup/rollback evidence from the
+  release commit. Until those gates pass and a release tag is explicitly
+  authorized, v2.0.0 remains an unpublished candidate.
+
 ## Required 1.0 scope
 
 ### 1. Download clients and routing
