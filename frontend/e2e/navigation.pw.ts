@@ -79,11 +79,11 @@ test("matches the annotated sidebar and library-card interactions", async ({ pag
   expect(runtimeBounds).not.toBeNull()
   const sidebarCenter = collapsedSidebarBounds!.x + collapsedSidebarBounds!.width / 2
   expect(Math.abs((brandMarkSlotBounds!.x + brandMarkSlotBounds!.width / 2) - sidebarCenter)).toBeLessThan(1)
-  expect(Math.abs((expandBounds!.x + expandBounds!.width / 2) - sidebarCenter)).toBeLessThan(1)
   await expect.poll(async () => {
-    const [settledSidebar, settledRuntime] = await Promise.all([sidebar.boundingBox(), page.locator(".app-shell__sidebar .app-shell__runtime-status").boundingBox()])
-    if (!settledSidebar || !settledRuntime) return Number.POSITIVE_INFINITY
-    return Math.abs((settledRuntime.x + settledRuntime.width / 2) - (settledSidebar.x + settledSidebar.width / 2))
+    const [settledSidebar, settledToggle, settledRuntime] = await Promise.all([sidebar.boundingBox(), page.getByRole("button", { name: "Expand sidebar" }).boundingBox(), page.locator(".app-shell__sidebar .app-shell__runtime-status").boundingBox()])
+    if (!settledSidebar || !settledToggle || !settledRuntime) return Number.POSITIVE_INFINITY
+    const settledCenter = settledSidebar.x + settledSidebar.width / 2
+    return Math.max(Math.abs((settledToggle.x + settledToggle.width / 2) - settledCenter), Math.abs((settledRuntime.x + settledRuntime.width / 2) - settledCenter))
   }, { timeout: 2_000 }).toBeLessThan(1)
   const desktopFocusLocator = page.locator(".app-shell__navigation-highlight > .app-shell__nav-active-indicator")
   const activeDesktopIconLocator = page.locator('[data-slot="motion-highlight-item-container"][data-value="settings"] [data-slot="animated-icon"]')
@@ -117,7 +117,7 @@ test("matches the annotated sidebar and library-card interactions", async ({ pag
   await library.click()
   await library.hover()
   await expect(library).toHaveCSS("background-color", "rgba(0, 0, 0, 0)")
-  const libraryIcon = page.locator('[data-slot="motion-highlight-item-container"][data-value="library"] [data-slot="animated-icon"]')
+  const libraryIcon = page.locator('.app-shell__sidebar [data-slot="motion-highlight-item-container"][data-value="library"] [data-slot="animated-icon"]')
   await expect.poll(async () => {
     const focus = await desktopFocusLocator.boundingBox()
     const icon = await libraryIcon.boundingBox()
@@ -167,13 +167,13 @@ test("places user identity and the administrator safeguard in the Users header",
   await expect(page.locator("[data-initials=FA]").last()).toBeVisible()
   await expect(page.getByText("You", { exact: true })).toHaveCount(0)
   const usersIndicator = page.locator(".app-shell__navigation-highlight > .app-shell__nav-active-indicator")
-  const usersItem = page.locator('[data-slot="motion-highlight-item-container"][data-value="users"]')
+  const usersItem = page.locator('.app-shell__sidebar [data-slot="motion-highlight-item-container"][data-value="users"]')
   await expect.poll(async () => {
     const [indicatorBounds, itemBounds] = await Promise.all([usersIndicator.boundingBox(), usersItem.boundingBox()])
     if (!indicatorBounds || !itemBounds) return Number.POSITIVE_INFINITY
     return Math.max(Math.abs(indicatorBounds.x - itemBounds.x), Math.abs(indicatorBounds.y - itemBounds.y), Math.abs(indicatorBounds.width - itemBounds.width), Math.abs(indicatorBounds.height - itemBounds.height))
   }, { timeout: 2_000 }).toBeLessThan(1)
-  const usersCard = page.locator('[data-slot="card"]').last()
+  const usersCard = page.locator('[data-slot="card"]').filter({ has: page.getByLabel("Users: 1") })
   const cardPadding = await usersCard.evaluate((node) => {
     const style = getComputedStyle(node)
     return [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft]
