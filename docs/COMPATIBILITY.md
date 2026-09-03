@@ -57,10 +57,12 @@ versions and read contracts used by those scenario flows.
 
 The candidate rehearsal covers both directions with real released containers:
 `v0.2.11 -> candidate -> restored v0.2.11`,
-`v0.9.0 -> candidate -> restored v0.9.0`, and the latest stable
-`v1.0.0 -> candidate -> restored v1.0.0`. It checks the byte-identical verified
-backup, database/config schema migration, retained configuration, and retained
-activity history.
+`v0.9.0 -> candidate -> restored v0.9.0`,
+`v1.0.0 -> candidate -> restored v1.0.0`, and the latest stable
+`v1.1.0 -> candidate -> restored v1.1.0`. It checks the verified backup,
+database/config schema migration, retained configuration, and retained activity
+history. The v1.1.0 path additionally restores the automatic schema-v3 sidecar
+created before the candidate writes configuration schema 4 or database schema 6.
 
 Run the complete gate locally from a clean checkout:
 
@@ -75,27 +77,31 @@ are removed after the run. `CLEANARR_COMPAT_KEEP=1` may be used only for local
 diagnosis; it intentionally retains the stack and prints its generated project
 and runtime paths.
 
-## Post-1.0 command boundary
+## 2.0 continuity boundary
 
-The candidate profile now exercises normalized Downloads reads and idempotent
-pause/resume mapping for all four torrent adapters. This harness coverage does
-not retroactively extend a published release's certified contract. A release
-may claim these commands only when this exact pinned profile, container/package
-smoke, the latest stable v1.0.0-to-v5/config-v3 backup/restore rehearsal, and the
-populated v4-to-v5 migration test pass from the release commit.
+CleanArr v1.1.0 certified normalized Downloads reads and idempotent pause/resume
+mapping for all four torrent adapters. The v2.0 candidate carries those
+contracts forward without adding destructive authority. It may claim continuity
+only when this exact pinned profile, container/package smoke, the latest stable
+v1.1.0-to-v6/config-v4 backup/restore rehearsal, and the populated v5-to-v6 and
+config-v3-to-v4 migration tests pass from the release commit.
 
 The profile does **not** by itself certify seeding-stop policy execution,
 cleanup-candidate aggregation, first-run workflow, or batch APIs. A successful
 connection test, HTTP response, or cached observation is never compatibility
 evidence for those flows.
 
-## 1.x compatibility and deprecation policy
+## 1.x and 2.x compatibility and deprecation policy
 
 - The exact rows above are the tested support floor for 1.0. Patch releases of
   a dependency are not silently claimed compatible; CI must certify them first.
-- CleanArr 1.x keeps its documented webhook, configuration-export, database,
-  and adapter contracts backward compatible. Additive fields and migrations
-  may ship in minor releases.
+- CleanArr 2.0 carries forward the documented 1.x webhook,
+  configuration-export, database, adapter, and fail-closed safety contracts.
+  The major version identifies the new production UI and authenticated
+  administrator/viewer boundary; it does not remove a Tier 1 integration or
+  bypass an announced deprecation window.
+- CleanArr 2.x keeps those documented contracts backward compatible. Additive
+  fields and ordered migrations may ship in minor releases.
 - A planned removal or incompatible behavior change is announced in both
   languages for at least one CleanArr minor release and 90 days before removal.
 - A deprecated configuration key remains readable during that window and is

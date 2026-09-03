@@ -28,12 +28,13 @@
    [матрицы совместимости](COMPATIBILITY_RU.md).
 4. Влейте релизный коммит в `main`.
 
-Для будущего релиза с post-1.0 Downloads/deletion slice запустите candidate
-compatibility profile, доказывающий normalized reads и pause/resume для всех
-четырёх adapters, затем выполните upgrade с последней stable v1.0.0 до candidate
-schema v5/config-v3 и rollback через проверенный backup. Direct populated
-migration test v4-to-v5 остаётся отдельным evidence. Не называйте эти contracts
-сертифицированными, пока весь evidence не пройдёт из release commit.
+Для release candidate v2.0 запустите compatibility profile, доказывающий
+сохранение существующих contracts normalized reads и pause/resume для всех
+четырёх adapters, затем выполните upgrade с последней stable v1.1.0 до database
+schema 6 и runtime configuration schema 4 и rollback через автоматически
+созданный проверенный sidecar schema v3. Direct populated migration tests
+v5-to-v6 и config-v3-to-v4 остаются отдельным evidence. Не называйте candidate
+готовым, пока весь evidence не пройдёт из release commit.
 
 ## Публикация
 

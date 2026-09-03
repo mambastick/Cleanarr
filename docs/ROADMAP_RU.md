@@ -439,6 +439,27 @@ pagination и выбор размера карточек Library, явный с�
 а не заявление о релизе; они не ослабляют preflight, ownership, freshness или
 dry-run contracts.
 
+## Подготовка release candidate v2.0.0 — 2026-09-03
+
+- Пять изменений UI-v2 последовательно влиты через PR
+  [#9](https://github.com/mambastick/Cleanarr/pull/9),
+  [#10](https://github.com/mambastick/Cleanarr/pull/10),
+  [#11](https://github.com/mambastick/Cleanarr/pull/11),
+  [#12](https://github.com/mambastick/Cleanarr/pull/12) и
+  [#13](https://github.com/mambastick/Cleanarr/pull/13), завершая production
+  cutover из
+  [Epic #8](https://github.com/mambastick/Cleanarr/issues/8).
+- Версия 2.0.0 выбрана потому, что поставка заменяет production UI и вводит
+  сохраняемую authorization-границу administrator/viewer. Она не удаляет Tier
+  1 adapter, не ослабляет fail-closed deletion behavior и не использует major
+  boundary для обхода опубликованной deprecation policy.
+- Release candidate переводит SQLite со schema v5 на v6, а runtime
+  configuration — со schema v3 на v4. Публикация остаётся заблокированной до
+  полного прохождения quality, package, container, security, pinned real-service
+  compatibility и latest-stable v1.1.0 upgrade/automatic-backup/rollback gates
+  из release commit. Пока эти проверки не пройдут и release tag не будет явно
+  разрешён, v2.0.0 остаётся неопубликованным candidate.
+
 ## Обязательный scope 1.0
 
 ### 1. Torrent-клиенты и маршрутизация
