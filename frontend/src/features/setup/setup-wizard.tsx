@@ -3,7 +3,6 @@ import { Zap } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogBackdrop, DialogDescription, DialogPopup, DialogPortal, DialogTitle } from "@/components/ui/dialog"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import Stepper, { Step } from "@/components/ui/stepper"
 import { WizardGeneralStep, WizardServiceStep } from "@/features/setup/wizard-steps"
 import type { DashboardPayload } from "@/lib/dashboard"
@@ -65,7 +64,7 @@ export function SetupWizard({
           </Button>
         </div>
 
-        <ScrollArea className="min-h-0 flex-1" viewportClassName="h-full px-4 py-5 sm:px-7 sm:py-6">
+        <div role="region" aria-label={text.firstTimeSetup} tabIndex={0} className="min-h-0 flex-1 overflow-y-auto px-4 py-5 outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring/50 sm:px-7 sm:py-6">
         <Stepper
           onFinalStepCompleted={onClose}
           nextButtonText={text.next}
@@ -149,7 +148,7 @@ export function SetupWizard({
             />
           </Step>
         </Stepper>
-        </ScrollArea>
+        </div>
       </DialogPopup>
         </div>
       </DialogPortal>

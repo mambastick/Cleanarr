@@ -3,7 +3,6 @@ import { useEffect, type ReactNode, type RefObject } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogBackdrop, DialogClose, DialogDescription, DialogPopup, DialogPortal, DialogTitle } from "@/components/ui/dialog"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 
 export function Modal({
@@ -46,7 +45,7 @@ export function Modal({
               </div>
               <DialogClose render={<Button autoFocus type="button" variant="ghost" size="icon-sm" aria-label={closeLabel} title={closeLabel} />}><X /></DialogClose>
             </div>
-            <ScrollArea className="min-h-0 flex-1 overflow-hidden" viewportClassName="h-full overscroll-contain px-6 py-5">{children}</ScrollArea>
+            <div role="region" aria-label={title} tabIndex={0} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-5 outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring/50">{children}</div>
             {footer ? <div className="shrink-0 border-t bg-background px-6 py-4">{footer}</div> : null}
           </DialogPopup>
         </div>

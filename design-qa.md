@@ -31,6 +31,8 @@ Focused desktop comparison confirmed that the collapsed rail retains every desti
 2. **P1 — icon tooltip trigger props were initially swallowed by the animated-icon wrapper.** Fixed by rendering the actual button through the tooltip trigger. Verified with a real pointer hover; `Активность` is visible in `/tmp/cleanarr-desktop-tooltip-activity.png`.
 3. **P2 — Settings subsections were not reachable after moving Settings into the mobile More sheet.** Fixed by exposing all five sections in that sheet and giving More the shared active state for Users/Settings. Verified at 590 × 850.
 4. **P2 — a self-demoted administrator could retain stale administrative controls until reload.** Fixed by applying the returned current-user role to the active workspace immediately; backend authorization already resolves the persisted role per request.
+5. **P1 — the long torrent-client editor was visually clipped even though its custom viewport reported scroll styling.** Replaced the flex-trapped viewport with a bounded, keyboard-focusable native scroll region using themed scrollbar tokens. At 590 × 850, an actual wheel gesture moved the form from `scrollTop=0` to `scrollTop=472` while the fixed footer remained visible.
+6. **P2 — the disabled SSO Client Secret icon action had an accessible name but no hover tooltip.** Moved the tooltip trigger to a non-disabled wrapper so the localized explanation is available even while SSO is disabled; verified with a real pointer hover.
 
 No actionable P0, P1, or P2 visual or interaction findings remain. The production build reports only the existing large-chunk advisory; it does not affect this visual acceptance pass.
 

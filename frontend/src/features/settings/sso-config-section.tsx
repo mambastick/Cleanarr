@@ -2,6 +2,7 @@ import { Eye, EyeOff } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { FieldHint, FormField, SelectControl } from "@/features/settings/form-presentation"
 import type { SsoAuthMode } from "@/lib/auth"
 import type { UiTextMap } from "@/lib/i18n"
@@ -82,16 +83,21 @@ export function SsoConfigSection({
               disabled={!ssoEnabled}
               onChange={(e) => onDraftChange({ ...draft, sso_client_secret: e.target.value || null })}
             />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              aria-label={`${isSecretVisible ? text.hideToken : text.showToken}: ${text.ssoClientSecret}`}
-              onClick={onToggleSecretVisibility}
-              disabled={!ssoEnabled}
-            >
-              {isSecretVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={`${isSecretVisible ? text.hideToken : text.showToken}: ${text.ssoClientSecret}`}
+                  onClick={onToggleSecretVisibility}
+                  disabled={!ssoEnabled}
+                >
+                  {isSecretVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{isSecretVisible ? text.hideToken : text.showToken}: {text.ssoClientSecret}</TooltipContent>
+            </Tooltip>
           </div>
           <FieldHint text={text.ssoClientSecretHint} />
         </FormField>

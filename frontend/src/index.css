@@ -198,6 +198,9 @@
 
   ::selection { background: var(--selection); color: var(--foreground); }
   * { scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); }
+  *::-webkit-scrollbar { width: 0.625rem; height: 0.625rem; }
+  *::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+  *::-webkit-scrollbar-thumb { border: 2px solid var(--scrollbar-track); border-radius: 999px; background: var(--scrollbar-thumb); }
 
   #root {
     min-height: 100vh;
