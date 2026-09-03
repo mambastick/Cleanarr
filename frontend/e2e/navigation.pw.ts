@@ -77,13 +77,11 @@ test("matches the annotated sidebar and library-card interactions", async ({ pag
   expect(brandMarkSlotBounds).not.toBeNull()
   expect(expandBounds).not.toBeNull()
   expect(runtimeBounds).not.toBeNull()
-  const sidebarCenter = collapsedSidebarBounds!.x + collapsedSidebarBounds!.width / 2
-  expect(Math.abs((brandMarkSlotBounds!.x + brandMarkSlotBounds!.width / 2) - sidebarCenter)).toBeLessThan(1)
   await expect.poll(async () => {
-    const [settledSidebar, settledToggle, settledRuntime] = await Promise.all([sidebar.boundingBox(), page.getByRole("button", { name: "Expand sidebar" }).boundingBox(), page.locator(".app-shell__sidebar .app-shell__runtime-status").boundingBox()])
-    if (!settledSidebar || !settledToggle || !settledRuntime) return Number.POSITIVE_INFINITY
+    const [settledSidebar, settledMark, settledToggle, settledRuntime] = await Promise.all([sidebar.boundingBox(), page.locator(".app-shell__sidebar .app-shell__brand-mark-slot").boundingBox(), page.getByRole("button", { name: "Expand sidebar" }).boundingBox(), page.locator(".app-shell__sidebar .app-shell__runtime-status").boundingBox()])
+    if (!settledSidebar || !settledMark || !settledToggle || !settledRuntime) return Number.POSITIVE_INFINITY
     const settledCenter = settledSidebar.x + settledSidebar.width / 2
-    return Math.max(Math.abs((settledToggle.x + settledToggle.width / 2) - settledCenter), Math.abs((settledRuntime.x + settledRuntime.width / 2) - settledCenter))
+    return Math.max(Math.abs((settledMark.x + settledMark.width / 2) - settledCenter), Math.abs((settledToggle.x + settledToggle.width / 2) - settledCenter), Math.abs((settledRuntime.x + settledRuntime.width / 2) - settledCenter))
   }, { timeout: 2_000 }).toBeLessThan(1)
   const desktopFocusLocator = page.locator(".app-shell__navigation-highlight > .app-shell__nav-active-indicator")
   const activeDesktopIconLocator = page.locator('[data-slot="motion-highlight-item-container"][data-value="settings"] [data-slot="animated-icon"]')

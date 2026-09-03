@@ -172,7 +172,7 @@ type NavItem = { page: AppShellPage; icon: LucideIcon }
 
 const NAV_ICON_ANIMATION: Record<AppShellPage, IconAnimation> = {
   overview: "pulse",
-  library: "lift",
+  library: "pulse",
   downloads: "bounce",
   activity: "pulse",
   users: "lift",
