@@ -468,9 +468,9 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .library-card__delete { pointer-events: none; opacity: 0; transform: translate(-50%, -50%) scale(0.92); transition: opacity 160ms ease, transform 180ms ease; }
+  .library-card__delete { opacity: 0; transform: translate(-50%, -50%) scale(0.92); transition: opacity 160ms ease, transform 180ms ease; }
   .group:hover .library-card__delete,
-  .group:focus-within .library-card__delete { pointer-events: auto; opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  .group:focus-within .library-card__delete { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
 
 @media (max-width: 47.9375rem) {
