@@ -62,7 +62,7 @@ test("matches the annotated sidebar and library-card interactions", async ({ pag
   expect(sidebarBounds).not.toBeNull()
   expect(collapseBounds).not.toBeNull()
   expect(collapseBounds!.x + collapseBounds!.width).toBeLessThanOrEqual(sidebarBounds!.x + sidebarBounds!.width)
-  await expect(page.locator(".app-shell__brand")).toHaveCSS("border-bottom-style", "solid")
+  await expect(sidebar.locator(".app-shell__brand")).toHaveCSS("border-bottom-style", "solid")
   await page.getByRole("button", { name: "Collapse sidebar" }).click()
   await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible()
   await expect(page.getByRole("status", { name: /Runtime status/ }).first()).toBeVisible()
