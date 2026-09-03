@@ -5,7 +5,7 @@ test("downloader wizard uses client-specific test routes and invalidates visible
   const tested: string[] = []
   await boot(page, { handlers: [(request) => { if (!request.pathname.endsWith("/test")) return undefined; tested.push(request.pathname); return { body: { ok: true, message: "Fixture connection succeeded", version: "fixture", details: {} } } }] })
   await page.getByRole("button", { name: /setup wizard/i }).click(); await page.getByRole("button", { name: "Setup 6" }).click()
-  await expect(page.getByRole("heading", { name: "Downloader" })).toBeVisible(); await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0); await expect(page.getByText("Saves on continue")).toBeVisible(); await testInfo.attach("setup-downloader-followup", { body: await page.screenshot(), contentType: "image/png" })
+  await expect(page.getByRole("heading", { name: "Downloader" })).toBeVisible(); await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0); await expect(page.getByText("Saves on continue").last()).toBeVisible(); await testInfo.attach("setup-downloader-followup", { body: await page.screenshot(), contentType: "image/png" })
   const kind = page.locator("#wizard-downloader-kind")
   for (const [label, endpoint] of [["qBittorrent", "/api/config/downloaders/qbittorrent/test"], ["Transmission", "/api/config/downloaders/transmission/test"], ["Deluge", "/api/config/downloaders/deluge/test"], ["rTorrent", "/api/config/downloaders/rtorrent/test"]] as const) {
     await kind.click(); await page.getByRole("option", { name: label }).click(); await page.getByRole("button", { name: /test current profile/i }).click(); await expect.poll(() => tested.includes(endpoint)).toBeTruthy()

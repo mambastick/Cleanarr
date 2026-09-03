@@ -58,7 +58,7 @@ export function UsersPanel({ active, language, currentUsername, currentRole, fet
 
   return <section className="space-y-5">
     <header><h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight sm:text-3xl"><Users className="size-6 text-primary" />{text.title}</h1><p className="mt-1 text-sm text-muted-foreground">{text.description}</p></header>
-    <Card className="overflow-hidden p-4 sm:p-5">
+    <Card className="overflow-hidden px-4 py-4 sm:px-5 sm:py-5">
       <CardHeader className="gap-4 p-0">
         <div className="flex items-start justify-between gap-4"><CardTitle className="text-base">{text.title}</CardTitle><Badge variant="secondary" className="min-w-8 justify-center tabular-nums" aria-label={`${text.title}: ${users.length}`}>{users.length}</Badge></div>
         {currentUsername ? <div className="flex items-start gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" /><p><span>{text.signedInAs} <strong className="font-semibold text-foreground">{currentUsername}</strong>.</span>{adminCount === 1 ? <span className="ml-1">{text.lastAdmin}</span> : null}</p></div> : null}

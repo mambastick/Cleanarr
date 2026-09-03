@@ -89,7 +89,7 @@ export default function Stepper({
   }
 
   return (
-    <div className="flex flex-col" data-reduced-motion={reduceMotion ? "true" : "false"} aria-busy={isTransitioning || undefined} {...rest}>
+    <div className="flex flex-col" data-slot="stepper" data-reduced-motion={reduceMotion ? "true" : "false"} aria-busy={isTransitioning || undefined} {...rest}>
       <div
         className={`w-full overflow-hidden rounded-2xl border bg-card shadow-sm ${stepCircleContainerClassName}`}
       >

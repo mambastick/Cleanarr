@@ -80,7 +80,11 @@ test("matches the annotated sidebar and library-card interactions", async ({ pag
   const sidebarCenter = collapsedSidebarBounds!.x + collapsedSidebarBounds!.width / 2
   expect(Math.abs((brandMarkSlotBounds!.x + brandMarkSlotBounds!.width / 2) - sidebarCenter)).toBeLessThan(1)
   expect(Math.abs((expandBounds!.x + expandBounds!.width / 2) - sidebarCenter)).toBeLessThan(1)
-  expect(Math.abs((runtimeBounds!.x + runtimeBounds!.width / 2) - sidebarCenter)).toBeLessThan(1)
+  await expect.poll(async () => {
+    const [settledSidebar, settledRuntime] = await Promise.all([sidebar.boundingBox(), page.locator(".app-shell__sidebar .app-shell__runtime-status").boundingBox()])
+    if (!settledSidebar || !settledRuntime) return Number.POSITIVE_INFINITY
+    return Math.abs((settledRuntime.x + settledRuntime.width / 2) - (settledSidebar.x + settledSidebar.width / 2))
+  }, { timeout: 2_000 }).toBeLessThan(1)
   const desktopFocusLocator = page.locator(".app-shell__navigation-highlight > .app-shell__nav-active-indicator")
   const activeDesktopIconLocator = page.locator('[data-slot="motion-highlight-item-container"][data-value="settings"] [data-slot="animated-icon"]')
   await expect.poll(async () => {
@@ -102,7 +106,7 @@ test("matches the annotated sidebar and library-card interactions", async ({ pag
   expect(Math.abs((desktopFocus!.y + desktopFocus!.height / 2) - (activeDesktopIcon!.y + activeDesktopIcon!.height / 2))).toBeLessThan(1)
   await testInfo.attach("desktop-collapsed-focus-followup", { body: await page.screenshot(), contentType: "image/png" })
 
-  const tooltip = page.locator('[data-slot="tooltip-content"]')
+  const tooltip = page.locator('[data-slot="tooltip-content"][data-open]')
   for (const name of ["Overview", "Library", "Downloads", "Activity", "Users", "Settings"]) {
     await navButton(page, name).hover()
     await expect(tooltip).toHaveText(name)
