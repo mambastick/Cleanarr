@@ -14,9 +14,12 @@ test("setup dialog traps focus, supports escape/backdrop restoration, and remain
 
 test("settings Select is a themed portal and keeps English/Russian copy localized", async ({ page }) => {
   await boot(page)
-  const account = page.getByLabel("Account: fixture-admin"); await expect(account).toBeVisible()
-  await page.getByRole("button", { name: /Theme.*System/i }).click()
-  await expect(page.getByRole("button", { name: /Theme.*Light/i })).toBeFocused()
+  const account = page.getByLabel("Account: fixture-admin"); await expect(account).toBeVisible(); await account.click()
+  const accountPopover = page.getByRole("dialog", { name: "fixture-admin" })
+  await accountPopover.getByRole("button", { name: /Theme.*System/i }).click()
+  await expect(accountPopover.getByRole("button", { name: /Theme.*Light/i })).toBeFocused()
+  await page.keyboard.press("Escape")
+  await expect(account).toBeFocused()
   await navButton(page, "Settings").click()
   const language = page.locator("#settings-ui-language")
   await language.focus()

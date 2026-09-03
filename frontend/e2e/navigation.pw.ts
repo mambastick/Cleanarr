@@ -7,7 +7,7 @@ const mobileJob = { id: "mobile-job", item_type: "Movie", item_name: "Mobile fix
 async function expectNoWcagViolations(page: Page) { const result = await new AxeBuilder({ page }).withTags(WCAG_AA_TAGS).analyze(); expect(result.violations).toEqual([]) }
 async function expectViewportWidth(page: Page) { expect(await page.evaluate(() => ({ html: document.documentElement.scrollWidth <= document.documentElement.clientWidth, body: document.body.scrollWidth <= document.documentElement.clientWidth }))).toEqual({ html: true, body: true }) }
 
-test("uses isolated startup mocks, keyboard tabs, theme modes, and accessible desktop/mobile shells", async ({ page }) => {
+test("uses isolated startup mocks, keyboard tabs, theme modes, and accessible desktop/mobile shells", async ({ page }, testInfo) => {
   const api = await boot(page, { jobs: [mobileJob] })
   const overview = navButton(page, "Overview")
   await overview.focus(); await page.keyboard.press("Tab")
@@ -16,7 +16,7 @@ test("uses isolated startup mocks, keyboard tabs, theme modes, and accessible de
   const account = page.getByRole("button", { name: "Account: fixture-admin" }); await expect(account).toBeVisible(); await expect(account).toHaveText("F"); await account.click()
   const accountPopover = page.getByRole("dialog", { name: "fixture-admin" }); await expect(accountPopover).toBeVisible()
   const theme = accountPopover.getByRole("button", { name: /Theme.*System/i }); await theme.click(); await expect(accountPopover.getByRole("button", { name: /Theme.*Light/i })).toBeVisible(); await expect(page.locator("html")).not.toHaveClass(/dark/); await page.waitForTimeout(250); await expectNoWcagViolations(page)
-  await accountPopover.getByRole("button", { name: /Theme.*Light/i }).click(); await expect(accountPopover.getByRole("button", { name: /Theme.*Dark/i })).toBeVisible(); await expect(page.locator("html")).toHaveClass(/dark/); await page.waitForTimeout(250); await expectNoWcagViolations(page)
+  await accountPopover.getByRole("button", { name: /Theme.*Light/i }).click(); await expect(accountPopover.getByRole("button", { name: /Theme.*Dark/i })).toBeVisible(); await expect(page.locator("html")).toHaveClass(/dark/); await page.waitForTimeout(250); await expectNoWcagViolations(page); await testInfo.attach("desktop-account-popover-dark-followup", { body: await page.screenshot(), contentType: "image/png" })
   await accountPopover.getByRole("button", { name: /Theme.*Dark/i }).click(); await expect(accountPopover.getByRole("button", { name: /Theme.*System/i })).toBeVisible(); await expect(accountPopover.getByRole("button", { name: /Theme.*System/i })).toBeFocused(); await page.keyboard.press("Escape"); await expect(accountPopover).toBeHidden(); await expect(account).toBeFocused()
   await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "dark" }); await navButton(page, "Library").click(); await expect(page.locator('[data-reduced-motion="true"]:visible')).toHaveCount(1); await expect(page.locator("html")).toHaveClass(/dark/); await expectNoWcagViolations(page)
   await page.setViewportSize({ width: 375, height: 812 }); await expect(page.getByRole("navigation", { name: "Main navigation" })).toBeVisible(); const more = navButton(page, "More"); await expect(more).toBeVisible(); await more.click(); const moreDialog = page.getByRole("dialog", { name: "More" }); await expect(moreDialog.getByRole("button", { name: "Settings" })).toBeVisible(); await expect(moreDialog.getByRole("region", { name: "Storage" })).toBeVisible(); await expect(moreDialog.getByText("fixture-admin")).toBeVisible(); await expect(moreDialog.getByRole("button", { name: /Theme/ })).toBeVisible(); await expect(moreDialog.getByRole("button", { name: /Language/ })).toBeVisible(); await expect(moreDialog.getByRole("button", { name: "Log out" })).toBeVisible(); await moreDialog.getByRole("button", { name: "Close" }).click(); await expect(more).toBeFocused()
@@ -41,13 +41,13 @@ test("matches the annotated sidebar and library-card interactions", async ({ pag
   }))).toEqual({ overflows: true, firefox: "none", webkit: "none" })
   await expect(page.locator('[data-slot="motion-highlight-item-container"][data-value="settings"]')).toHaveAttribute("data-active", "true")
   const settingsIndicator = page.locator(".app-shell__settings-highlight > .app-shell__settings-active-indicator")
-  const settingsStart = await settingsIndicator.boundingBox()
+  const settingsStart = await settingsIndicator.evaluate((element) => Number.parseFloat((element as HTMLElement).style.top))
   await page.getByRole("button", { name: "Media library" }).click()
   await page.waitForTimeout(300)
-  const settingsEnd = await settingsIndicator.boundingBox()
-  expect(settingsStart).not.toBeNull()
-  expect(settingsEnd).not.toBeNull()
-  expect(settingsEnd!.y).toBeGreaterThan(settingsStart!.y)
+  const settingsEnd = await settingsIndicator.evaluate((element) => Number.parseFloat((element as HTMLElement).style.top))
+  expect(Number.isFinite(settingsStart)).toBe(true)
+  expect(Number.isFinite(settingsEnd)).toBe(true)
+  expect(settingsEnd).toBeGreaterThan(settingsStart)
   await testInfo.attach("desktop-settings-tree-followup", { body: await page.screenshot(), contentType: "image/png" })
 
   await page.getByRole("button", { name: "Collapse sidebar" }).click()
