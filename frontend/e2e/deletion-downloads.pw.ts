@@ -68,7 +68,14 @@ test("Cleanup candidates preserve unknown evidence and hand safe links into sing
     (request) => request.pathname === "/api/actions/delete/preview" ? { body: { generated_at: "2026-01-01T00:00:00Z", plan_hash: "safe-plan", plan: linkedPlan } } : undefined,
     (request) => request.pathname === "/api/actions/delete/batches/preview" ? { body: { generated_at: "2026-01-01T00:00:00Z", batch_hash: "safe-batch", ready_count: 1, blocked_count: 0, children: [{ mutation_identity: "safe-child", display_name: "Safe linked title", status: "ready", plan_hash: "safe-plan", plan: linkedPlan, blocked_code: null, blocked_message: null }] } } : undefined,
   ] })
-  await navButton(page, /downloads/i).click(); await page.getByRole("tab", { name: "Cleanup candidates" }).click(); await expect(page.getByText("Safe linked title")).toBeVisible(); await expect(page.getByText("Missing link fixture")).toBeVisible(); await expect(page.getByText("Playback unknown").first()).toBeVisible(); await expect(page.getByText(/no safe library link/i)).toBeVisible(); await expect(page.getByRole("checkbox", { name: /missing link fixture/i })).toHaveCount(0)
+  await navButton(page, /downloads/i).click()
+  const downloadsTabs = page.getByRole("tablist", { name: "Downloads" })
+  await expect(downloadsTabs.locator("[data-slot=tabs-highlight]")).toHaveCount(1)
+  expect(await downloadsTabs.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true)
+  await page.getByRole("tab", { name: "Cleanup candidates" }).click()
+  await expect(page.getByRole("combobox", { name: "Sort" })).toContainText("Recently added")
+  await expect(page.getByRole("combobox", { name: "Order" })).toContainText("Descending")
+  await expect(page.getByText("Safe linked title")).toBeVisible(); await expect(page.getByText("Missing link fixture")).toBeVisible(); await expect(page.getByText("Playback unknown").first()).toBeVisible(); await expect(page.getByText(/no safe library link/i)).toBeVisible(); await expect(page.getByRole("checkbox", { name: /missing link fixture/i })).toHaveCount(0)
   const review = page.getByRole("button", { name: "Review deletion plan: Safe linked title" }); await review.click(); const single = page.getByRole("dialog", { name: /safe linked title/i }); await expect(single).toBeVisible(); await expect(single.getByText("Safe linked title").first()).toBeVisible(); await single.getByRole("button", { name: "Cancel" }).click(); await expect(review).toBeFocused()
   await page.getByRole("checkbox", { name: "Select: Safe linked title" }).check(); const batchTrigger = page.getByRole("button", { name: "Review selected cleanup" }); await batchTrigger.click(); await expect(page.getByRole("alertdialog", { name: /review batch deletion/i })).toBeVisible(); const batchRequest = api.last("/api/actions/delete/batches/preview", "POST"); expect(batchRequest?.body).toContain("Safe linked title")
 })

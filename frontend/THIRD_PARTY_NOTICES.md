@@ -1,7 +1,8 @@
 # Third-party UI provenance
 
-- **Animate UI Base Tabs**: local `src/components/ui/tabs.tsx` is an API-compatible
-  adaptation of the [official Base Tabs reference](https://animate-ui.com/docs/components/base/tabs).
+- **Animate UI Tabs**: local `src/components/ui/tabs.tsx` adapts the animated highlight
+  from the [official Tabs reference](https://animate-ui.com/docs/components/animate/tabs)
+  while retaining the project's Base UI keyboard and ARIA semantics.
   The reference is distributed by Animate UI under **MIT + Commons Clause**; no registry
   code importing the obsolete `@base-ui-components/react` package was copied.
 - **React Bits FadeContent**: downloader profile rows use a local, presentation-only

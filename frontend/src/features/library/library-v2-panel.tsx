@@ -328,7 +328,7 @@ function LibraryControls({ text, query, setQuery, sort, setSort, direction, setD
   return (
     <div className="flex flex-wrap items-center gap-2">
       <div className="relative min-w-[220px] flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input className="pl-9" aria-label={text.search} placeholder={text.search} value={query} onChange={(event) => setQuery(event.target.value)} /></div>
-      <Select value={sort} onValueChange={(value) => setSort(value as LibrarySort)}><SelectTrigger aria-label={text.sort} className="w-[150px]"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="added">{text.added}</SelectItem><SelectItem value="title">{text.titleSort}</SelectItem><SelectItem value="size">{text.size}</SelectItem></SelectContent></Select>
+      <Select items={{ added: text.added, title: text.titleSort, size: text.size }} value={sort} onValueChange={(value) => setSort(value as LibrarySort)}><SelectTrigger aria-label={text.sort} className="w-[180px]"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="added">{text.added}</SelectItem><SelectItem value="title">{text.titleSort}</SelectItem><SelectItem value="size">{text.size}</SelectItem></SelectContent></Select>
       <Button variant="outline" size="icon" aria-label={direction === "desc" ? text.descending : text.ascending} onClick={() => setDirection(direction === "desc" ? "asc" : "desc")}><DirectionIcon aria-hidden="true" /></Button>
     </div>
   )
