@@ -52,6 +52,7 @@ test("matches the annotated sidebar and library-card interactions", async ({ pag
 
   await page.getByRole("button", { name: "Collapse sidebar" }).click()
   await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible()
+  await page.waitForTimeout(450)
   await expect(page.getByRole("status", { name: /Runtime status/ }).first()).toBeVisible()
   await expect(page.getByRole("region", { name: "Storage" }).first()).toBeVisible()
   const desktopFocus = await page.locator(".app-shell__navigation-highlight > .app-shell__nav-active-indicator").boundingBox()
