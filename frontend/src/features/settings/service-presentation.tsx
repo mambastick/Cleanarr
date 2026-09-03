@@ -132,7 +132,7 @@ export function StatusPill({
   tone,
   label,
 }: {
-  tone: "blue" | "green" | "red" | "neutral"
+  tone: "blue" | "green" | "yellow" | "red" | "neutral"
   label: string
 }) {
   return (
@@ -143,6 +143,8 @@ export function StatusPill({
           "border-primary/30 bg-primary/10 text-primary",
         tone === "green" &&
           "border-status-success-border bg-status-success-bg text-status-success",
+        tone === "yellow" &&
+          "border-status-warning-border bg-status-warning-bg text-status-warning",
         tone === "red" &&
           "border-status-danger-border bg-status-danger-bg text-status-danger",
         tone === "neutral" && "border-border bg-background text-foreground",
@@ -153,6 +155,7 @@ export function StatusPill({
           "size-1.5 rounded-full",
           tone === "blue" && "bg-primary",
           tone === "green" && "bg-status-success",
+          tone === "yellow" && "bg-status-warning",
           tone === "red" && "bg-status-danger",
           tone === "neutral" && "bg-muted-foreground",
         )}
