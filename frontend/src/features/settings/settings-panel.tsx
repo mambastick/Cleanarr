@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { SeedingStopPolicyFields } from "@/features/downloads/seeding-stop-policy-fields"
 import { stopPolicyIsValid } from "@/lib/downloads"
 import { FieldHint, FormField, SelectControl } from "@/features/settings/form-presentation"
@@ -28,6 +29,8 @@ export function SettingsPanel({
   onEditService,
   text,
   language,
+  settingsSection,
+  onSettingsSectionChange,
 }: {
   config: RuntimeConfigPayload | null
   isConfigLoading: boolean
@@ -36,6 +39,8 @@ export function SettingsPanel({
   onEditService: (family: ServiceFamily, service: ServiceRecord, trigger: HTMLButtonElement) => void
   text: UiTextMap
   language: UiLanguage
+  settingsSection?: "general" | "services"
+  onSettingsSectionChange?: (section: "general" | "services") => void
 }) {
   const general = config?.general ?? null
   const [draft, setDraft] = useState<GeneralConfig | null>(null)
@@ -43,6 +48,13 @@ export function SettingsPanel({
   const [tokenCopied, setTokenCopied] = useState(false)
   const [isTokenVisible, setIsTokenVisible] = useState(false)
   const [isSSOSecretVisible, setIsSSOSecretVisible] = useState(false)
+  const [uncontrolledSection, setUncontrolledSection] = useState<"general" | "services">("general")
+  const activeSection = settingsSection ?? uncontrolledSection
+  const setActiveSection = (value: string | null) => {
+    if (value !== "general" && value !== "services") return
+    if (settingsSection === undefined) setUncontrolledSection(value)
+    onSettingsSectionChange?.(value)
+  }
 
   useEffect(() => {
     setDraft(general ? structuredClone(general) : null)
@@ -69,7 +81,13 @@ export function SettingsPanel({
 
   return (
     <section className="space-y-5">
-      {/* General settings — inline form */}
+      <div><h1 className="text-xl font-semibold">{text.settings}</h1><p className="text-sm text-muted-foreground">{text.runtimeSettingsDescription}</p></div>
+      <Tabs value={activeSection} onValueChange={setActiveSection}>
+        <TabsList aria-label={text.settings}>
+          <TabsTrigger value="general">{text.general}</TabsTrigger>
+          <TabsTrigger value="services">{text.connectedServices}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="general">
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
@@ -205,6 +223,8 @@ export function SettingsPanel({
         </CardContent>
       </Card>
 
+        </TabsContent>
+        <TabsContent value="services">
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
@@ -233,10 +253,8 @@ export function SettingsPanel({
                   </Button>
                 </div>
                 {services.length > 0 ? (
-                  <div className="mt-3">
-                    <div role="table" className="space-y-2">
-                      {services.map((service) => <div role="row" key={service.id} className="grid gap-2 rounded-lg border bg-card p-2 sm:grid-cols-[minmax(8rem,1fr)_minmax(8rem,1.5fr)_auto] sm:items-center"><div role="cell" className="min-w-0"><p className="truncate text-sm font-medium">{service.name}</p></div><div role="cell" className="truncate text-xs text-muted-foreground">{family === "downloaders" ? getDownloaderLabel(service.kind as DownloaderKind) : service.url}</div><div role="cell" className="flex items-center justify-between gap-2 sm:justify-end">{service.is_default && <Badge variant="outline">{text.defaultLabel}</Badge>}<StatusPill tone={service.enabled ? "green" : "blue"} label={service.enabled ? text.enabled : text.disabled} /><Button variant="ghost" size="sm" onClick={(event) => onEditService(family, service, event.currentTarget)}>{text.edit}</Button></div></div>)}
-                    </div>
+                  <div className="mt-3 space-y-2">
+                    {services.map((service) => <div key={service.id} className="rounded-lg border bg-card p-3"><div className="flex flex-wrap items-center justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-medium">{service.name}</p><p className="mt-0.5 text-xs text-muted-foreground">{family === "downloaders" ? getDownloaderLabel(service.kind as DownloaderKind) : SERVICE_META[family].title}</p></div><div className="flex items-center gap-2">{service.is_default && <Badge variant="outline">{text.defaultLabel}</Badge>}<StatusPill tone={service.enabled ? "green" : "blue"} label={service.enabled ? text.enabled : text.disabled} /><Button variant="ghost" size="sm" onClick={(event) => onEditService(family, service, event.currentTarget)}>{text.edit}</Button></div></div><details className="mt-2 text-xs text-muted-foreground"><summary className="cursor-pointer select-none hover:text-foreground">{text.serviceDetails}</summary><code className="mt-2 block break-all rounded-md bg-muted/60 p-2">{service.url}</code></details></div>)}
                   </div>
                 ) : (
                   <p className="mt-3 text-xs text-muted-foreground">{text.notConfigured}</p>
@@ -246,7 +264,8 @@ export function SettingsPanel({
           })}
         </CardContent>
       </Card>
-
+        </TabsContent>
+      </Tabs>
     </section>
   )
 }

@@ -1,14 +1,15 @@
-import { Activity, Download, Film, PenSquare, Play, RefreshCw, Server, ShieldAlert, Star, Tv, Webhook, Zap, type LucideIcon } from "lucide-react"
+import { Activity, Download, Film, PenSquare, Play, RefreshCw, Server, ShieldAlert, Star, Tv, Zap, type LucideIcon } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { EmptyState, StatusDot, StatusPill } from "@/features/settings/service-presentation"
 import type { DashboardActivity, DashboardPayload, HealthStatus } from "@/lib/dashboard"
 import type { UiTextMap } from "@/lib/i18n"
 import { getStatusLabel, SETUP_STEPS } from "@/lib/service-config"
-import { formatMediaTitle } from "@/lib/status-format"
+import { formatMediaTitle, getWebhookStatusLabel } from "@/lib/status-format"
 import { cn } from "@/lib/utils"
 import { useStorage, type StorageFetchJson, type StorageResponse, type StorageVolume } from "@/lib/storage"
 import { STORAGE_COPY, type StorageCopy } from "./storage-copy"
@@ -80,11 +81,12 @@ function ServiceHealthCard({
           {getDashboardServiceRole(service.name, service.role, text)}
         </p>
       </div>
-      {service.url ? (
-        <code className="block truncate text-[11px] text-muted-foreground">{service.url}</code>
-      ) : (
-        <span className="text-[11px] text-muted-foreground italic">{text.notConfigured}</span>
-      )}
+      <details className="text-xs text-muted-foreground">
+        <summary className="cursor-pointer select-none text-xs text-muted-foreground hover:text-foreground">{text.serviceDetails}</summary>
+        <div className="mt-2 rounded-md bg-muted/60 p-2">
+          {service.url ? <code className="block break-all text-[11px]">{service.url}</code> : <span>{text.notConfigured}</span>}
+        </div>
+      </details>
     </div>
   )
 }
@@ -132,6 +134,33 @@ export function DashboardPanel({
   const storageCopy = STORAGE_COPY[storageLanguage]
   const effectiveStorageLoading = storage === undefined ? internalStorage.loading : storageLoading
   const effectiveStorageError = storage === undefined ? internalStorage.error : storageError
+  const [isChangingRuntime, setIsChangingRuntime] = useState(false)
+  const [requestedRuntime, setRequestedRuntime] = useState<string | null>(null)
+  const runtimeRequestRef = useRef<string | null>(null)
+  const runtimeValue = isLive ? "live" : "dry-run"
+
+  useEffect(() => {
+    if (requestedRuntime === runtimeValue) {
+      runtimeRequestRef.current = null
+      setRequestedRuntime(null)
+    }
+  }, [requestedRuntime, runtimeValue])
+
+  const changeRuntime = async (next: string | null) => {
+    if (next == null || next === runtimeValue || isChangingRuntime || runtimeRequestRef.current != null) return
+    runtimeRequestRef.current = next
+    setRequestedRuntime(next)
+    setIsChangingRuntime(true)
+    try {
+      await onToggleDryRun()
+    } catch (error) {
+      runtimeRequestRef.current = null
+      setRequestedRuntime(null)
+      throw error
+    } finally {
+      setIsChangingRuntime(false)
+    }
+  }
 
   return (
     <section className="space-y-5">
@@ -177,33 +206,20 @@ export function DashboardPanel({
               {text.setupWizard}
             </Button>
           )}
-          {/* Mode toggle */}
-          <div className="flex items-center rounded-lg border bg-background p-0.5">
-            <button
-              onClick={() => isLive ? void onToggleDryRun() : undefined}
-              className={cn(
-                "flex min-h-11 items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors",
-                !isLive
-                  ? "bg-status-warning-bg text-status-warning"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <ShieldAlert className="size-3.5" />
-              {text.dryRun}
-            </button>
-            <button
-              onClick={() => !isLive ? void onToggleDryRun() : undefined}
-              className={cn(
-                "flex min-h-11 items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors",
-                isLive
-                  ? "bg-status-success-bg text-status-success"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Zap className="size-3.5" />
-              {text.live}
-            </button>
-          </div>
+          <Tabs value={runtimeValue} onValueChange={changeRuntime} aria-label={text.runtimeSettings}>
+            <TabsList>
+              <TabsTrigger value="dry-run" disabled={isChangingRuntime}>
+                <ShieldAlert className="size-3.5" />
+                {text.dryRun}
+              </TabsTrigger>
+              <TabsTrigger value="live" disabled={isChangingRuntime}>
+                <Zap className="size-3.5" />
+                {text.live}
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="dry-run" className="max-w-56 text-xs text-muted-foreground">{text.dryRunDescription}</TabsContent>
+            <TabsContent value="live" className="max-w-56 text-xs text-muted-foreground">{text.liveModeDescription}</TabsContent>
+          </Tabs>
         </div>
       </div>
 
@@ -232,93 +248,34 @@ export function DashboardPanel({
         )}
       </div>
 
-      {/* Webhook status + latest event */}
-      <div className="grid gap-5 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Webhook className="size-4 text-primary" />
-              {text.webhookStatus}
-            </CardTitle>
-            <CardDescription>{text.webhookStatusDescription}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {webhookStatus?.attempted_at ? (
-              <div className="space-y-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <StatusPill
-                    tone={webhookStatus.outcome === "processed" ? "green" : "red"}
-                    label={webhookStatus.outcome}
-                  />
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(webhookStatus.attempted_at).toLocaleString()}
-                  </span>
-                </div>
-                <p className="text-sm">{webhookStatus.message}</p>
-                {webhookStatus.item_name && (
-                  <p className="text-xs text-muted-foreground">{webhookStatus.item_name}</p>
-                )}
-              </div>
-            ) : (
-              <EmptyState
-                title={text.noWebhookReceived}
-                description={text.sendWebhookForStatus}
-              />
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Activity className="size-4 text-status-success" />
-              {text.latestEvent}
-            </CardTitle>
-            <CardDescription>{text.latestEventDescription}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {latestActivity ? (
-              <div className="space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                <p className="truncate text-sm font-medium">
-                  {formatMediaTitle(latestActivity.result.item_type, latestActivity.result.name)}
-                </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {new Date(latestActivity.processed_at).toLocaleString()}
-                    </p>
-                  </div>
-                  <StatusPill
-                    tone={latestActivity.result.status === "partial_failure" ? "red" : "green"}
-                    label={latestActivity.result.status}
-                  />
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {Object.entries(latestActivity.action_summary).map(([k, v]) => (
-                    <Badge key={k} variant="outline" className="text-xs">
-                      {k}: {v}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            ) : (
-            <EmptyState
-                title={text.noActivity}
-                description={text.noWebhookActivity}
-              />
-            )}
-          </CardContent>
-        </Card>
-      </div>
+      <RecentActivitySummary text={text} latestActivity={latestActivity} webhookStatus={webhookStatus} />
     </section>
   )
 }
 
 function StorageHealthCard({ data, loading, error, text, onRefresh }: { data: StorageResponse | null | undefined; loading: boolean; error: string | null; text: StorageCopy; onRefresh: () => void }) {
-  return <Card><CardHeader className="flex flex-row items-start justify-between gap-3 pb-3"><div><CardTitle className="text-base">{text.title}</CardTitle>{data ? <CardDescription>{storageStatusLabel(data.status, text)}</CardDescription> : null}</div><Button variant="outline" size="sm" onClick={onRefresh} disabled={loading}><RefreshCw className={cn(loading && "animate-spin")} />{text.refresh}</Button></CardHeader><CardContent>{error ? <div className="flex items-center justify-between gap-3 rounded-lg border border-status-danger/30 bg-status-danger/5 p-3 text-sm"><span>{text.unavailable}</span><Button variant="outline" size="sm" onClick={onRefresh}>{text.retry}</Button></div> : loading && !data ? <p className="text-sm text-muted-foreground">{text.loading}</p> : data ? <div className="space-y-3"><div className="flex flex-wrap items-center gap-2"><StatusPill tone={data.status === "critical" ? "red" : data.status === "warning" ? "yellow" : data.status === "healthy" ? "green" : "blue"} label={storageStatusLabel(data.status, text)} />{data.partial || data.freshness !== "fresh" ? <span className="text-xs text-muted-foreground">{data.partial ? text.partial : text.stale}</span> : null}</div><div role="table" aria-label={text.title} className="grid gap-2">{data.volumes.map((volume) => <StorageVolumeRow key={volume.volume_id} volume={volume} text={text} />)}</div></div> : <p className="text-sm text-muted-foreground">{text.unknown}</p>}</CardContent></Card>
+  return <Card><CardHeader className="flex flex-row items-start justify-between gap-3 pb-3"><div><CardTitle className="text-base">{text.title}</CardTitle><CardDescription>{text.provenance}</CardDescription></div><Button variant="outline" size="sm" onClick={onRefresh} disabled={loading}><RefreshCw className={cn(loading && "animate-spin")} />{text.refresh}</Button></CardHeader><CardContent>{error ? <div className="flex items-center justify-between gap-3 rounded-lg border border-status-danger/30 bg-status-danger/5 p-3 text-sm"><span>{text.unavailable}</span><Button variant="outline" size="sm" onClick={onRefresh}>{text.retry}</Button></div> : loading && !data ? <p className="text-sm text-muted-foreground">{text.loading}</p> : data ? <div className="space-y-3"><div className="flex flex-wrap items-center gap-2"><StatusPill tone={data.status === "critical" ? "red" : data.status === "warning" ? "yellow" : data.status === "healthy" ? "green" : "blue"} label={storageStatusLabel(data.status, text)} />{data.partial || data.freshness !== "fresh" ? <span className="text-xs text-muted-foreground">{data.partial ? text.partial : text.stale}</span> : null}</div><div role="table" aria-label={text.title} className="grid gap-2">{data.volumes.map((volume) => <StorageVolumeRow key={volume.volume_id} volume={volume} text={text} />)}</div></div> : <p className="text-sm text-muted-foreground">{text.unknown}</p>}</CardContent></Card>
 }
 function StorageVolumeRow({ volume, text }: { volume: StorageVolume; text: StorageCopy }) { const total = volume.total_bytes ?? volume.total; const free = volume.free_bytes ?? volume.free; const capacity = free != null ? `${text.free} ${formatBytes(free)}${volume.free_percent != null ? ` · ${volume.free_percent.toFixed(1)}%` : ""}` : volume.free_percent == null ? text.unknown : `${text.free} ${volume.free_percent.toFixed(1)}%`; return <div role="row" className="grid gap-2 rounded-lg border p-3 text-sm sm:grid-cols-[minmax(0,1.4fr)_minmax(8rem,1fr)_auto] sm:items-center"><div role="cell" className="min-w-0"><p className="truncate font-medium">{volume.display_label}</p><p className="truncate text-xs text-muted-foreground">{volume.service_type} · {volume.service_id}</p></div><div role="cell" className="text-xs text-muted-foreground">{capacity}{total != null ? ` / ${formatBytes(total)}` : ""}</div><div role="cell" className="flex items-center gap-2 sm:justify-end"><StatusPill tone={volume.status === "critical" ? "red" : volume.status === "warning" ? "yellow" : volume.status === "healthy" ? "green" : "blue"} label={storageStatusLabel(volume.status, text)} />{volume.possible_duplicate ? <span className="sr-only">{text.possibleDuplicate}</span> : null}</div></div> }
 function storageStatusLabel(status: StorageResponse["status"] | StorageVolume["status"], text: StorageCopy) { return status === "critical" ? text.critical : status === "warning" ? text.warning : status === "healthy" ? text.healthy : text.unknown }
 function formatBytes(bytes: number) { if (!bytes) return "0 B"; const index = Math.min(4, Math.floor(Math.log(bytes) / Math.log(1024))); return `${(bytes / 1024 ** index).toFixed(1)} ${["B", "KB", "MB", "GB", "TB"][index]}` }
+
+function RecentActivitySummary({ text, latestActivity, webhookStatus }: { text: UiTextMap; latestActivity: DashboardActivity | null; webhookStatus: DashboardPayload["webhook_status"] | undefined }) {
+  const latestIsProcessed = latestActivity && (!webhookStatus?.attempted_at || Date.parse(latestActivity.processed_at) >= Date.parse(webhookStatus.attempted_at))
+  if (!latestActivity && !webhookStatus?.attempted_at) return <Card><CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><Activity className="size-4 text-status-success" />{text.recentActivitySummary}</CardTitle><CardDescription>{text.recentActivitySummaryDescription}</CardDescription></CardHeader><CardContent><EmptyState title={text.noActivity} description={text.noWebhookActivity} /></CardContent></Card>
+  const item = latestIsProcessed && latestActivity ? formatMediaTitle(latestActivity.result.item_type, latestActivity.result.name) : webhookStatus?.item_name ?? text.item
+  const status = latestIsProcessed && latestActivity ? latestActivity.result.status : webhookStatus?.result_status ?? webhookStatus?.outcome ?? "unknown"
+  const statusLabel = latestIsProcessed && latestActivity ? friendlyOutcome(status, text) : webhookStatus?.result_status ? friendlyOutcome(webhookStatus.result_status, text) : getWebhookStatusLabel(webhookStatus?.outcome ?? "", text)
+  const occurredAt = latestIsProcessed && latestActivity ? latestActivity.processed_at : webhookStatus?.attempted_at
+  return <Card><CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><Activity className="size-4 text-status-success" />{text.recentActivitySummary}</CardTitle><CardDescription>{text.recentActivitySummaryDescription}</CardDescription></CardHeader><CardContent className="space-y-3"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="text-sm font-medium">{latestIsProcessed ? text.recentActivityProcessed.replace("{{item}}", item) : text.recentActivityWebhook.replace("{{item}}", item)}</p>{occurredAt ? <p className="mt-1 text-xs text-muted-foreground">{new Date(occurredAt).toLocaleString()}</p> : null}</div><StatusPill tone={status === "partial_failure" || status === "failed" ? "red" : "green"} label={statusLabel} /></div><details className="text-xs text-muted-foreground"><summary className="cursor-pointer select-none hover:text-foreground">{text.technicalDetails}</summary><div className="mt-2 space-y-1 rounded-md bg-muted/60 p-2">{latestIsProcessed && latestActivity ? Object.entries(latestActivity.action_summary).map(([code, count]) => <p key={code}><code>{code}</code>: {count}</p>) : <p>{webhookStatus?.message}</p>}</div></details></CardContent></Card>
+}
+
+function friendlyOutcome(status: string, text: UiTextMap) {
+  if (status === "dry_run") return text.dryRun
+  if (status === "ignored") return text.skipped
+  if (status === "already_absent") return text.deleted
+  const label = getStatusLabel(status, text)
+  return label === status ? text.unknown : label
+}
 
 // ─── Activity panel ───────────────────────────────────────────────────────────

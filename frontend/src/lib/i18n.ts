@@ -290,6 +290,15 @@ export type UiTextKey =
   | "skipped"
   | "unknown"
   | "downloadsActive"
+  | "storageProvenance"
+  | "serviceDetails"
+  | "recentActivitySummary"
+  | "recentActivitySummaryDescription"
+  | "recentActivityProcessed"
+  | "recentActivityWebhook"
+  | "eventDetails"
+  | "technicalDetails"
+  | "viewDetails"
 
 export type UiTextMap = Record<UiTextKey, string>
 
@@ -301,6 +310,15 @@ export const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     library: "Library",
     downloads: "Downloads",
     downloadsActive: "active",
+    storageProvenance: "Storage is read from each configured Radarr and Sonarr root folder and disk-space endpoint. Paths and credentials stay hidden; preview data is never used here.",
+    serviceDetails: "Technical details",
+    recentActivitySummary: "Recent activity",
+    recentActivitySummaryDescription: "The latest delivery or cleanup outcome, with technical details available when needed.",
+    recentActivityProcessed: "Cleanup processed for {{item}}",
+    recentActivityWebhook: "Webhook received for {{item}}",
+    eventDetails: "Event details",
+    technicalDetails: "Technical details",
+    viewDetails: "View details",
     live: "Live",
     dryRun: "Dry run",
     liveMode: "Live mode",
@@ -588,6 +606,15 @@ export const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     library: "Библиотека",
     downloads: "Загрузки",
     downloadsActive: "активно",
+    storageProvenance: "Данные о хранилище поступают из root-папок и endpoint’ов свободного места каждого настроенного Radarr и Sonarr. Пути и учётные данные скрыты; тестовые данные здесь не используются.",
+    serviceDetails: "Технические сведения",
+    recentActivitySummary: "Последняя активность",
+    recentActivitySummaryDescription: "Последний результат доставки или очистки; технические сведения доступны при необходимости.",
+    recentActivityProcessed: "Очистка обработана для {{item}}",
+    recentActivityWebhook: "Webhook получен для {{item}}",
+    eventDetails: "Сведения о событии",
+    technicalDetails: "Технические сведения",
+    viewDetails: "Открыть сведения",
     live: "Включен",
     dryRun: "Тестовый режим",
     liveMode: "Рабочий режим",
