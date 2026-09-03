@@ -34,6 +34,7 @@ Focused desktop comparison confirmed that the collapsed rail retains every desti
 5. **P1 — the long torrent-client editor was visually clipped even though its custom viewport reported scroll styling.** Replaced the flex-trapped viewport with a bounded, keyboard-focusable native scroll region using themed scrollbar tokens. At 590 × 850, an actual wheel gesture moved the form from `scrollTop=0` to `scrollTop=472` while the fixed footer remained visible.
 6. **P2 — the disabled SSO Client Secret icon action had an accessible name but no hover tooltip.** Moved the tooltip trigger to a non-disabled wrapper so the localized explanation is available even while SSO is disabled; verified with a real pointer hover.
 7. **P1 — the browser fixture and assertions still reflected the pre-role, pre-account-redesign shell.** Added the explicit administrator fixture role, updated theme checks for the new directly accessible desktop controls, localized the downloader profile expectation, and retargeted the setup-wizard scroll assertion to its labelled native region.
+8. **P1 — expanding the five-section Settings tree at a 720 px desktop height pushed the account actions outside the viewport.** The sidebar navigation is now its own keyboard-focusable scroll region while runtime, storage, theme, language, and logout controls remain pinned and reachable.
 
 No actionable P0, P1, or P2 visual or interaction findings remain. The production build reports only the existing large-chunk advisory; it does not affect this visual acceptance pass.
 

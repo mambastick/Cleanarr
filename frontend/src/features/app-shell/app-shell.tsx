@@ -413,10 +413,12 @@ export function AppShell({ activePage, onPageChange, onNavigate, settingsSection
     <div className={cn("app-shell", collapsed && "app-shell--sidebar-collapsed")}>
       <aside className="app-shell__sidebar" aria-label={labels.navigation}>
         <Brand labels={labels} collapsed={collapsed} onToggle={() => setCollapsed((value) => !value)} />
-        <LayoutGroup id="desktop-sidebar-navigation">
-          <NavigationItems items={NAV_ITEMS.filter(({ page }) => page !== "settings" && (canAdmin || page !== "users"))} activePage={activePage} labels={labels} onNavigate={navigate} collapsed={collapsed} />
-          {canAdmin ? <SettingsNavigation activePage={activePage} settingsSection={settingsSection} labels={labels} onNavigate={navigate} onSettingsSectionChange={onSettingsSectionChange} collapsed={collapsed} /> : null}
-        </LayoutGroup>
+        <div className="app-shell__navigation-scroll" role="region" aria-label={labels.navigation} tabIndex={0}>
+          <LayoutGroup id="desktop-sidebar-navigation">
+            <NavigationItems items={NAV_ITEMS.filter(({ page }) => page !== "settings" && (canAdmin || page !== "users"))} activePage={activePage} labels={labels} onNavigate={navigate} collapsed={collapsed} />
+            {canAdmin ? <SettingsNavigation activePage={activePage} settingsSection={settingsSection} labels={labels} onNavigate={navigate} onSettingsSectionChange={onSettingsSectionChange} collapsed={collapsed} /> : null}
+          </LayoutGroup>
+        </div>
         <div className="app-shell__sidebar-bottom">
           <RuntimeStatus dryRun={dryRun} labels={labels} />
           <StorageCard storage={resolvedStorage} labels={labels} />
