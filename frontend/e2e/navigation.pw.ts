@@ -52,11 +52,21 @@ test("matches the annotated sidebar and library-card interactions", async ({ pag
 
   await page.getByRole("button", { name: "Collapse sidebar" }).click()
   await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible()
-  await page.waitForTimeout(450)
   await expect(page.getByRole("status", { name: /Runtime status/ }).first()).toBeVisible()
   await expect(page.getByRole("region", { name: "Storage" }).first()).toBeVisible()
-  const desktopFocus = await page.locator(".app-shell__navigation-highlight > .app-shell__nav-active-indicator").boundingBox()
-  const activeDesktopIcon = await page.locator('[data-slot="motion-highlight-item-container"][data-value="settings"] [data-slot="animated-icon"]').boundingBox()
+  const desktopFocusLocator = page.locator(".app-shell__navigation-highlight > .app-shell__nav-active-indicator")
+  const activeDesktopIconLocator = page.locator('[data-slot="motion-highlight-item-container"][data-value="settings"] [data-slot="animated-icon"]')
+  await expect.poll(async () => {
+    const focus = await desktopFocusLocator.boundingBox()
+    const icon = await activeDesktopIconLocator.boundingBox()
+    if (!focus || !icon) return Number.POSITIVE_INFINITY
+    return Math.max(
+      Math.abs((focus.x + focus.width / 2) - (icon.x + icon.width / 2)),
+      Math.abs((focus.y + focus.height / 2) - (icon.y + icon.height / 2)),
+    )
+  }, { timeout: 2_000 }).toBeLessThan(1)
+  const desktopFocus = await desktopFocusLocator.boundingBox()
+  const activeDesktopIcon = await activeDesktopIconLocator.boundingBox()
   expect(desktopFocus).not.toBeNull()
   expect(activeDesktopIcon).not.toBeNull()
   expect(Math.abs(desktopFocus!.width - desktopFocus!.height)).toBeLessThan(1)
