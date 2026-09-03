@@ -390,6 +390,7 @@ def _rehearse(source: SourceRelease, candidate_image: str, work_dir: Path) -> No
             assert _database_digest(state_dir / "cleanarr.db") == backup_digest
         else:
             state_dir.mkdir(mode=0o777)
+            os.chmod(state_dir, 0o777)
             shutil.copy2(automatic_rollback, state_dir / "cleanarr.db")
             os.chmod(state_dir / "cleanarr.db", 0o666)
         _start_container(rollback_name, source.image, state_dir)
