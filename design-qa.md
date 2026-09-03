@@ -8,6 +8,7 @@
 - Matching implementation capture: `/tmp/cleanarr-mobile-final-light.png`
 - Implementation pixels and browser viewport: 590 × 850 at 1× density.
 - Additional evidence: `/tmp/cleanarr-mobile-final-dark.png`, `/tmp/cleanarr-desktop-tooltip-activity.png`, and `/tmp/cleanarr-desktop-collapsed-tooltip.png`.
+- Follow-up browser evidence: the `playwright-report` artifact from quality-gate run `33766660754`, with attachments `desktop-settings-tree-followup`, `desktop-collapsed-focus-followup`, `desktop-account-popover-followup`, `desktop-account-popover-dark-followup`, and `mobile-bottom-navigation-followup` (downloaded locally to `/tmp/cleanarr-ui-followup-final.DxMEm8`).
 - State: authenticated administrator, Russian UI, Library, movies, first 12-item page, medium cards. Light and dark themes were both checked.
 
 ## Comparison
@@ -40,7 +41,12 @@ Focused desktop comparison confirmed that the collapsed rail retains every desti
 10. **P1 — destructive card actions competed with artwork in the top-right corner.** The solid destructive control now appears at the poster center on pointer hover or keyboard focus; it stays visible on touch-only devices and retains its accessible name and tooltip.
 11. **P2 — the shared-layout sidebar selection could stretch in from an unrelated origin.** Desktop navigation now uses the measured Animate UI Highlight primitive and the same `350/35` spring as the Files reference, so the surface follows the destination bounds directly and does not animate in on first render.
 12. **P2 — the collapsed rail reduced runtime and storage to ambiguous marks.** Dry-run/live and storage now keep recognizable Lucide icons, focusable semantic labels, and full status tooltips. Navigation icons receive a compact square hover/focus surface, matching the rest of the icon-button language.
-13. **P2 — the brand and account footer remained visually fragmented.** The sidebar toggle now morphs between Lucide panel states through Morphicons, the lightning mark is separated vertically in the collapsed header, the official Animate UI GitHub Stars pattern is restored beside the brand, and account identity/actions share one compact row instead of two boxed blocks.
+13. **P2 — the brand and account footer remained visually fragmented.** The lightning mark is separated vertically in the collapsed header and the official Animate UI GitHub Stars pattern is restored beside the brand. The edge toggle is now a compact circular control with a morphing left/right chevron, keeping its direction readable without adding another boxed sidebar row.
+14. **P1 — mobile navigation and the Settings tree changed state without spatial continuity.** Both now use the shared measured Highlight primitive: the mobile active surface springs between destinations, while the Settings branch expands/collapses through AnimatePresence and its subsection surface moves between rows. Initial render and reduced-motion behavior remain non-distracting.
+15. **P1 — the compact desktop selection surface was not reliably square or centered.** The rail surface is fixed at 40 × 40 px, follows bounds throughout the sidebar resize, and applies the Settings-group offset through a semantic active class. Browser coverage waits for the spring to settle and requires the surface and active icon centers to differ by less than 1 px; this exposed and fixed a persistent 7 px Settings offset.
+16. **P2 — account controls consumed the bottom of the sidebar.** Only the avatar remains pinned in the footer. Identity, theme, language, and logout are grouped in an accessible popover, verified in light and dark modes with Escape dismissal and focus return to the avatar trigger.
+
+The final follow-up run passed lint, 114 Vitest tests, production build, and all 14 Chromium scenarios. Its screenshots were reviewed together with the two annotated source captures; the compact focus is centered, the mobile bar keeps balanced bottom spacing, and both account-popover themes are visually stable.
 
 No actionable P0, P1, or P2 visual or interaction findings remain. The production build reports only the existing large-chunk advisory; it does not affect this visual acceptance pass.
 
