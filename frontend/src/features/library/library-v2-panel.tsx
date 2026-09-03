@@ -10,7 +10,7 @@ import {
   Tv,
   X,
 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -345,15 +345,22 @@ function LibraryStatus({ text, status, failures, error, onRetry }: { text: Libra
 
 function LibraryCard({ item, text, selectMode, selected, onToggle, onOpen, onDeletePreview }: { item: LibraryItem; text: LibraryV2Copy; selectMode: boolean; selected: boolean; onToggle: () => void; onOpen: (item: LibraryItem, trigger: HTMLElement) => void; onDeletePreview?: (item: LibraryItem, trigger: HTMLElement) => void }) {
   const typeLabel = item.media_type === "movie" ? text.movie : text.seriesType
+  const selectable = Boolean(libraryDeleteTargetFromItem(item))
   const deleteAvailable = Boolean(onDeletePreview && libraryDeleteTargetFromItem(item))
+  const selectionUnavailableId = `selection-unavailable-${item.resource_id.replace(/[^a-zA-Z0-9_-]/g, "-")}`
+  const handleCardAction = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (selectMode) onToggle()
+    else onOpen(item, event.currentTarget)
+  }
   return (
     <article role="listitem" className="group relative min-w-0 transition-transform duration-200 hover:-translate-y-0.5">
       <div className={cn("relative aspect-[2/3] overflow-hidden rounded-lg bg-muted shadow-sm", selected && "ring-3 ring-primary ring-offset-2 ring-offset-background")}>
-        <button type="button" className="absolute inset-0 z-0 block size-full rounded-lg text-left focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50" aria-label={`${item.display_name}, ${typeLabel}`} onClick={(event) => onOpen(item, event.currentTarget)}><Artwork resourceId={item.resource_id} artwork={item.artwork} fallback={item.media_type === "movie" ? <Film className="size-10 text-muted-foreground" /> : <Tv className="size-10 text-muted-foreground" />} /></button>
-        {selectMode ? <Checkbox className="absolute left-2 top-2 z-10 size-6 bg-card/90" checked={selected} disabled={!libraryDeleteTargetFromItem(item)} aria-label={`${text.select}: ${item.display_name}`} onCheckedChange={onToggle} /> : null}
+        <button type="button" className="absolute inset-0 z-0 block size-full rounded-lg text-left focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed" aria-label={selectMode ? `${text.select}: ${item.display_name}` : `${item.display_name}, ${typeLabel}`} aria-describedby={selectMode && !selectable ? selectionUnavailableId : undefined} disabled={selectMode && !selectable} onClick={handleCardAction}><Artwork resourceId={item.resource_id} artwork={item.artwork} fallback={item.media_type === "movie" ? <Film className="size-10 text-muted-foreground" /> : <Tv className="size-10 text-muted-foreground" />} /></button>
+        {selectMode ? <Checkbox className="absolute left-2 top-2 z-10 size-6 bg-card/90" checked={selected} disabled={!selectable} aria-label={`${text.select}: ${item.display_name}`} aria-describedby={!selectable ? selectionUnavailableId : undefined} onCheckedChange={onToggle} /> : null}
         <Button variant="destructive" size="icon" className="absolute right-2 top-2 z-10 size-11 opacity-0 shadow-md transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100" aria-label={`${text.reviewPlan}: ${item.display_name}`} title={deleteAvailable ? text.reviewPlan : text.deleteUnavailable} onClick={(event) => onDeletePreview?.(item, event.currentTarget)} disabled={!deleteAvailable}><Trash2 aria-hidden="true" /></Button>
       </div>
-      <button type="button" className="mt-2 block min-h-11 w-full rounded text-left focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50" onClick={(event) => onOpen(item, event.currentTarget)}><span className="block truncate text-sm font-medium">{item.display_name}</span><span className="block truncate text-xs text-muted-foreground">{item.year ?? text.unknown}{item.size != null ? ` · ${formatSize(item.size)}` : ""}</span></button>
+      <button type="button" className="mt-2 block min-h-11 w-full rounded text-left focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed" aria-describedby={selectMode && !selectable ? selectionUnavailableId : undefined} disabled={selectMode && !selectable} onClick={handleCardAction}><span className="block truncate text-sm font-medium">{item.display_name}</span><span className="block truncate text-xs text-muted-foreground">{item.year ?? text.unknown}{item.size != null ? ` · ${formatSize(item.size)}` : ""}</span></button>
+      {selectMode && !selectable ? <p id={selectionUnavailableId} className="mt-1 text-xs text-muted-foreground">{text.selectionUnavailable}</p> : null}
     </article>
   )
 }

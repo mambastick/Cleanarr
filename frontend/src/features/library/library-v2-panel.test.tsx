@@ -10,7 +10,7 @@ const detail: LibraryItemDetail = { ...item, playback: { watched: "never_watched
 const api = (page: LibraryItemsResponse = { items: [item], next_cursor: null, source_status: "complete", source_failures: [], catalog_revision: "rev-1" }) => vi.fn((url: string) => Promise.resolve(url.includes("/items/movie-1") ? detail : page)) as unknown as Parameters<typeof LibraryPanelV2>[0]["fetchJson"]
 
 describe("LibraryPanelV2", () => {
-  it("keeps deletion preview single-shot and opens detail from a separate title action", async () => {
+  it("keeps deletion preview single-shot and opens detail from the card body in normal mode", async () => {
     const user = userEvent.setup()
     const onDeletePreview = vi.fn()
     const fetchJson = api()
@@ -19,9 +19,54 @@ describe("LibraryPanelV2", () => {
     const trash = screen.getByRole("button", { name: /Review deletion plan: Dune/ })
     await user.click(trash)
     expect(onDeletePreview).toHaveBeenCalledTimes(1)
-    await user.click(screen.getByRole("button", { name: /Dune: Part Two, Movie/ }))
+    await user.click(screen.getByText("Dune: Part Two").closest("button")!)
     await waitFor(() => expect(screen.getByText("Technical details")).toBeInTheDocument())
     expect(fetchJson).toHaveBeenCalledWith(expect.stringContaining("/api/library/items/movie-1"), expect.anything())
+  })
+
+  it("uses poster and card body clicks for selection mode without opening the inspector", async () => {
+    const user = userEvent.setup()
+    const unlinked = { ...item, resource_id: "movie-unlinked", display_name: "Unlinked movie", title: "Unlinked movie", delete_target: null }
+    const fetchJson = api({ items: [item, unlinked], next_cursor: null, source_status: "complete", source_failures: [], catalog_revision: "rev-1" })
+    render(<LibraryPanelV2 active authenticated fetchJson={fetchJson} copy={LIBRARY_COPY.en} />)
+
+    await waitFor(() => expect(screen.getByText("Dune: Part Two")).toBeInTheDocument())
+    await user.click(screen.getByRole("button", { name: "Select" }))
+    await user.click(screen.getByText("Dune: Part Two").closest("button")!)
+    expect(screen.getByText(/1 selected/)).toBeInTheDocument()
+    expect(screen.queryByText("Technical details")).not.toBeInTheDocument()
+
+    const poster = screen.getAllByRole("button", { name: "Select: Dune: Part Two" })[0]
+    await user.click(poster!)
+    expect(screen.queryByText(/1 selected/)).not.toBeInTheDocument()
+    expect(screen.queryByText("Technical details")).not.toBeInTheDocument()
+
+    expect(screen.getByText(LIBRARY_COPY.en.selectionUnavailable)).toBeInTheDocument()
+    expect(screen.getByRole("checkbox", { name: "Select: Unlinked movie" })).toBeDisabled()
+    expect(screen.getAllByRole("button", { name: "Select: Unlinked movie" })[0]).toBeDisabled()
+  })
+
+  it("requests server-sorted pages when the sort select and direction control change", async () => {
+    const user = userEvent.setup()
+    const alpha = { ...item, resource_id: "movie-alpha", display_name: "Alpha", title: "Alpha" }
+    const zeta = { ...item, resource_id: "movie-zeta", display_name: "Zeta", title: "Zeta" }
+    const fetchJson = vi.fn((url: string) => {
+      if (url.includes("sort=title") && url.includes("direction=asc")) return Promise.resolve({ items: [alpha, zeta], next_cursor: null, source_status: "complete", source_failures: [], catalog_revision: "rev-1" })
+      if (url.includes("sort=title") && url.includes("direction=desc")) return Promise.resolve({ items: [zeta, alpha], next_cursor: null, source_status: "complete", source_failures: [], catalog_revision: "rev-1" })
+      return Promise.resolve({ items: [zeta, alpha], next_cursor: null, source_status: "complete", source_failures: [], catalog_revision: "rev-1" })
+    }) as unknown as Parameters<typeof LibraryPanelV2>[0]["fetchJson"]
+    render(<LibraryPanelV2 active authenticated fetchJson={fetchJson} copy={LIBRARY_COPY.en} />)
+
+    await waitFor(() => expect(screen.getByText("Zeta")).toBeInTheDocument())
+    const sort = screen.getByRole("combobox", { name: "Sort" })
+    sort.focus()
+    await user.keyboard("{ArrowDown}{ArrowDown}{Enter}")
+    await waitFor(() => expect(fetchJson).toHaveBeenCalledWith(expect.stringContaining("sort=title&direction=desc"), expect.anything()))
+    await waitFor(() => expect(screen.getAllByRole("listitem").map((card) => card.textContent)).toEqual([expect.stringContaining("Zeta"), expect.stringContaining("Alpha")]))
+
+    await user.click(screen.getByRole("button", { name: "Descending" }))
+    await waitFor(() => expect(fetchJson).toHaveBeenCalledWith(expect.stringContaining("sort=title&direction=asc"), expect.anything()))
+    await waitFor(() => expect(screen.getAllByRole("listitem").map((card) => card.textContent)).toEqual([expect.stringContaining("Alpha"), expect.stringContaining("Zeta")]))
   })
 
   it("persists selections across tabs, exposes hidden count, and caps at fifty", async () => {
