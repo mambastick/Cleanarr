@@ -31,8 +31,11 @@ test("settings Select is a themed portal and keeps English/Russian copy localize
   expect(await lightPopup.evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)")
   await page.keyboard.press("Escape")
 
-  await page.getByRole("button", { name: /Theme.*Light/i }).click()
-  await expect(page.getByRole("button", { name: /Theme.*Dark/i })).toBeFocused()
+  await account.click()
+  await accountPopover.getByRole("button", { name: /Theme.*Light/i }).click()
+  await expect(accountPopover.getByRole("button", { name: /Theme.*Dark/i })).toBeFocused()
+  await page.keyboard.press("Escape")
+  await expect(account).toBeFocused()
   await language.focus()
   await page.keyboard.press("Enter")
   await expect(russian).toBeVisible()
