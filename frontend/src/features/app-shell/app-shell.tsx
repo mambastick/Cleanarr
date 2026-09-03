@@ -477,7 +477,7 @@ export function AppShell({ activePage, onPageChange, onNavigate, settingsSection
       <aside className="app-shell__sidebar" aria-label={labels.navigation}>
         <Brand labels={labels} collapsed={collapsed} onToggle={() => setCollapsed((value) => !value)} />
         <div className="app-shell__navigation-scroll" role="region" aria-label={labels.navigation} tabIndex={0}>
-          <Highlight mode="parent" controlledItems value={activePage} hover={false} click={false} transition={{ type: "spring", stiffness: 350, damping: 35 }} className="app-shell__nav-active-indicator" containerClassName="app-shell__navigation-highlight">
+          <Highlight mode="parent" controlledItems value={activePage} hover={false} click={false} forceUpdateBounds transition={{ type: "spring", stiffness: 350, damping: 35 }} className="app-shell__nav-active-indicator" containerClassName="app-shell__navigation-highlight">
             <NavigationItems items={NAV_ITEMS.filter(({ page }) => page !== "settings" && (canAdmin || page !== "users"))} activePage={activePage} labels={labels} onNavigate={navigate} collapsed={collapsed} highlight />
             {canAdmin ? <SettingsNavigation activePage={activePage} settingsSection={settingsSection} labels={labels} onNavigate={navigate} onSettingsSectionChange={onSettingsSectionChange} collapsed={collapsed} /> : null}
           </Highlight>
