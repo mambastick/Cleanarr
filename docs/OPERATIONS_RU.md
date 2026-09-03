@@ -2,10 +2,13 @@
 
 [English](OPERATIONS.md) · [Русский](OPERATIONS_RU.md)
 
-Все operational endpoints требуют сессию администратора или явно настроенный
-`ADMIN_SHARED_TOKEN`. Публичными остаются только health probes. Не передавайте
-administrator token системам Prometheus, backup jobs или support tooling,
-которым вы не доверяете.
+Product endpoints требуют authenticated session или явно настроенный
+`ADMIN_SHARED_TOKEN`; публичными остаются только health probes. Viewer session
+ограничена read projections dashboard, storage, Library, Downloads и состояния
+deletion jobs. Конфигурация, support/metrics exports, каталог пользователей,
+ручные refresh, controls и любые mutation требуют администратора. Статический
+token всегда имеет полномочия администратора. Не передавайте его системам
+Prometheus, backup jobs или support tooling, которым вы не доверяете.
 
 ## Операции Library и storage в UI-v2
 
@@ -13,7 +16,7 @@ Authenticated Library workspace использует следующие read-onl
 
 - `GET /api/library/items?media_type=movie|series&q=&sort=added|title|size&direction=asc|desc&limit=1..50&cursor=` возвращает ограниченную страницу, привязанную к revision. `refresh=true` обходит in-process cache, но не меняет Arr или Jellyfin.
 - `GET /api/library/items/{resource_id}` возвращает detail выбранного opaque resource. Детали эпизодов и файлов сериала ограничены, raw paths исключены.
-- `GET /api/library/artwork/{resource_id}` сначала разрешает объект и проксирует проверенный artwork из Jellyfin. Endpoint требует admin session, является private и разрешает клиентский cache не более часа.
+- `GET /api/library/artwork/{resource_id}` сначала разрешает объект и проксирует проверенный artwork из Jellyfin. Endpoint требует authenticated session, является private и разрешает клиентский cache не более часа.
 - `GET /api/storage/volumes` возвращает observations томов Radarr/Sonarr без raw paths. `POST /api/storage/refresh` просит одно объединённое обновление и возвращает `429` с code `refresh_throttled` при повторе в течение 10 секунд.
 
 Library collection results кэшируются 30 секунд на сочетание runtime
@@ -28,6 +31,28 @@ ownership torrent.
 Shell адаптивен (sidebar 240px на desktop, rail 80px на tablet, top bar и bottom
 navigation на mobile) и резервирует safe-area для контента. Это presentation
 layer не меняет authentication, preflight или fail-closed правила удаления.
+
+## Роли пользователей и database schema 6
+
+После успешного локального или допущенного OIDC-входа CleanArr сохраняет
+учётную запись. Проекция содержит регистронезависимый ключ username,
+отображаемое имя, auth source, роль, время создания и последнего входа;
+provider claims и credentials в неё не копируются. Существующий локальный
+администратор добавляется при запуске. При SSO-only bootstrap первая допущенная
+identity становится администратором; когда администратор уже существует, новые
+SSO identity по умолчанию получают роль viewer. Повторный вход сохраняет ранее
+назначенную роль.
+
+Только администраторы могут вызывать `GET /api/users` и
+`PATCH /api/users/{username}/role`. Последнего администратора нельзя понизить.
+Viewer session может читать перечисленное выше ограниченное workspace, но не
+может получать runtime configuration или запускать refresh, pause/resume,
+preflight, deletion и mutation удаления записи из истории.
+
+Database migration 6 транзакционно добавляет `user_accounts`. Перед upgrade
+создайте и проверьте SQLite backup по installation guide. Для rollback нужно
+остановить CleanArr и восстановить pre-upgrade database; старую binary нельзя
+запускать с schema 6.
 
 ## Обновление и rollback
 

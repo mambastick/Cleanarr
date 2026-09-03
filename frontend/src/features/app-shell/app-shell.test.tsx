@@ -3,11 +3,15 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, vi } from "vitest"
 
 import { AppShell } from "@/features/app-shell/app-shell"
+import { TooltipProvider } from "@/components/ui/tooltip"
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  window.localStorage.removeItem("cleanarr.sidebar.collapsed")
+})
 
 const labels = {
-  nav: { overview: "Overview", library: "Library", downloads: "Downloads", activity: "Activity", settings: "Settings" },
+  nav: { overview: "Overview", library: "Library", downloads: "Downloads", activity: "Activity", users: "Users", settings: "Settings" },
   more: "More",
   close: "Close",
   storage: "Storage",
@@ -17,17 +21,19 @@ const labels = {
 
 function renderShell(overrides: Partial<React.ComponentProps<typeof AppShell>> = {}) {
   return render(
-    <AppShell
-      activePage="library"
-      onPageChange={vi.fn()}
-      dryRun
-      username="admin"
-      storageHeadline={{ status: "warning", headline: "18% free", percent: 82 }}
-      labels={labels}
-      {...overrides}
-    >
-      <h1>Library content</h1>
-    </AppShell>,
+    <TooltipProvider delay={0}>
+      <AppShell
+        activePage="library"
+        onPageChange={vi.fn()}
+        dryRun
+        username="admin"
+        storageHeadline={{ status: "warning", headline: "18% free", percent: 82 }}
+        labels={labels}
+        {...overrides}
+      >
+        <h1>Library content</h1>
+      </AppShell>
+    </TooltipProvider>,
   )
 }
 
@@ -87,6 +93,21 @@ it("navigates to Settings from More before closing the sheet", async () => {
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
 })
 
+it("keeps every Settings section reachable from the mobile More sheet", async () => {
+  const user = userEvent.setup()
+  const onSettingsSectionChange = vi.fn()
+  renderShell({ activePage: "settings", onSettingsSectionChange })
+
+  const more = screen.getByRole("button", { name: "More" })
+  expect(more).toHaveAttribute("aria-current", "page")
+  await user.click(more)
+  const mobileDialog = screen.getByRole("dialog")
+  await user.click(within(mobileDialog).getByRole("button", { name: "Connected services" }))
+
+  expect(onSettingsSectionChange).toHaveBeenCalledWith("services")
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+})
+
 it("reveals the active Settings sections and reports the selected section", async () => {
   const user = userEvent.setup()
   const onPageChange = vi.fn()
@@ -95,14 +116,14 @@ it("reveals the active Settings sections and reports the selected section", asyn
 
   const settings = screen.getByRole("button", { name: "Settings" })
   expect(settings).toHaveAttribute("aria-expanded", "true")
-  expect(screen.getByRole("button", { name: "General" })).toHaveAttribute("aria-current", "page")
+  expect(screen.getByRole("button", { name: "CleanArr" })).toHaveAttribute("aria-current", "page")
 
   await user.click(screen.getByRole("button", { name: "Connected services" }))
   expect(onSettingsSectionChange).toHaveBeenCalledWith("services")
   expect(onPageChange).toHaveBeenCalledWith("settings")
 })
 
-it("keeps Settings and Storage in mobile More but removes their desktop-sheet duplicates", async () => {
+it("keeps Settings and Storage in mobile More while desktop account actions stay directly accessible", async () => {
   const user = userEvent.setup()
   renderShell()
 
@@ -112,13 +133,36 @@ it("keeps Settings and Storage in mobile More but removes their desktop-sheet du
   expect(within(mobileDialog).getByRole("region", { name: "Storage" })).toBeInTheDocument()
   await user.keyboard("{Escape}")
 
-  await user.click(screen.getByRole("button", { name: "Account: admin" }))
-  const desktopDialog = screen.getByRole("dialog")
-  expect(desktopDialog).toHaveAccessibleName("Account")
-  expect(within(desktopDialog).queryByRole("button", { name: "Settings" })).not.toBeInTheDocument()
-  expect(within(desktopDialog).queryByRole("region", { name: "Storage" })).not.toBeInTheDocument()
-  expect(within(desktopDialog).getByRole("button", { name: "Theme: System" })).toBeInTheDocument()
-  expect(within(desktopDialog).getByRole("button", { name: "Language: EN" })).toBeInTheDocument()
+  expect(screen.queryByRole("button", { name: "Account: admin" })).not.toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "Theme: System" })).toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "Language: EN" })).toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "Log out" })).toBeInTheDocument()
+})
+
+it("collapses the desktop sidebar and keeps every destination available by accessible name", async () => {
+  const user = userEvent.setup()
+  const { container } = renderShell()
+  await user.click(screen.getByRole("button", { name: "Collapse sidebar" }))
+  expect(container.querySelector(".app-shell")).toHaveClass("app-shell--sidebar-collapsed")
+  expect(screen.getAllByRole("button", { name: "Activity" })[0]).toBeEnabled()
+  expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument()
+})
+
+it("wires tooltip triggers for icon-only destinations in the collapsed sidebar", async () => {
+  const user = userEvent.setup()
+  renderShell()
+  await user.click(screen.getByRole("button", { name: "Collapse sidebar" }))
+  expect(screen.getAllByRole("button", { name: "Activity" })[0]).toHaveAttribute("data-base-ui-tooltip-trigger")
+})
+
+it("keeps administration destinations out of a viewer workspace", async () => {
+  const user = userEvent.setup()
+  renderShell({ canAdmin: false })
+  expect(screen.queryByRole("button", { name: "Users" })).not.toBeInTheDocument()
+  expect(screen.queryByRole("button", { name: "Settings" })).not.toBeInTheDocument()
+  await user.click(screen.getByRole("button", { name: "More" }))
+  expect(within(screen.getByRole("dialog")).queryByRole("button", { name: "Users" })).not.toBeInTheDocument()
+  expect(within(screen.getByRole("dialog")).queryByRole("button", { name: "Settings" })).not.toBeInTheDocument()
 })
 
 it("links the brand to the static GitHub star count without a runtime fetch", () => {

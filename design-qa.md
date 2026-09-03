@@ -1,26 +1,37 @@
-# CleanArr UI v2 design QA
+# Design QA — annotated UI-v2 follow-up
 
-## Visual comparison
+## Visual truth and test state
 
-- Approved source: `docs/design/ui-v2/reference-library.png`.
-- Implemented desktop state: `docs/design/ui-v2/implementation-library-light-desktop.png`.
-- Same-frame comparison: `docs/design/ui-v2/comparison-library-light-desktop.png`.
-- CSS viewport: 1487 × 1058 at DPR 1. The in-app browser capture omits its 15 px scrollbar gutter and 11 px browser chrome inset, so the implementation was normalized to the declared CSS viewport only for the side-by-side comparison.
-- Reviewed composition: 240 px navigation, five-column poster grid, hover/focus trash action, storage/runtime/account blocks, and 360 px right inspector.
+- Source visual truth: `/home/golodn1y/.codex/attachments/f3f8988c-612d-437d-a9a8-82cd2fad4ecd/codex-clipboard-4c7a1314-829a-4aa1-8968-07f491f3c538.png`
+- Source pixels: 1176 × 1697 (approximately 588 × 848.5 CSS pixels at 2× density).
+- Matching implementation capture: `/tmp/cleanarr-mobile-final-light.png`
+- Implementation pixels and browser viewport: 590 × 850 at 1× density.
+- Additional evidence: `/tmp/cleanarr-mobile-final-dark.png`, `/tmp/cleanarr-desktop-tooltip-activity.png`, and `/tmp/cleanarr-desktop-collapsed-tooltip.png`.
+- State: authenticated administrator, Russian UI, Library, movies, first 12-item page, medium cards. Light and dark themes were both checked.
 
-## Responsive and theme evidence
+## Comparison
 
-- Light desktop: `docs/design/ui-v2/implementation-library-light-desktop.png`.
-- Dark desktop: `docs/design/ui-v2/implementation-library-dark-desktop.png`.
-- Light mobile at 375 CSS px: `docs/design/ui-v2/implementation-library-light-mobile.png`.
-- Dark mobile at 375 CSS px: `docs/design/ui-v2/implementation-library-dark-mobile.png`.
+The reference and implementation were reviewed together at the same effective mobile viewport. The implementation preserves the existing CleanArr typography, semantic surfaces, purple active state, two-column artwork grid, copy hierarchy, Lucide icon language, and responsive reflow. The intentionally changed surfaces match the annotation: the web scrollbar is absent while document scrolling remains available, the bottom navigation is inset 8 px from the viewport and safe area, content reserves space above it, and solid destructive card controls remain visible without hover.
 
-## Interaction and accessibility review
+Focused desktop comparison confirmed that the collapsed rail retains every destination by icon and accessible name, the active surface moves between destinations, and a real pointer hover exposes the localized tooltip. Activity uses a dense single stream; connected services use divided rows rather than nested cards; the service editor remains within the 850 px viewport and scrolls internally.
 
-- Keyboard navigation, focus return, reduced motion, destructive preflight, duplicate-submit prevention, responsive reflow, EN/RU copy, and Axe checks are covered by Vitest and Chromium Playwright gates.
-- Poster images retain a fixed 2:3 box and use authenticated Blob URLs with a local fallback.
-- Mobile batch actions clear the fixed bottom navigation and safe-area inset.
-- Missing, stale, ambiguous, or conflicting evidence remains visibly unknown or blocked.
-- Final comparison found no open P0, P1, or P2 visual discrepancies.
+## Fidelity checklist
+
+- Typography: existing Geist scale and weights retained; headings and control labels remain legible at 590 px.
+- Spacing and geometry: mobile content gutters remain 16 px; bottom navigation has balanced outer spacing, rounded border, safe-area offset, and matching content clearance.
+- Color and theme: semantic tokens used for surfaces, focus, status, and solid destructive actions; checked in light and dark modes.
+- Imagery: existing poster assets retain their aspect ratio and crop; first-page loading is bounded and lazy.
+- Copy: new user, pagination, density, Settings, tooltip, and role strings are available in English and Russian; the Russian default badge is `Основной`.
+- Icons and controls: Lucide icons are retained; icon-only actions have an accessible name and tooltip (native close descriptions are retained where wrapping would interfere with Escape/focus behavior).
+- Accessibility and responsiveness: keyboard focus return, selection reset, reduced initial tab motion, mobile overflow, safe-area spacing, viewer-disabled reasons, and responsive Settings access were exercised.
+
+## Findings and fixes
+
+1. **P1 — visible mobile web scrollbar and bottom bar flush to the viewport edge.** Fixed with mobile-only scrollbar suppression, retained scrolling, an 8 px/safe-area bottom inset, and increased content clearance. Verified in the light and dark captures.
+2. **P1 — icon tooltip trigger props were initially swallowed by the animated-icon wrapper.** Fixed by rendering the actual button through the tooltip trigger. Verified with a real pointer hover; `Активность` is visible in `/tmp/cleanarr-desktop-tooltip-activity.png`.
+3. **P2 — Settings subsections were not reachable after moving Settings into the mobile More sheet.** Fixed by exposing all five sections in that sheet and giving More the shared active state for Users/Settings. Verified at 590 × 850.
+4. **P2 — a self-demoted administrator could retain stale administrative controls until reload.** Fixed by applying the returned current-user role to the active workspace immediately; backend authorization already resolves the persisted role per request.
+
+No actionable P0, P1, or P2 visual or interaction findings remain. The production build reports only the existing large-chunk advisory; it does not affect this visual acceptance pass.
 
 final result: passed

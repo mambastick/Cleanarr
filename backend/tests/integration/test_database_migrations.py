@@ -270,8 +270,8 @@ def test_populated_v4_upgrades_to_v5_and_backup_restores_exactly(tmp_path: Path)
     with sqlite3.connect(db_path) as source, sqlite3.connect(backup_path) as backup:
         source.backup(backup)
 
-    assert migrate_database(db_path) == 5
-    assert migrate_database(db_path) == 5
+    assert migrate_database(db_path) == LATEST_SCHEMA_VERSION
+    assert migrate_database(db_path) == LATEST_SCHEMA_VERSION
     with sqlite3.connect(db_path) as connection:
         assert connection.execute("SELECT id FROM manual_delete_jobs").fetchone() == ("v4-job",)
         assert connection.execute("SELECT resource_id FROM destructive_idempotency_ledger").fetchone() == ("v4-job",)
@@ -340,3 +340,34 @@ def test_populated_v4_upgrades_to_v5_and_backup_restores_exactly(tmp_path: Path)
         assert restored.execute("SELECT resource_id FROM destructive_idempotency_ledger").fetchone() == ("v4-job",)
         assert restored.execute("SELECT id FROM manual_delete_batches").fetchone() == ("v4-batch",)
         assert not ({"download_observations", "download_actions", "policy_evaluations"} & _table_names(restored_path))
+
+
+def test_populated_v5_upgrades_to_user_registry_and_backup_restores(tmp_path: Path) -> None:
+    db_path = tmp_path / "v5.db"
+    backup_path = tmp_path / "v5.backup.db"
+    restored_path = tmp_path / "v5.restored.db"
+    with sqlite3.connect(db_path) as connection:
+        for migration in MIGRATIONS[:5]:
+            for statement in migration.statements:
+                connection.execute(statement)
+        connection.execute("PRAGMA user_version = 5")
+        connection.execute("INSERT INTO config(id,config_json) VALUES(1,?)", ('{"general":{"dry_run":true}}',))
+        connection.commit()
+    with sqlite3.connect(db_path) as source, sqlite3.connect(backup_path) as backup:
+        source.backup(backup)
+
+    assert migrate_database(db_path) == LATEST_SCHEMA_VERSION
+    assert migrate_database(db_path) == LATEST_SCHEMA_VERSION
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone() == (LATEST_SCHEMA_VERSION,)
+        assert connection.execute("SELECT config_json FROM config").fetchone() == ('{"general":{"dry_run":true}}',)
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(user_accounts)").fetchall()}
+        assert {"username_key", "username", "role", "auth_source", "last_seen_at"} <= columns
+
+    with sqlite3.connect(backup_path) as backup, sqlite3.connect(restored_path) as restored:
+        backup.backup(restored)
+    with sqlite3.connect(restored_path) as restored:
+        assert restored.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        assert restored.execute("PRAGMA user_version").fetchone() == (5,)
+        assert restored.execute("SELECT config_json FROM config").fetchone() == ('{"general":{"dry_run":true}}',)
+        assert "user_accounts" not in _table_names(restored_path)

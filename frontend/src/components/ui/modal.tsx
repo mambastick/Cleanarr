@@ -38,18 +38,16 @@ export function Modal({
       <DialogPortal>
         <DialogBackdrop data-testid="modal-backdrop" className="fixed inset-0 z-50 bg-black/50" />
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <DialogPopup finalFocus={returnFocusRef} className={cn("flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col rounded-2xl border bg-background shadow-2xl outline-none", className)}>
+          <DialogPopup finalFocus={returnFocusRef} className={cn("flex max-h-[calc(100dvh-2rem)] min-h-0 w-full max-w-2xl flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl outline-none", className)}>
             <div className="flex items-start justify-between gap-4 border-b px-6 py-5">
               <div className="space-y-1">
                 <DialogTitle className="text-xl font-semibold tracking-tight">{title}</DialogTitle>
                 {description ? <DialogDescription className="text-sm text-muted-foreground">{description}</DialogDescription> : null}
               </div>
-              <DialogClose render={<Button autoFocus variant="ghost" size="icon-sm" aria-label={closeLabel} />}>
-                <X />
-              </DialogClose>
+              <DialogClose render={<Button autoFocus type="button" variant="ghost" size="icon-sm" aria-label={closeLabel} title={closeLabel} />}><X /></DialogClose>
             </div>
-            <ScrollArea className="min-h-0 flex-1" viewportClassName="h-full px-6 py-5">{children}</ScrollArea>
-            {footer ? <div className="border-t px-6 py-4">{footer}</div> : null}
+            <ScrollArea className="min-h-0 flex-1 overflow-hidden" viewportClassName="h-full overscroll-contain px-6 py-5">{children}</ScrollArea>
+            {footer ? <div className="shrink-0 border-t bg-background px-6 py-4">{footer}</div> : null}
           </DialogPopup>
         </div>
       </DialogPortal>

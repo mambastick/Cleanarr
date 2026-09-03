@@ -17,12 +17,14 @@ function stateTone(item: DownloadItem) {
   return "border-status-success-border bg-status-success-bg text-status-success"
 }
 
-function TorrentControl({ item, text, language, actionStates, onControl }: { item: DownloadItem; text: DownloadsCopy; language: DownloadsLanguage; actionStates: Record<string, DownloadActionState>; onControl: (item: DownloadItem, action: DownloadAction) => void }) {
+function TorrentControl({ item, text, language, actionStates, onControl, canMutate }: { item: DownloadItem; text: DownloadsCopy; language: DownloadsLanguage; actionStates: Record<string, DownloadActionState>; onControl: (item: DownloadItem, action: DownloadAction) => void; canMutate: boolean }) {
   const action = actionForItem(item)
   const actionKey = action ? `${item.client_id}:${item.info_hash}:${action}` : null
   const status = actionKey ? actionStates[actionKey] : undefined
-  const canControl = action != null && item.freshness === "fresh" && item.ownership === "managed" && item.unavailable_reason == null
-  const disabledReason = !canControl
+  const canControl = canMutate && action != null && item.freshness === "fresh" && item.ownership === "managed" && item.unavailable_reason == null
+  const disabledReason = !canMutate
+    ? text.adminOnly
+    : !canControl
     ? item.unavailable_reason ? reasonLabel(language, item.unavailable_reason) : text.actionUnavailable
     : null
   const statusText = status?.phase === "pending" ? text.pending
@@ -43,14 +45,14 @@ function TorrentControl({ item, text, language, actionStates, onControl }: { ite
         {status?.phase === "pending" ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : action === "pause" ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}
         {action === "pause" ? text.pause : action === "resume" ? text.resume : text.controls}
       </Button>
-      {status?.phase === "retry" ? <Button variant="ghost" size="xs" onClick={() => action && onControl(item, action)}>{text.retryAction}</Button> : null}
+      {status?.phase === "retry" ? <Button variant="ghost" size="xs" disabled={!canMutate} onClick={() => action && onControl(item, action)}>{text.retryAction}</Button> : null}
       {disabledReason ? <span className="max-w-48 whitespace-normal text-[11px] leading-4 text-muted-foreground">{disabledReason}</span> : null}
       {statusText ? <span role="status" className="max-w-48 whitespace-normal text-[11px] leading-4 text-muted-foreground">{statusText}</span> : null}
     </div>
   )
 }
 
-export function TorrentTable({ items, language, text, actionStates, onControl }: { items: DownloadItem[]; language: DownloadsLanguage; text: DownloadsCopy; actionStates: Record<string, DownloadActionState>; onControl: (item: DownloadItem, action: DownloadAction) => void }) {
+export function TorrentTable({ items, language, text, actionStates, onControl, canMutate = true }: { items: DownloadItem[]; language: DownloadsLanguage; text: DownloadsCopy; actionStates: Record<string, DownloadActionState>; onControl: (item: DownloadItem, action: DownloadAction) => void; canMutate?: boolean }) {
   return (
     <div className="overflow-hidden rounded-xl border bg-card">
       <Table>
@@ -92,7 +94,7 @@ export function TorrentTable({ items, language, text, actionStates, onControl }:
                   <span className="text-[11px] text-muted-foreground">{enumLabel(language, "ownership", item.ownership)}</span>
                 </div>
               </TableCell>
-              <TableCell className="px-4"><TorrentControl item={item} text={text} language={language} actionStates={actionStates} onControl={onControl} /></TableCell>
+              <TableCell className="px-4"><TorrentControl item={item} text={text} language={language} actionStates={actionStates} onControl={onControl} canMutate={canMutate} /></TableCell>
             </TableRow>
           ))}
         </TableBody>

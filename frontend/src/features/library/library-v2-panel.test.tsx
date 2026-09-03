@@ -46,6 +46,17 @@ describe("LibraryPanelV2", () => {
     expect(screen.getAllByRole("button", { name: "Select: Unlinked movie" })[0]).toBeDisabled()
   })
 
+  it("clears the current selection when leaving selection mode", async () => {
+    const user = userEvent.setup()
+    render(<LibraryPanelV2 active authenticated fetchJson={api()} copy={LIBRARY_COPY.en} />)
+    await waitFor(() => expect(screen.getByText("Dune: Part Two")).toBeInTheDocument())
+    await user.click(screen.getByRole("button", { name: "Select" }))
+    await user.click(screen.getByRole("checkbox", { name: /Select: Dune/ }))
+    expect(screen.getByText(/1 selected/)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Done" }))
+    expect(screen.queryByText(/1 selected/)).not.toBeInTheDocument()
+  })
+
   it("requests server-sorted pages when the sort select and direction control change", async () => {
     const user = userEvent.setup()
     const alpha = { ...item, resource_id: "movie-alpha", display_name: "Alpha", title: "Alpha" }
@@ -121,7 +132,7 @@ describe("LibraryPanelV2", () => {
     await waitFor(() => expect(screen.getByText("Dune: Part Two")).toBeInTheDocument())
     await user.click(screen.getByRole("button", { name: "Select" }))
     await user.click(screen.getByRole("checkbox", { name: /Select: Dune/ }))
-    await user.click(screen.getByRole("button", { name: "Load more" }))
+    await user.click(screen.getByRole("button", { name: "Next" }))
 
     await waitFor(() => expect(screen.getByText(LIBRARY_COPY.en.selectionNeedsReview)).toBeInTheDocument())
     expect(screen.getByRole("button", { name: "Review deletion plan" })).toBeDisabled()

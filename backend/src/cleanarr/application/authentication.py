@@ -11,7 +11,9 @@ from threading import Lock
 from typing import Any, Protocol
 
 from cleanarr.application.configuration import RuntimeConfigurationService
+from cleanarr.application.users import UserAccountStorePort
 from cleanarr.domain.config import GeneralConfig, SSOAuthMode
+from cleanarr.domain.users import UserAuthSource, UserRole
 
 
 class PasswordHashResult(Protocol):
@@ -60,6 +62,7 @@ class AuthStatus:
     requires_registration: bool
     authenticated: bool
     username: str | None
+    role: UserRole | None
     csrf_token: str | None
     sso_enabled: bool
     sso_mode: SSOAuthMode
@@ -71,6 +74,7 @@ class AuthSession:
     """Successful admin login/registration result."""
 
     username: str
+    role: UserRole
     token: str
     csrf_token: str
 
@@ -101,6 +105,7 @@ class AuthenticationService:
         config_service: RuntimeConfigurationService,
         password_hasher: PasswordHasherPort,
         session_store: SessionStorePort,
+        user_store: UserAccountStorePort,
         sso_state_ttl_seconds: int = 60 * 5,
         login_window_seconds: int = 60 * 5,
         login_max_failures: int = 5,
@@ -109,6 +114,7 @@ class AuthenticationService:
         self._config_service = config_service
         self._password_hasher = password_hasher
         self._session_store = session_store
+        self._user_store = user_store
         self._sso_state_ttl_seconds = sso_state_ttl_seconds
         self._sso_states: dict[str, SSOAuthorizationState] = {}
         self._sso_state_lock = Lock()
@@ -132,6 +138,7 @@ class AuthenticationService:
         admin = config.admin
         session = self._session_store.resolve_session(session_token) if session_token else None
         username = session.username if session else None
+        account = self._user_store.touch_user(username) if username else None
         configured = admin.configured
         sso_configured = self.is_sso_configured(config.general)
         return AuthStatus(
@@ -141,6 +148,7 @@ class AuthenticationService:
             ),
             authenticated=username is not None,
             username=username,
+            role=account.role if account else None,
             csrf_token=session.csrf_token if session else None,
             sso_enabled=self.is_sso_auth_enabled(config.general),
             sso_mode=config.general.sso_mode,
@@ -153,6 +161,14 @@ class AuthenticationService:
         record = self._session_store.resolve_session(session_token)
         return record.username if record else None
 
+    def resolve_user_role(self, session_token: str | None) -> UserRole | None:
+        """Resolve the current persisted role for a live session."""
+
+        if not session_token:
+            return None
+        record = self._session_store.resolve_session(session_token)
+        return self._user_store.get_role(record.username) if record else None
+
     def verify_csrf_token(self, session_token: str | None, csrf_token: str | None) -> bool:
         if not session_token or not csrf_token:
             return False
@@ -160,6 +176,7 @@ class AuthenticationService:
         return bool(record and _constant_time_equal(record.csrf_token, csrf_token))
 
     def create_session_for_user(self, username: str) -> AuthSession:
+        self._user_store.ensure_sso_user(username)
         return self._create_session(username)
 
     def register_admin(self, *, username: str, password: str) -> AuthSession:
@@ -175,6 +192,7 @@ class AuthenticationService:
             password_salt=password_hash.salt,
             password_hash=password_hash.digest,
         )
+        self._user_store.ensure_user(username, UserAuthSource.LOCAL, UserRole.ADMIN)
         return self._create_session(username)
 
     def login(self, *, username: str, password: str, source: str = "unknown") -> AuthSession:
@@ -197,6 +215,7 @@ class AuthenticationService:
             self._record_login_failure(throttle_keys)
             raise PermissionError("Invalid username or password.")
         self._clear_login_failures(throttle_keys)
+        self._user_store.ensure_user(admin.username, UserAuthSource.LOCAL, UserRole.ADMIN)
         return self._create_session(admin.username)
 
     def create_sso_state(self) -> tuple[str, SSOAuthorizationState]:
@@ -287,7 +306,8 @@ class AuthenticationService:
         record = self._session_store.resolve_session(token)
         if record is None:  # pragma: no cover - created under the same lock-backed store
             raise RuntimeError("Could not create admin session.")
-        return AuthSession(username=username, token=token, csrf_token=record.csrf_token)
+        role = self._user_store.get_role(username) or UserRole.VIEWER
+        return AuthSession(username=username, role=role, token=token, csrf_token=record.csrf_token)
 
     def _purge_sso_states_locked(self, now: float) -> None:
         expired = [

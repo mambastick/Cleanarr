@@ -145,6 +145,21 @@ MIGRATIONS = (
             "ON policy_evaluations(policy_revision, observation_key)",
         ),
     ),
+    DatabaseMigration(
+        version=6,
+        statements=(
+            "CREATE TABLE IF NOT EXISTS user_accounts ("
+            " username_key TEXT PRIMARY KEY,"
+            " username TEXT NOT NULL,"
+            " role TEXT NOT NULL CHECK (role IN ('admin','viewer')),"
+            " auth_source TEXT NOT NULL CHECK (auth_source IN ('local','sso')),"
+            " created_at TEXT NOT NULL,"
+            " last_seen_at TEXT,"
+            " updated_at TEXT NOT NULL"
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_user_accounts_last_seen ON user_accounts(last_seen_at DESC)",
+        ),
+    ),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

@@ -73,6 +73,7 @@ class FakeAuthService:
                 "requires_registration": False,
                 "authenticated": username is not None,
                 "username": username,
+                "role": "admin" if username else None,
                 "csrf_token": "csrf-token" if username else None,
                 "sso_enabled": False,
                 "sso_mode": "password_only",
@@ -84,14 +85,14 @@ class FakeAuthService:
         return type(
             "Session",
             (),
-            {"username": username, "token": "session-token", "csrf_token": "csrf-token"},
+            {"username": username, "role": "admin", "token": "session-token", "csrf_token": "csrf-token"},
         )()
 
     def login(self, *, username: str, password: str, source: str = "unknown"):  # type: ignore[no-untyped-def]
         return type(
             "Session",
             (),
-            {"username": username, "token": "session-token", "csrf_token": "csrf-token"},
+            {"username": username, "role": "admin", "token": "session-token", "csrf_token": "csrf-token"},
         )()
 
     def verify_csrf_token(self, session_token: str | None, csrf_token: str | None) -> bool:
@@ -1216,6 +1217,75 @@ async def test_first_run_admin_registration_enables_session_auth(tmp_path: Path)
     assert status_after.json()["authenticated"] is True
     assert status_after.json()["username"] == "admin"
     assert config_response.status_code == 200
+
+    await container.close()
+
+
+@pytest.mark.asyncio
+async def test_user_roles_are_listed_and_enforced_for_mutations(tmp_path: Path) -> None:
+    settings = Settings.model_construct(
+        db_path=str(tmp_path / "users.db"),
+        config_state_path=str(tmp_path / "runtime-config.json"),
+        admin_shared_token=None,
+        log_level="INFO",
+        dry_run=True,
+        webhook_shared_token="secret-token",
+        http_timeout_seconds=5.0,
+        radarr_url=None,
+        radarr_api_key=None,
+        sonarr_url=None,
+        sonarr_api_key=None,
+        seerr_url=None,
+        seerr_api_key=None,
+        downloader_kind="qbittorrent",
+        qbittorrent_url=None,
+        qbittorrent_username=None,
+        qbittorrent_password=None,
+    )
+    container = ServiceContainer.from_settings(settings)
+    app = create_app(container=container)
+
+    async with app_client(app) as admin_client:
+        register = await admin_client.post(
+            "/api/auth/register",
+            headers={"Origin": "http://test"},
+            json={"username": "admin", "password": "super-secret-123"},
+        )
+        csrf = register.json()["csrf_token"]
+        viewer_session = container.auth_service.create_session_for_user("viewer@example.com")
+
+        listed = await admin_client.get("/api/users")
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as viewer_client:
+            viewer_client.cookies.set("cleanarr_session", viewer_session.token)
+            viewer_dashboard = await viewer_client.get("/api/dashboard")
+            viewer_users = await viewer_client.get("/api/users")
+            viewer_config = await viewer_client.get("/api/config")
+            viewer_mutation = await viewer_client.put(
+                "/api/config/general",
+                headers={"Origin": "http://test", "X-CSRF-Token": viewer_session.csrf_token},
+                json=container.config.general.model_dump(),
+            )
+
+        updated = await admin_client.patch(
+            "/api/users/viewer%40example.com/role",
+            headers={"Origin": "http://test", "X-CSRF-Token": csrf},
+            json={"role": "admin"},
+        )
+        original_admin_demoted = await admin_client.patch(
+            "/api/users/admin/role",
+            headers={"Origin": "http://test", "X-CSRF-Token": csrf},
+            json={"role": "viewer"},
+        )
+
+    assert listed.status_code == 200
+    assert {user["username"] for user in listed.json()["users"]} == {"admin", "viewer@example.com"}
+    assert viewer_dashboard.status_code == 200
+    assert viewer_users.status_code == 403
+    assert viewer_config.status_code == 403
+    assert viewer_mutation.status_code == 403
+    assert viewer_mutation.json()["detail"] == "Administrator role required"
+    assert updated.status_code == 200 and updated.json()["role"] == "admin"
+    assert original_admin_demoted.status_code == 200
 
     await container.close()
 

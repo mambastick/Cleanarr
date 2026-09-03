@@ -21,10 +21,12 @@ import { LIBRARY_COPY } from "@/features/library/library-copy"
 import { buildManualDeleteRequest, libraryDeleteTargetFromItem, librarySelectionItemFromItem, type BatchSelectionItem, type LibraryDeleteTarget } from "@/features/library/library-selection"
 import { GeneralSettingsModal, ServiceModal, SettingsPanel } from "@/features/settings/settings-panel"
 import { SetupWizard } from "@/features/setup/setup-wizard"
+import { UsersPanel } from "@/features/users/users-panel"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { AuthSessionPayload, AuthStatusPayload, SSOLoginPayload } from "@/lib/auth"
 import type { DashboardActivity, DashboardPayload, DashboardWebhookAttempt } from "@/lib/dashboard"
 import { getUiText, resolveUiLanguage, type UiLanguage, type UiTextMap } from "@/lib/i18n"
+import { createClientIdempotencyKey } from "@/lib/idempotency"
 import type { LibraryItem, ManualDeleteBatch, ManualDeleteBatchListResponse, ManualDeleteJob, ManualDeleteJobListResponse, ManualDeletePreviewResponse } from "@/lib/library"
 import type { ConnectionTestResponse, GeneralConfig, RuntimeConfigPayload } from "@/lib/runtime-config"
 import { buildServicePayload, DASHBOARD_NAME_TO_FAMILY, EMPTY_DRAFTS, getDownloaderLabel, getServiceEndpoint, getServiceTitle, getServices, isSetupStepReady, resolveActiveService, SERVICE_META, SETUP_STEPS, toDraft, type DownloaderKind, type ServiceDraft, type ServiceFamily, type ServiceModalState } from "@/lib/service-config"
@@ -51,7 +53,7 @@ function CleanArrApp() {
   const [authMode, setAuthMode] = useState<AuthMode>("login")
   const [showWizard, setShowWizard] = useState(false)
   const [activeTab, setActiveTab] = useState<AppShellPage>("overview")
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("general")
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("cleanarr")
   const [, setDownloadsActiveCount] = useState<number | null>(null)
   const [authForm, setAuthForm] = useState({ username: "", password: "", confirmPassword: "" })
   const [ssoError, setSsoError] = useState<string | null>(null)
@@ -367,9 +369,9 @@ function CleanArrApp() {
   }, [authStatus?.authenticated, hasActiveBatches, hasActiveDeleteJobs, loadDeleteBatches, loadDeleteJobs])
 
   useEffect(() => {
-    if (authStatus?.authenticated) {
+    if (authStatus?.authenticated && authStatus.role === "admin") {
       void loadConfig()
-    } else if (authStatus && !authStatus.authenticated) {
+    } else if (authStatus) {
       setConfig(null)
     }
   }, [authStatus, loadConfig])
@@ -493,6 +495,7 @@ function CleanArrApp() {
       ...current,
       authenticated: false,
       username: null,
+      role: null,
       csrf_token: null,
     } : current)
     setSsoError(null)
@@ -587,6 +590,7 @@ function CleanArrApp() {
 
   // Derive from config first (updated immediately after save), fall back to dashboard (polled)
   const isLive = config != null ? !config.general.dry_run : dashboard ? !dashboard.service.dry_run : false
+  const isAdmin = authStatus.role === "admin"
 
   // ─── Main app ──────────────────────────────────────────────────────────────
 
@@ -639,6 +643,7 @@ function CleanArrApp() {
         dryRun={!isLive}
         storageHeadline={shellStorage}
         labels={SHELL_COPY[shellLanguage]}
+        canAdmin={isAdmin}
       >
         <div className={activeTab === "library" ? "mx-auto w-full max-w-[100rem]" : "mx-auto w-full max-w-6xl"}>
           <div hidden={activeTab !== "overview"}>
@@ -655,7 +660,8 @@ function CleanArrApp() {
               storageLoading={storage.loading || storage.refreshing}
               storageError={storage.error}
               storageLanguage={shellLanguage}
-              onRefreshStorage={() => void storage.refresh()}
+              readOnly={!isAdmin}
+              onRefreshStorage={isAdmin ? () => void storage.refresh() : undefined}
               onToggleDryRun={async () => {
                 if (config) await saveGeneralSettings({ ...config.general, dry_run: !config.general.dry_run })
               }}
@@ -682,8 +688,8 @@ function CleanArrApp() {
               language={shellLanguage}
               fetchJson={fetchJson}
               resetKey={libraryResetKey}
-              onDeletePreview={openLibraryDeletePreview}
-              onBatchPreview={openLibraryBatchPreview}
+              onDeletePreview={isAdmin ? openLibraryDeletePreview : undefined}
+              onBatchPreview={isAdmin ? openLibraryBatchPreview : undefined}
             />
           </div>
 
@@ -694,6 +700,7 @@ function CleanArrApp() {
                 authenticated={Boolean(authStatus.authenticated)}
                 language={shellLanguage}
                 isLive={isLive}
+                canMutate={isAdmin}
                 fetchJson={fetchJson}
                 onActiveCountChange={setDownloadsActiveCount}
                 onDelete={openDeletePreview}
@@ -709,7 +716,11 @@ function CleanArrApp() {
             <ActivityPanel text={uiText} filteredActivity={filteredActivity} webhookAttempts={filteredWebhookAttempts} activityFilter={activityFilter} onFilterChange={setActivityFilter} />
           </div>
 
-          <div hidden={activeTab !== "settings"}>
+          {isAdmin ? <div hidden={activeTab !== "users"}>
+            <UsersPanel active={activeTab === "users"} language={shellLanguage} currentUsername={authStatus.username} currentRole={authStatus.role} fetchJson={fetchJson} onCurrentRoleChange={(role) => setAuthStatus((current) => current ? { ...current, role } : current)} />
+          </div> : null}
+
+          {isAdmin ? <div hidden={activeTab !== "settings"}>
             <SettingsPanel
               text={uiText}
               language={uiLanguage}
@@ -727,12 +738,12 @@ function CleanArrApp() {
                 setServiceModal({ family, draft: toDraft(service) })
               }}
             />
-          </div>
+          </div> : null}
         </div>
       </AppShell>
 
       {/* ── Setup wizard overlay ── */}
-      {showWizard && (
+      {isAdmin && showWizard && (
         <SetupWizard
           text={uiText}
           config={config}
@@ -750,7 +761,7 @@ function CleanArrApp() {
       )}
 
       {/* Modals */}
-      <GeneralSettingsModal
+      {isAdmin ? <GeneralSettingsModal
         open={generalModalOpen}
         text={uiText}
         config={config?.general ?? null}
@@ -760,9 +771,9 @@ function CleanArrApp() {
           setGeneralModalOpen(false)
         }}
         returnFocusRef={settingsModalReturnFocusRef}
-      />
+      /> : null}
 
-      <ServiceModal
+      {isAdmin ? <ServiceModal
         state={serviceModal}
         text={uiText}
         onClose={() => setServiceModal(null)}
@@ -777,7 +788,7 @@ function CleanArrApp() {
           tokenConfigured: Boolean(config?.general.webhook_shared_token),
           onSetupWebhook: handleSetupWebhook,
         } : undefined}
-      />
+      /> : null}
 
       <DeleteConfirmationDialog
         open={deleteSession.phase !== "closed"}
@@ -837,6 +848,7 @@ function CleanArrApp() {
         language={uiLanguage === "ru" ? "ru" : "en"}
         announcement={deleteJobAnnouncement}
         announcementTone={deleteJobAnnouncementTone}
+        canDismiss={isAdmin}
         onDismiss={(jobId) => void dismissDeleteJob(jobId)}
       />
     </>
@@ -851,9 +863,7 @@ function CleanArrApp() {
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
-function createDeleteSessionKey(): string {
-  return crypto.randomUUID()
-}
+const createDeleteSessionKey = createClientIdempotencyKey
 
 function getDeleteTargetLabel(target: LibraryDeleteTarget, text: UiTextMap): string {
   if (target.kind === "movie") return target.movie_title

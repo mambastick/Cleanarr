@@ -2,26 +2,33 @@ import {
   Activity,
   BookOpen,
   Download,
+  HardDrive,
   Home,
   Languages,
+  LibraryBig,
   LogOut,
+  Menu,
   MoreHorizontal,
   Plug,
+  ShieldCheck,
   SlidersHorizontal,
-  Zap,
   Settings,
   Star,
+  Trash2,
+  Users,
   X,
-  HardDrive,
+  Zap,
   type LucideIcon,
 } from "lucide-react"
 import { Laptop as LaptopData, Moon as MoonData, Sun as SunData } from "lucide"
 import { MorphIcon } from "morphicons/react"
-import { useRef, useState, type ReactNode } from "react"
+import { LayoutGroup, motion } from "motion/react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 
 import { AnimateIcon, AnimatedIcon, type IconAnimation } from "@/components/animate-ui/animated-icon"
 import type { ThemeMode } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Sheet,
   SheetBackdrop,
@@ -34,9 +41,9 @@ import {
 } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
 
-export type AppShellPage = "overview" | "library" | "downloads" | "activity" | "settings"
+export type AppShellPage = "overview" | "library" | "downloads" | "activity" | "users" | "settings"
 export type ShellLanguage = "en" | "ru"
-export type SettingsSection = "general" | "services"
+export type SettingsSection = "cleanarr" | "library" | "security" | "cleanup" | "services"
 export type StorageHealth = "healthy" | "warning" | "critical" | "unknown"
 
 export type StorageHeadline = {
@@ -62,8 +69,13 @@ export type AppShellLabels = {
   storageUnavailable: string
   account: string
   settings: string
-  settingsGeneral: string
+  settingsCleanarr: string
+  settingsLibrary: string
+  settingsSecurity: string
+  settingsCleanup: string
   settingsServices: string
+  collapseSidebar: string
+  expandSidebar: string
   theme: string
   themeLight: string
   themeDark: string
@@ -89,8 +101,13 @@ const DEFAULT_LABELS: AppShellLabels = {
   storageUnavailable: "Storage unavailable",
   account: "Account",
   settings: "Settings",
-  settingsGeneral: "General",
+  settingsCleanarr: "CleanArr",
+  settingsLibrary: "Media library",
+  settingsSecurity: "Security",
+  settingsCleanup: "Cleanup",
   settingsServices: "Connected services",
+  collapseSidebar: "Collapse sidebar",
+  expandSidebar: "Expand sidebar",
   theme: "Theme",
   themeLight: "Light",
   themeDark: "Dark",
@@ -103,6 +120,7 @@ const DEFAULT_LABELS: AppShellLabels = {
     library: "Library",
     downloads: "Downloads",
     activity: "Activity",
+    users: "Users",
     settings: "Settings",
   },
   storageStatus: {
@@ -120,6 +138,7 @@ type AppShellProps = {
   settingsSection?: SettingsSection
   onSettingsSectionChange?: (section: SettingsSection) => void
   username?: string | null
+  canAdmin?: boolean
   theme?: ThemeMode
   onThemeChange?: (theme: ThemeMode) => void
   language?: ShellLanguage
@@ -146,6 +165,7 @@ const NAV_ICON_ANIMATION: Record<AppShellPage, IconAnimation> = {
   library: "lift",
   downloads: "bounce",
   activity: "pulse",
+  users: "lift",
   settings: "wiggle",
 }
 
@@ -154,10 +174,11 @@ const NAV_ITEMS: NavItem[] = [
   { page: "library", icon: BookOpen },
   { page: "downloads", icon: Download },
   { page: "activity", icon: Activity },
+  { page: "users", icon: Users },
   { page: "settings", icon: Settings },
 ]
 
-const MOBILE_ITEMS: NavItem[] = NAV_ITEMS.filter(({ page }) => page !== "settings")
+const MOBILE_ITEMS: NavItem[] = NAV_ITEMS.filter(({ page }) => page !== "settings" && page !== "users")
 
 function mergeLabels(labels?: AppShellProps["labels"]): AppShellLabels {
   return {
@@ -168,22 +189,23 @@ function mergeLabels(labels?: AppShellProps["labels"]): AppShellLabels {
   }
 }
 
-function Brand({ labels }: { labels: AppShellLabels }) {
+function Brand({ labels, collapsed, onToggle }: { labels: AppShellLabels; collapsed?: boolean; onToggle?: () => void }) {
   return (
     <AnimateIcon><div className="app-shell__brand" aria-label={labels.logo}>
       <AnimatedIcon animation="wiggle"><Zap className="app-shell__brand-mark" /></AnimatedIcon>
       <span className="app-shell__brand-name"><span>Clean</span><strong>Arr</strong></span>
-      <AnimateIcon><a
-        className="app-shell__brand-github"
-        href="https://github.com/mambastick/Cleanarr"
-        target="_blank"
-        rel="noreferrer noopener"
-        aria-label={`GitHub: ${labels.githubStars}`}
-        title={`GitHub: ${labels.githubStars}`}
-      >
-        <AnimatedIcon animation="pulse"><Star /></AnimatedIcon>
-        <span>15</span>
-      </a></AnimateIcon>
+      {onToggle ? <Tooltip><TooltipTrigger render={<button type="button" className="app-shell__collapse" onClick={onToggle} aria-label={collapsed ? labels.expandSidebar : labels.collapseSidebar}><Menu /></button>} /><TooltipContent side="right">{collapsed ? labels.expandSidebar : labels.collapseSidebar}</TooltipContent></Tooltip> : null}
+      {!onToggle ? <AnimateIcon><a
+          className="app-shell__brand-github"
+          href="https://github.com/mambastick/Cleanarr"
+          target="_blank"
+          rel="noreferrer noopener"
+          aria-label={`GitHub: ${labels.githubStars}`}
+          title={`GitHub: ${labels.githubStars}`}
+        >
+          <AnimatedIcon animation="pulse"><Star /></AnimatedIcon>
+          <span>15</span>
+        </a></AnimateIcon> : null}
     </div></AnimateIcon>
   )
 }
@@ -214,23 +236,35 @@ function StorageCard({ storage, labels }: { storage: StorageHeadline; labels: Ap
   )
 }
 
-function NavigationItems({ items, activePage, labels, onNavigate, mobile = false }: { items: NavItem[]; activePage: AppShellPage; labels: AppShellLabels; onNavigate: (page: AppShellPage) => void; mobile?: boolean }) {
+function NavigationItems({ items, activePage, labels, onNavigate, mobile = false, collapsed = false }: { items: NavItem[]; activePage: AppShellPage; labels: AppShellLabels; onNavigate: (page: AppShellPage) => void; mobile?: boolean; collapsed?: boolean }) {
   return (
     <div className={cn("app-shell__nav-list", mobile && "app-shell__nav-list--mobile")}>
       {items.map(({ page, icon: Icon }) => {
         const active = activePage === page
         return (
-          <AnimateIcon key={page}><button type="button" className={cn("app-shell__nav-item", active && "app-shell__nav-item--active")} aria-current={active ? "page" : undefined} aria-label={labels.nav[page]} title={labels.nav[page]} onClick={() => onNavigate(page)}>
-            <AnimatedIcon animation={NAV_ICON_ANIMATION[page]}><Icon /></AnimatedIcon>
-            <span>{labels.nav[page]}</span>
-          </button></AnimateIcon>
+          <Tooltip key={page}>
+            <AnimateIcon><TooltipTrigger render={<button type="button" className={cn("app-shell__nav-item", active && "app-shell__nav-item--active")} aria-current={active ? "page" : undefined} aria-label={labels.nav[page]} onClick={() => onNavigate(page)}>
+              {active ? <motion.span layoutId={mobile ? "mobile-active-navigation" : "sidebar-active-navigation"} initial={false} transition={{ type: "spring", stiffness: 310, damping: 30 }} className="app-shell__nav-active-indicator" /> : null}
+              <AnimatedIcon animation={NAV_ICON_ANIMATION[page]}><Icon /></AnimatedIcon>
+              <span>{labels.nav[page]}</span>
+            </button>} /></AnimateIcon>
+            {collapsed && !mobile ? <TooltipContent side="right">{labels.nav[page]}</TooltipContent> : null}
+          </Tooltip>
         )
       })}
     </div>
   )
 }
 
-function SettingsNavigation({ activePage, settingsSection = "general", labels, onNavigate, onSettingsSectionChange }: { activePage: AppShellPage; settingsSection?: SettingsSection; labels: AppShellLabels; onNavigate: (page: AppShellPage) => void; onSettingsSectionChange?: (section: SettingsSection) => void }) {
+const SETTINGS_ITEMS: Array<{ section: SettingsSection; label: keyof Pick<AppShellLabels, "settingsCleanarr" | "settingsLibrary" | "settingsSecurity" | "settingsCleanup" | "settingsServices">; icon: LucideIcon; animation: IconAnimation }> = [
+  { section: "cleanarr", label: "settingsCleanarr", icon: SlidersHorizontal, animation: "rotate" },
+  { section: "library", label: "settingsLibrary", icon: LibraryBig, animation: "lift" },
+  { section: "security", label: "settingsSecurity", icon: ShieldCheck, animation: "pulse" },
+  { section: "cleanup", label: "settingsCleanup", icon: Trash2, animation: "wiggle" },
+  { section: "services", label: "settingsServices", icon: Plug, animation: "bounce" },
+]
+
+function SettingsNavigation({ activePage, settingsSection = "cleanarr", labels, onNavigate, onSettingsSectionChange, collapsed = false }: { activePage: AppShellPage; settingsSection?: SettingsSection; labels: AppShellLabels; onNavigate: (page: AppShellPage) => void; onSettingsSectionChange?: (section: SettingsSection) => void; collapsed?: boolean }) {
   const expanded = activePage === "settings"
   const selectSection = (section: SettingsSection) => {
     onSettingsSectionChange?.(section)
@@ -239,51 +273,42 @@ function SettingsNavigation({ activePage, settingsSection = "general", labels, o
 
   return (
     <div className="app-shell__settings-group">
-      <AnimateIcon><button
-        type="button"
-        className={cn("app-shell__nav-item", expanded && "app-shell__nav-item--active")}
-        aria-current={expanded ? "page" : undefined}
-        aria-expanded={expanded}
-        aria-controls={expanded ? "app-shell-settings-sections" : undefined}
-        aria-label={labels.nav.settings}
-        title={labels.nav.settings}
-        onClick={() => selectSection("general")}
-      >
-        <AnimatedIcon animation="wiggle"><Settings /></AnimatedIcon>
-        <span>{labels.nav.settings}</span>
-      </button></AnimateIcon>
+      <Tooltip><AnimateIcon><TooltipTrigger render={<button
+          type="button"
+          className={cn("app-shell__nav-item", expanded && "app-shell__nav-item--active")}
+          aria-current={expanded ? "page" : undefined}
+          aria-expanded={expanded && !collapsed}
+          aria-controls={expanded && !collapsed ? "app-shell-settings-sections" : undefined}
+          aria-label={labels.nav.settings}
+          onClick={() => selectSection(settingsSection)}
+        >
+          {expanded ? <motion.span layoutId="sidebar-active-navigation" initial={false} transition={{ type: "spring", stiffness: 310, damping: 30 }} className="app-shell__nav-active-indicator" /> : null}
+          <AnimatedIcon animation="wiggle"><Settings /></AnimatedIcon>
+          <span>{labels.nav.settings}</span>
+        </button>} /></AnimateIcon>{collapsed ? <TooltipContent side="right">{labels.nav.settings}</TooltipContent> : null}</Tooltip>
       {expanded ? (
         <div id="app-shell-settings-sections" className="app-shell__settings-sections" role="group" aria-label={labels.settings}>
-          <AnimateIcon><button
-            type="button"
-            className={cn("app-shell__settings-section", settingsSection === "general" && "app-shell__settings-section--active")}
-            aria-current={settingsSection === "general" ? "page" : undefined}
-            title={labels.settingsGeneral}
-            onClick={() => selectSection("general")}
-          >
-            <AnimatedIcon animation="rotate"><SlidersHorizontal /></AnimatedIcon>
-            <span>{labels.settingsGeneral}</span>
-          </button></AnimateIcon>
-          <AnimateIcon><button
-            type="button"
-            className={cn("app-shell__settings-section", settingsSection === "services" && "app-shell__settings-section--active")}
-            aria-current={settingsSection === "services" ? "page" : undefined}
-            title={labels.settingsServices}
-            onClick={() => selectSection("services")}
-          >
-            <AnimatedIcon animation="bounce"><Plug /></AnimatedIcon>
-            <span>{labels.settingsServices}</span>
-          </button></AnimateIcon>
+          {SETTINGS_ITEMS.map(({ section, label, icon: Icon, animation }) => <Tooltip key={section}><AnimateIcon><TooltipTrigger render={<button
+              type="button"
+              className={cn("app-shell__settings-section", settingsSection === section && "app-shell__settings-section--active")}
+              aria-current={settingsSection === section ? "page" : undefined}
+              aria-label={labels[label]}
+              onClick={() => selectSection(section)}
+            >
+              <AnimatedIcon animation={animation}><Icon /></AnimatedIcon>
+              <span>{labels[label]}</span>
+            </button>} /></AnimateIcon>{collapsed ? <TooltipContent side="right">{labels[label]}</TooltipContent> : null}</Tooltip>)}
         </div>
       ) : null}
     </div>
   )
 }
 
-function MorePanel({ labels, storageHeadline, username, theme, language, onThemeChange, onLanguageChange, onLogout, onSettings, triggerRef, activePage, desktop = false }: { labels: AppShellLabels; storageHeadline: StorageHeadline; username: string | null | undefined; theme?: ThemeMode; language?: ShellLanguage; onThemeChange?: (theme: ThemeMode) => void; onLanguageChange?: (language: ShellLanguage) => void; onLogout?: () => void; onSettings: () => void; triggerRef: React.RefObject<HTMLButtonElement | null>; activePage: AppShellPage; desktop?: boolean }) {
+function MorePanel({ labels, storageHeadline, username, theme, language, onThemeChange, onLanguageChange, onLogout, onNavigate, settingsSection = "cleanarr", onSettingsSectionChange, triggerRef, activePage, canAdmin = true, desktop = false }: { labels: AppShellLabels; storageHeadline: StorageHeadline; username: string | null | undefined; theme?: ThemeMode; language?: ShellLanguage; onThemeChange?: (theme: ThemeMode) => void; onLanguageChange?: (language: ShellLanguage) => void; onLogout?: () => void; onNavigate: (page: AppShellPage) => void; settingsSection?: SettingsSection; onSettingsSectionChange?: (section: SettingsSection) => void; triggerRef: React.RefObject<HTMLButtonElement | null>; activePage: AppShellPage; canAdmin?: boolean; desktop?: boolean }) {
   const [open, setOpen] = useState(false)
   const currentTheme = theme ?? "system"
   const currentLanguage = language ?? "en"
+  const moreActive = activePage === "users" || activePage === "settings"
   const nextTheme: ThemeMode = currentTheme === "light" ? "dark" : currentTheme === "dark" ? "system" : "light"
   const themeIcon = currentTheme === "dark" ? MoonData : currentTheme === "light" ? SunData : LaptopData
   const themeLabel = currentTheme === "dark" ? labels.themeDark : currentTheme === "light" ? labels.themeLight : labels.themeSystem
@@ -299,7 +324,8 @@ function MorePanel({ labels, storageHeadline, username, theme, language, onTheme
           <span className="app-shell__account-name">{username || labels.account}</span>
         </SheetTrigger>
       ) : (
-        <SheetTrigger render={<Button ref={triggerRef} type="button" variant="ghost" className="app-shell__more-trigger" aria-label={labels.more} />}>
+        <SheetTrigger render={<Button ref={triggerRef} type="button" variant="ghost" className={cn("app-shell__more-trigger", moreActive && "app-shell__more-trigger--active")} aria-current={moreActive ? "page" : undefined} aria-label={labels.more} />}>
+          {moreActive ? <motion.span layoutId="mobile-active-navigation" initial={false} transition={{ type: "spring", stiffness: 310, damping: 30 }} className="app-shell__nav-active-indicator" /> : null}
           <MoreHorizontal aria-hidden="true" />
           <span>{labels.more}</span>
         </SheetTrigger>
@@ -318,13 +344,17 @@ function MorePanel({ labels, storageHeadline, username, theme, language, onTheme
                 <SheetTitle>{labels.more}</SheetTitle>
                 <SheetDescription>{labels.navigation}</SheetDescription>
               </div>
-              <SheetClose render={<Button type="button" variant="ghost" size="icon-lg" className="min-h-11 min-w-11" aria-label={labels.close} />}>
+              <SheetClose render={<Button type="button" variant="ghost" size="icon-lg" className="min-h-11 min-w-11" aria-label={labels.close} title={labels.close} />}>
                 <X aria-hidden="true" />
               </SheetClose>
             </div>
           )}
           <div className="app-shell__sheet-body">
-            {!desktop ? <NavigationItems items={[{ page: "settings", icon: Settings }]} activePage={activePage} labels={labels} onNavigate={(page) => { setOpen(false); if (page === "settings") onSettings() }} /> : null}
+            {!desktop && canAdmin ? <NavigationItems items={[{ page: "users", icon: Users }, { page: "settings", icon: Settings }]} activePage={activePage} labels={labels} onNavigate={(page) => { setOpen(false); onNavigate(page) }} /> : null}
+            {!desktop && canAdmin && activePage === "settings" ? <div className="app-shell__sheet-settings" role="group" aria-label={labels.settings}>
+              <p className="app-shell__sheet-section-label">{labels.settings}</p>
+              {SETTINGS_ITEMS.map(({ section, label, icon: Icon, animation }) => <AnimateIcon key={section}><button type="button" className={cn("app-shell__sheet-action", settingsSection === section && "app-shell__sheet-action--active")} aria-current={settingsSection === section ? "page" : undefined} onClick={() => { onSettingsSectionChange?.(section); setOpen(false); onNavigate("settings") }}><AnimatedIcon animation={animation}><Icon /></AnimatedIcon><span>{labels[label]}</span></button></AnimateIcon>)}
+            </div> : null}
             {!desktop ? <StorageCard storage={storageHeadline} labels={labels} /> : null}
             <div className={cn(desktop && "app-shell__sheet-icon-actions")}>
               <AnimateIcon><button type="button" className={cn("app-shell__sheet-action", desktop && "app-shell__sheet-icon-action")} onClick={() => onThemeChange?.(nextTheme)} aria-label={desktop ? `${labels.theme}: ${themeLabel}` : undefined} title={desktop ? `${labels.theme}: ${themeLabel}` : undefined}><AnimatedIcon animation="pulse"><MorphIcon icon={themeIcon} reducedMotion="user" size={18} /></AnimatedIcon>{!desktop ? <><span>{labels.theme}</span><strong>{themeLabel}</strong></> : null}</button></AnimateIcon>
@@ -339,26 +369,58 @@ function MorePanel({ labels, storageHeadline, username, theme, language, onTheme
   )
 }
 
-export function AppShell({ activePage, onPageChange, onNavigate, settingsSection, onSettingsSectionChange, username, theme, onThemeChange, language, onLanguageChange, onLogout, dryRun, storageHeadline, storage, jobsSlot, jobs, jobsCount, labels: labelOverrides, children }: AppShellProps) {
+function DesktopAccountControls({ labels, username, theme = "system", language = "en", onThemeChange, onLanguageChange, onLogout }: Pick<AppShellProps, "username" | "theme" | "language" | "onThemeChange" | "onLanguageChange" | "onLogout"> & { labels: AppShellLabels }) {
+  const nextTheme: ThemeMode = theme === "light" ? "dark" : theme === "dark" ? "system" : "light"
+  const themeIcon = theme === "dark" ? MoonData : theme === "light" ? SunData : LaptopData
+  const themeLabel = theme === "dark" ? labels.themeDark : theme === "light" ? labels.themeLight : labels.themeSystem
+  return <div className="app-shell__account-panel">
+    <div className="app-shell__account-summary" aria-label={`${labels.account}: ${username || labels.account}`}>
+      <span className="app-shell__account-avatar" aria-hidden="true">{(username?.trim().charAt(0) || "A").toUpperCase()}</span>
+      <span className="app-shell__account-name">{username || labels.account}</span>
+    </div>
+    <div className="app-shell__account-actions">
+      <Tooltip><AnimateIcon><TooltipTrigger render={<button type="button" className="app-shell__account-action" onClick={() => onThemeChange?.(nextTheme)} aria-label={`${labels.theme}: ${themeLabel}`}><AnimatedIcon animation="pulse"><MorphIcon icon={themeIcon} reducedMotion="user" size={18} /></AnimatedIcon></button>} /></AnimateIcon><TooltipContent side="top">{labels.theme}: {themeLabel}</TooltipContent></Tooltip>
+      <Tooltip><AnimateIcon><TooltipTrigger render={<button type="button" className="app-shell__account-action" onClick={() => onLanguageChange?.(language === "en" ? "ru" : "en")} aria-label={`${labels.language}: ${language.toUpperCase()}`}><AnimatedIcon animation="wiggle"><Languages /></AnimatedIcon></button>} /></AnimateIcon><TooltipContent side="top">{labels.language}: {language.toUpperCase()}</TooltipContent></Tooltip>
+      <Tooltip><AnimateIcon><TooltipTrigger render={<button type="button" className="app-shell__account-action app-shell__account-action--logout" onClick={onLogout} aria-label={labels.logOut}><AnimatedIcon animation="bounce"><LogOut /></AnimatedIcon></button>} /></AnimateIcon><TooltipContent side="top">{labels.logOut}</TooltipContent></Tooltip>
+    </div>
+  </div>
+}
+
+export function AppShell({ activePage, onPageChange, onNavigate, settingsSection, onSettingsSectionChange, username, canAdmin = true, theme, onThemeChange, language, onLanguageChange, onLogout, dryRun, storageHeadline, storage, jobsSlot, jobs, jobsCount, labels: labelOverrides, children }: AppShellProps) {
   const labels = mergeLabels(labelOverrides)
+  const [collapsed, setCollapsed] = useState(() => typeof window !== "undefined" && window.localStorage.getItem("cleanarr.sidebar.collapsed") === "true")
   const resolvedStorage = storageHeadline ?? storage ?? { status: "unknown" as const, headline: labels.storageUnavailable }
   const resolvedJobs = jobsSlot ?? jobs
   const mobileMoreTriggerRef = useRef<HTMLButtonElement>(null)
-  const desktopAccountTriggerRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    window.localStorage.setItem("cleanarr.sidebar.collapsed", String(collapsed))
+  }, [collapsed])
+  useEffect(() => {
+    const toggle = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "b") {
+        event.preventDefault()
+        setCollapsed((value) => !value)
+      }
+    }
+    window.addEventListener("keydown", toggle)
+    return () => window.removeEventListener("keydown", toggle)
+  }, [])
   const navigate = (page: AppShellPage) => {
     onPageChange?.(page)
     onNavigate?.(page)
   }
   return (
-    <div className="app-shell">
+    <div className={cn("app-shell", collapsed && "app-shell--sidebar-collapsed")}>
       <aside className="app-shell__sidebar" aria-label={labels.navigation}>
-        <Brand labels={labels} />
-        <NavigationItems items={NAV_ITEMS.filter(({ page }) => page !== "settings")} activePage={activePage} labels={labels} onNavigate={navigate} />
-        <SettingsNavigation activePage={activePage} settingsSection={settingsSection} labels={labels} onNavigate={navigate} onSettingsSectionChange={onSettingsSectionChange} />
+        <Brand labels={labels} collapsed={collapsed} onToggle={() => setCollapsed((value) => !value)} />
+        <LayoutGroup id="desktop-sidebar-navigation">
+          <NavigationItems items={NAV_ITEMS.filter(({ page }) => page !== "settings" && (canAdmin || page !== "users"))} activePage={activePage} labels={labels} onNavigate={navigate} collapsed={collapsed} />
+          {canAdmin ? <SettingsNavigation activePage={activePage} settingsSection={settingsSection} labels={labels} onNavigate={navigate} onSettingsSectionChange={onSettingsSectionChange} collapsed={collapsed} /> : null}
+        </LayoutGroup>
         <div className="app-shell__sidebar-bottom">
           <RuntimeStatus dryRun={dryRun} labels={labels} />
           <StorageCard storage={resolvedStorage} labels={labels} />
-          <MorePanel labels={labels} storageHeadline={resolvedStorage} username={username} theme={theme} language={language} onThemeChange={onThemeChange} onLanguageChange={onLanguageChange} onLogout={onLogout} onSettings={() => navigate("settings")} triggerRef={desktopAccountTriggerRef} activePage={activePage} desktop />
+          <DesktopAccountControls labels={labels} username={username} theme={theme} language={language} onThemeChange={onThemeChange} onLanguageChange={onLanguageChange} onLogout={onLogout} />
         </div>
       </aside>
       <header className="app-shell__mobile-topbar">
@@ -369,7 +431,7 @@ export function AppShell({ activePage, onPageChange, onNavigate, settingsSection
       <main className="app-shell__main">{children}</main>
       <nav className="app-shell__bottom-nav" aria-label={labels.navigation}>
         <NavigationItems items={MOBILE_ITEMS} activePage={activePage} labels={labels} onNavigate={navigate} mobile />
-        <MorePanel labels={labels} storageHeadline={resolvedStorage} username={username} theme={theme} language={language} onThemeChange={onThemeChange} onLanguageChange={onLanguageChange} onLogout={onLogout} onSettings={() => navigate("settings")} triggerRef={mobileMoreTriggerRef} activePage={activePage} />
+        <MorePanel labels={labels} storageHeadline={resolvedStorage} username={username} theme={theme} language={language} onThemeChange={onThemeChange} onLanguageChange={onLanguageChange} onLogout={onLogout} onNavigate={navigate} settingsSection={settingsSection} onSettingsSectionChange={onSettingsSectionChange} triggerRef={mobileMoreTriggerRef} activePage={activePage} canAdmin={canAdmin} />
       </nav>
     </div>
   )

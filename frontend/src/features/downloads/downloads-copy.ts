@@ -25,6 +25,7 @@ const EXTRA_COPY = {
     actionSource: "Source",
     actionAttempts: "Attempts",
     actionUpdated: "Updated",
+    adminOnly: "Viewer access is read-only. An administrator can run controls and deletion plans.",
   },
   ru: {
     close: "Закрыть",
@@ -39,6 +40,7 @@ const EXTRA_COPY = {
     actionSource: "Источник",
     actionAttempts: "Попытки",
     actionUpdated: "Обновлено",
+    adminOnly: "Для роли «Зритель» доступен только просмотр. Команды и планы удаления запускает администратор.",
   },
 } as const
 

@@ -1,5 +1,7 @@
 import {
   AlertCircle,
+  ChevronLeft,
+  ChevronRight,
   Film,
   Info,
   RefreshCw,
@@ -29,6 +31,7 @@ import {
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   fetchLibraryArtwork,
   fetchLibraryItem,
@@ -99,6 +102,8 @@ export function LibraryPanelV2({
   const [query, setQuery] = useState("")
   const [sort, setSort] = useState<LibrarySort>("added")
   const [direction, setDirection] = useState<LibraryDirection>("desc")
+  const [pageSize, setPageSize] = useState(12)
+  const [cardSize, setCardSize] = useState<"small" | "medium" | "large">("medium")
   const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState<Record<string, LibraryItem>>({})
   const [catalogRevisions, setCatalogRevisions] = useState<Partial<Record<LibraryMediaType, string>>>({})
@@ -108,7 +113,7 @@ export function LibraryPanelV2({
   const [detailError, setDetailError] = useState(false)
   const detailTrigger = useRef<HTMLElement | null>(null)
   const detailRequest = useRef(0)
-  const filters: LibraryFilters = { mediaType, query, sort, direction, refresh: false }
+  const filters: LibraryFilters = { mediaType, query, sort, direction, pageSize, refresh: false }
   const list = useLibrary({ active, authenticated, filters, fetchJson, onCatalogRevisionChange })
 
   const resetSelection = useCallback(() => {
@@ -246,13 +251,13 @@ export function LibraryPanelV2({
     <div className="min-w-0 space-y-5">
       <LibraryStatus text={text} status={list.sourceStatus} failures={list.sourceFailures} error={list.error} onRetry={list.retry} />
       {list.loading && !list.items.length ? (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" aria-label={text.title} aria-busy="true">
+        <div className={cn("grid gap-4", cardGridClass(cardSize))} aria-label={text.title} aria-busy="true">
           {Array.from({ length: 8 }, (_, index) => <Skeleton key={index} className="aspect-[2/3] w-full rounded-xl" />)}
         </div>
       ) : null}
       {!list.loading && !list.items.length && !list.error ? <div className="rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">{text.noItems}</div> : null}
       {list.items.length ? (
-        <div role="list" className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4 xl:grid-cols-5">
+        <div role="list" className={cn("grid gap-x-3 gap-y-6 sm:gap-4", cardGridClass(cardSize))}>
           {list.items.map((item) => (
             <LibraryCard
               key={item.resource_id}
@@ -267,7 +272,7 @@ export function LibraryPanelV2({
           ))}
         </div>
       ) : null}
-      {list.nextCursor ? <AnimateIcon><Button variant="outline" className="w-full sm:w-auto" onClick={list.loadMore} disabled={list.loadingMore}>{list.loadingMore ? <AnimatedIcon animation="rotate"><RefreshCw className="opacity-50" /></AnimatedIcon> : null}{text.loadMore}</Button></AnimateIcon> : null}
+      {list.items.length ? <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4"><span className="text-sm text-muted-foreground">{text.page} {list.page}</span><div className="flex items-center gap-2"><Button variant="outline" onClick={list.previousPage} disabled={!list.hasPreviousPage || list.loading}><ChevronLeft />{text.previousPage}</Button><Button variant="outline" onClick={list.nextPage} disabled={!list.nextCursor || list.loading}>{text.nextPage}<ChevronRight /></Button></div></div> : null}
     </div>
   )
 
@@ -277,8 +282,8 @@ export function LibraryPanelV2({
         <div><h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{text.title}</h1><p className="mt-1 text-sm text-muted-foreground">{text.description}</p></div>
         <div className="flex items-center gap-2">
           {selectMode ? <Button variant="outline" onClick={selectVisibleItems} disabled={!list.items.length}>{text.selectVisible}</Button> : null}
-          <AnimateIcon><Button data-batch-focus-fallback variant={selectMode ? "secondary" : "outline"} onClick={() => setSelectMode((value) => !value)} aria-pressed={selectMode}>{selectMode ? <AnimatedIcon animation="wiggle"><X /></AnimatedIcon> : null}{selectMode ? text.exitSelectMode : text.selectMode}</Button></AnimateIcon>
-          <AnimateIcon><Button variant="outline" size="icon" aria-label={text.refresh} onClick={list.refresh} disabled={list.loading}><AnimatedIcon animation="rotate"><RefreshCw className={cn(list.loading && "opacity-50")} /></AnimatedIcon></Button></AnimateIcon>
+          <AnimateIcon><Button data-batch-focus-fallback variant={selectMode ? "secondary" : "outline"} onClick={() => { if (selectMode) resetSelection(); setSelectMode((value) => !value) }} aria-pressed={selectMode}>{selectMode ? <AnimatedIcon animation="wiggle"><X /></AnimatedIcon> : null}{selectMode ? text.exitSelectMode : text.selectMode}</Button></AnimateIcon>
+          <Tooltip><AnimateIcon><TooltipTrigger render={<Button variant="outline" size="icon" aria-label={text.refresh} onClick={list.refresh} disabled={list.loading}><AnimatedIcon animation="rotate"><RefreshCw className={cn(list.loading && "opacity-50")} /></AnimatedIcon></Button>} /></AnimateIcon><TooltipContent>{text.refresh}</TooltipContent></Tooltip>
         </div>
       </header>
 
@@ -288,11 +293,16 @@ export function LibraryPanelV2({
         <TabsContent value="series" className="mt-3 md:col-start-2 md:row-start-1 md:mt-0"><LibraryControls text={text} query={query} setQuery={setQuery} sort={sort} setSort={setSort} direction={direction} setDirection={setDirection} /></TabsContent>
       </Tabs>
 
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-card p-3">
+        <label className="flex items-center gap-2 text-sm text-muted-foreground"><span>{text.itemsPerPage}</span><Select items={{ "12": "12", "24": "24", "48": "48" }} value={String(pageSize)} onValueChange={(value) => setPageSize(Number(value))}><SelectTrigger className="w-20" aria-label={text.itemsPerPage}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="12">12</SelectItem><SelectItem value="24">24</SelectItem><SelectItem value="48">48</SelectItem></SelectContent></Select></label>
+        <label className="flex items-center gap-2 text-sm text-muted-foreground"><span>{text.cardSize}</span><Select items={{ small: text.cardSmall, medium: text.cardMedium, large: text.cardLarge }} value={cardSize} onValueChange={(value) => setCardSize(value as typeof cardSize)}><SelectTrigger className="w-36" aria-label={text.cardSize}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="small">{text.cardSmall}</SelectItem><SelectItem value="medium">{text.cardMedium}</SelectItem><SelectItem value="large">{text.cardLarge}</SelectItem></SelectContent></Select></label>
+      </div>
+
       <div className="min-w-0">
         {listColumn}
         {detail && desktopInspector ? (
           <aside className="fixed inset-y-0 right-0 z-30 w-[360px] overflow-y-auto border-l border-border bg-card shadow-[-18px_0_45px_color-mix(in_srgb,var(--foreground)_8%,transparent)]" aria-label={text.technicalDetails}>
-            <Button variant="secondary" size="icon" className="absolute right-4 top-4 z-10 bg-card/85 shadow-sm backdrop-blur" aria-label={text.close} onClick={closeDetail}><X aria-hidden="true" /></Button>
+            <Tooltip><TooltipTrigger render={<Button variant="secondary" size="icon" className="absolute right-4 top-4 z-10 bg-card shadow-sm" aria-label={text.close} onClick={closeDetail}><X aria-hidden="true" /></Button>} /><TooltipContent>{text.close}</TooltipContent></Tooltip>
             <div className="h-64 bg-muted"><Artwork resourceId={detail.resource_id} artwork={detail.artwork} fallback={detail.media_type === "movie" ? <Film className="size-12 text-muted-foreground" /> : <Tv className="size-12 text-muted-foreground" />} /></div>
             <div className="relative -mt-8 min-h-[calc(100vh-14rem)] rounded-t-3xl bg-card p-5">
               <p className="sr-only">{text.technicalDetails}</p>
@@ -314,7 +324,7 @@ export function LibraryPanelV2({
           <SheetPortal>
             <SheetBackdrop className="fixed inset-0 z-50 bg-foreground/25 backdrop-blur-[1px]" />
             <SheetContent className="fixed inset-y-0 right-0 z-[51] w-full overflow-y-auto border-l bg-card p-5 shadow-2xl outline-none sm:w-[360px]">
-              <div className="flex items-start justify-between gap-3"><div><SheetTitle>{detail?.display_name ?? text.title}</SheetTitle><SheetDescription>{text.technicalDetails}</SheetDescription></div><SheetClose render={<Button variant="ghost" size="icon" aria-label={text.close} />}><X aria-hidden="true" /></SheetClose></div>
+              <div className="flex items-start justify-between gap-3"><div><SheetTitle>{detail?.display_name ?? text.title}</SheetTitle><SheetDescription>{text.technicalDetails}</SheetDescription></div><SheetClose render={<Button variant="ghost" size="icon" aria-label={text.close} title={text.close} />}><X aria-hidden="true" /></SheetClose></div>
               {detail ? <Inspector detail={detail} loading={detailLoading} error={detailError} text={text} language={language} onDeletePreview={onDeletePreview} onSelect={() => { toggle(detail); setSelectMode(true) }} onRetry={retryDetail} /> : null}
             </SheetContent>
           </SheetPortal>
@@ -330,7 +340,7 @@ function LibraryControls({ text, query, setQuery, sort, setSort, direction, setD
     <div className="flex flex-wrap items-center gap-2">
       <div className="relative min-w-[220px] flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input className="pl-9" aria-label={text.search} placeholder={text.search} value={query} onChange={(event) => setQuery(event.target.value)} /></div>
       <Select items={{ added: text.added, title: text.titleSort, size: text.size }} value={sort} onValueChange={(value) => setSort(value as LibrarySort)}><SelectTrigger aria-label={text.sort} className="w-[180px]"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="added">{text.added}</SelectItem><SelectItem value="title">{text.titleSort}</SelectItem><SelectItem value="size">{text.size}</SelectItem></SelectContent></Select>
-      <AnimateIcon><Button variant="outline" size="icon" aria-label={direction === "desc" ? text.descending : text.ascending} onClick={() => setDirection(direction === "desc" ? "asc" : "desc")}><AnimatedIcon animation="pulse"><MorphIcon icon={directionIcon} reducedMotion="user" size={16} /></AnimatedIcon></Button></AnimateIcon>
+      <Tooltip><AnimateIcon><TooltipTrigger render={<Button variant="outline" size="icon" aria-label={direction === "desc" ? text.descending : text.ascending} onClick={() => setDirection(direction === "desc" ? "asc" : "desc")}><AnimatedIcon animation="pulse"><MorphIcon icon={directionIcon} reducedMotion="user" size={16} /></AnimatedIcon></Button>} /></AnimateIcon><TooltipContent>{direction === "desc" ? text.descending : text.ascending}</TooltipContent></Tooltip>
     </div>
   )
 }
@@ -358,12 +368,24 @@ function LibraryCard({ item, text, selectMode, selected, onToggle, onOpen, onDel
       <div className={cn("relative aspect-[2/3] overflow-hidden rounded-lg bg-muted shadow-sm", selected && "ring-3 ring-primary ring-offset-2 ring-offset-background")}>
         <button type="button" className="absolute inset-0 z-0 block size-full rounded-lg text-left focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed" aria-label={selectMode ? `${text.select}: ${item.display_name}` : `${item.display_name}, ${typeLabel}`} aria-describedby={selectMode && !selectable ? selectionUnavailableId : undefined} disabled={selectMode && !selectable} onClick={handleCardAction}><Artwork resourceId={item.resource_id} artwork={item.artwork} fallback={item.media_type === "movie" ? <Film className="size-10 text-muted-foreground" /> : <Tv className="size-10 text-muted-foreground" />} /></button>
         {selectMode ? <Checkbox className="absolute left-2 top-2 z-10 size-6 bg-card/90" checked={selected} disabled={!selectable} aria-label={`${text.select}: ${item.display_name}`} aria-describedby={!selectable ? selectionUnavailableId : undefined} onCheckedChange={onToggle} /> : null}
-        <AnimateIcon><Button variant="destructive" size="icon" className="absolute right-2 top-2 z-10 size-11 opacity-0 shadow-md transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100" aria-label={`${text.reviewPlan}: ${item.display_name}`} title={deleteAvailable ? text.reviewPlan : text.deleteUnavailable} onClick={(event) => onDeletePreview?.(item, event.currentTarget)} disabled={!deleteAvailable}><AnimatedIcon animation="wiggle"><Trash2 /></AnimatedIcon></Button></AnimateIcon>
+        <Tooltip><AnimateIcon><TooltipTrigger render={<Button variant="destructive" size="icon" className="absolute right-2 top-2 z-10 size-11 bg-destructive! text-white! opacity-100 shadow-lg hover:bg-destructive/90!" aria-label={`${text.reviewPlan}: ${item.display_name}`} onClick={(event) => onDeletePreview?.(item, event.currentTarget)} disabled={!deleteAvailable}><AnimatedIcon animation="wiggle"><Trash2 /></AnimatedIcon></Button>} /></AnimateIcon><TooltipContent>{deleteAvailable ? text.reviewPlan : text.deleteUnavailable}</TooltipContent></Tooltip>
       </div>
       <button type="button" className="mt-2 block min-h-11 w-full rounded text-left focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed" aria-describedby={selectMode && !selectable ? selectionUnavailableId : undefined} disabled={selectMode && !selectable} onClick={handleCardAction}><span className="block truncate text-sm font-medium">{item.display_name}</span><span className="block truncate text-xs text-muted-foreground">{item.year ?? text.unknown}{item.size != null ? ` · ${formatSize(item.size)}` : ""}</span></button>
       {selectMode && !selectable ? <p id={selectionUnavailableId} className="mt-1 text-xs text-muted-foreground">{text.selectionUnavailable}</p> : null}
     </article>
   )
+}
+
+const artworkCache = new Map<string, Promise<Blob>>()
+
+function cachedArtwork(resourceId: string) {
+  let cached = artworkCache.get(resourceId)
+  if (!cached) {
+    cached = fetchLibraryArtwork(resourceId).catch((error) => { artworkCache.delete(resourceId); throw error })
+    artworkCache.set(resourceId, cached)
+    if (artworkCache.size > 96) artworkCache.delete(artworkCache.keys().next().value as string)
+  }
+  return cached
 }
 
 function Artwork({ resourceId, artwork, fallback }: { resourceId: string; artwork: LibraryItem["artwork"]; fallback: ReactNode }) {
@@ -380,7 +402,7 @@ function Artwork({ resourceId, artwork, fallback }: { resourceId: string; artwor
     const start = () => {
       if (started) return
       started = true
-      void fetchLibraryArtwork(resourceId, controller.signal).then((blob) => {
+      void cachedArtwork(resourceId).then((blob) => {
         if (controller.signal.aborted) return
         objectUrl = URL.createObjectURL(blob)
         setUrl(objectUrl)
@@ -391,7 +413,7 @@ function Artwork({ resourceId, artwork, fallback }: { resourceId: string; artwor
     else {
       observer = new IntersectionObserver((entries) => {
         if (entries.some((entry) => entry.isIntersecting)) { start(); observer?.disconnect() }
-      }, { rootMargin: "200px" })
+      }, { rootMargin: "80px" })
       observer.observe(host.current)
     }
     return () => { observer?.disconnect(); controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl) }
@@ -443,6 +465,7 @@ function Inspector({ detail, loading, error, text, language, onDeletePreview, on
 }
 
 function Metric({ label, value }: { label: string; value: string }) { return <div><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 break-words font-medium">{value}</dd></div> }
+function cardGridClass(size: "small" | "medium" | "large") { if (size === "small") return "grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-7"; if (size === "large") return "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"; return "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" }
 function formatSize(size: number) { if (!size) return "0 B"; const index = Math.min(4, Math.floor(Math.log(size) / Math.log(1024))); return `${(size / 1024 ** index).toFixed(1)} ${["B", "KB", "MB", "GB", "TB"][index]}` }
 function formatDuration(seconds: number, language: LibraryLanguage) { const days = Math.floor(seconds / 86_400); const hours = Math.floor((seconds % 86_400) / 3_600); return days ? `${days}${language === "ru" ? "д" : "d"} ${hours}${language === "ru" ? "ч" : "h"}` : `${hours}${language === "ru" ? "ч" : "h"}` }
 function formatDate(value: string | null | undefined, language: LibraryLanguage, fallback: string) { if (!value) return fallback; const date = new Date(value); return Number.isNaN(date.getTime()) ? fallback : date.toLocaleDateString(language === "ru" ? "ru-RU" : "en-US") }

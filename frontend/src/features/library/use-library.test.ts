@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import { useLibrary, type LibraryFilters } from "./use-library"
 import type { LibraryItemsResponse } from "@/lib/library"
 
-const filters: LibraryFilters = { mediaType: "movie", query: "", sort: "added", direction: "desc", refresh: false }
+const filters: LibraryFilters = { mediaType: "movie", query: "", sort: "added", direction: "desc", pageSize: 12, refresh: false }
 const response = (overrides: Partial<LibraryItemsResponse> = {}): LibraryItemsResponse => ({ items: [], next_cursor: null, source_status: "complete", source_failures: [], catalog_revision: "rev-1", ...overrides })
 
 describe("useLibrary", () => {
@@ -45,12 +45,12 @@ describe("useLibrary", () => {
     vi.useRealTimers()
   })
 
-  it("merges cursor pages and surfaces catalog revision changes", async () => {
+  it("moves between cursor pages and surfaces catalog revision changes", async () => {
     const calls: string[] = []
     const fetchJson = vi.fn((url: string) => { calls.push(url); return Promise.resolve(response({ items: [{ resource_id: `item-${calls.length}`, media_type: "movie", display_name: `Item ${calls.length}`, title: `Item ${calls.length}`, year: null, size: null, has_file: null, counts: null, added_at: null, artwork: { status: "missing", url: null }, delete_target: null, fetched_at: null, catalog_revision: calls.length === 1 ? "rev-1" : "rev-2" }], next_cursor: calls.length === 1 ? "next" : null, catalog_revision: calls.length === 1 ? "rev-1" : "rev-2" })) }) as unknown as Parameters<typeof useLibrary>[0]["fetchJson"]
     const { result } = renderHook(() => useLibrary({ active: true, authenticated: true, filters, fetchJson, debounceMs: 0 }))
     await waitFor(() => expect(result.current.items).toHaveLength(1))
-    await act(async () => { result.current.loadMore() })
+    await act(async () => { result.current.nextPage() })
     await waitFor(() => expect(result.current.error).toBe("catalog_changed"))
     expect(result.current.items).toHaveLength(1)
     expect(calls[1]).toContain("cursor=next")
