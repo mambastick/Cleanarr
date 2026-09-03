@@ -292,7 +292,7 @@ function SettingsNavigation({ activePage, settingsSection = "cleanarr", labels, 
 
   return (
     <div className="app-shell__settings-group">
-      <HighlightItem value="settings" className="app-shell__nav-highlight-item"><Tooltip><AnimateIcon><TooltipTrigger render={<button
+      <HighlightItem value="settings" className="app-shell__nav-highlight-item" activeClassName="app-shell__nav-active-indicator--settings"><Tooltip><AnimateIcon><TooltipTrigger render={<button
           type="button"
           className={cn("app-shell__nav-item", expanded && "app-shell__nav-item--active")}
           aria-current={expanded ? "page" : undefined}
