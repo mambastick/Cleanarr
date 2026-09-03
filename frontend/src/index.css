@@ -233,16 +233,18 @@
   flex-direction: column;
   border-right: 1px solid var(--border);
   background: var(--surface);
-  padding: 1.5rem 0.875rem 0.75rem;
+  padding: 1rem 0.875rem 0.75rem;
   transition: width 220ms ease, padding 220ms ease;
 }
 
 .app-shell__brand {
   display: inline-flex;
-  min-height: 2.75rem;
+  min-height: 3.5rem;
+  width: 100%;
   align-items: center;
   gap: 0.25rem;
-  padding: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 0 0 0.75rem;
   color: var(--fg);
   font-size: 1.15rem;
   letter-spacing: -0.03em;
@@ -276,20 +278,20 @@
 .app-shell__brand-github:hover { background: var(--muted); color: var(--fg); }
 .app-shell__brand-github:focus-visible { outline: 3px solid color-mix(in srgb, var(--ring) 50%, transparent); outline-offset: 2px; }
 .app-shell__brand-github svg { width: 0.82rem; height: 0.82rem; }
-.app-shell__collapse { position: absolute; z-index: 2; top: 1.625rem; right: -1rem; display: inline-grid; width: 2rem; height: 2rem; place-items: center; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted-copy); box-shadow: 0 0.35rem 1rem color-mix(in srgb, var(--fg) 12%, transparent); transition: color 160ms ease, background-color 160ms ease, transform 180ms ease; }
-.app-shell__collapse:hover { background: var(--primary-soft); color: var(--primary-copy); transform: scale(1.06); }
+.app-shell__collapse { display: inline-grid; width: 2rem; height: 2rem; flex: 0 0 auto; place-items: center; margin-left: 0.2rem; border: 1px solid transparent; border-radius: 0.625rem; background: transparent; color: var(--muted-copy); transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease; }
+.app-shell__collapse:hover { border-color: var(--border); background: var(--muted); color: var(--fg); }
 .app-shell__collapse:focus-visible { outline: 3px solid color-mix(in srgb, var(--ring) 50%, transparent); outline-offset: 2px; }
 .app-shell__collapse svg { width: 1rem; height: 1rem; }
 .app-shell__navigation-scroll { min-height: 0; flex: 1 1 auto; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; margin-right: -0.25rem; padding-right: 0.25rem; outline: none; scrollbar-width: none; }
 .app-shell__navigation-scroll::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .app-shell__navigation-scroll:focus-visible { border-radius: 0.75rem; box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent); }
-.app-shell__navigation-highlight { min-height: 100%; }
+.app-shell__navigation-highlight { min-height: 100%; overflow: visible; }
 .app-shell__nav-highlight-item { position: relative; z-index: 1; width: 100%; }
-.app-shell__nav-list { display: grid; gap: 0.35rem; margin-top: 2rem; }
+.app-shell__nav-list { display: grid; gap: 0.35rem; margin-top: 1rem; }
 .app-shell__nav-item {
   position: relative;
   isolation: isolate;
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   min-height: 2.75rem;
   width: 100%;
@@ -324,21 +326,29 @@
 .app-shell__settings-highlight { display: grid; gap: 0.2rem; }
 .app-shell__settings-highlight-item { position: relative; z-index: 1; width: 100%; }
 .app-shell__settings-active-indicator { position: absolute; z-index: 0; border: 1px solid color-mix(in srgb, var(--primary) 22%, transparent); border-radius: 0.625rem; background: color-mix(in srgb, var(--primary-soft) 72%, transparent); }
-.app-shell__settings-section { display: flex; min-height: 2.75rem; align-items: center; gap: 0.55rem; border: 0; border-radius: 0.625rem; background: transparent; padding: 0.5rem 0.65rem; color: var(--muted-copy); font: inherit; font-size: 0.8rem; font-weight: 560; text-align: left; }
+.app-shell__settings-section { display: flex; min-height: 2.75rem; width: 100%; align-items: center; gap: 0.55rem; border: 0; border-radius: 0.625rem; background: transparent; padding: 0.5rem 0.65rem; color: var(--muted-copy); font: inherit; font-size: 0.8rem; font-weight: 560; text-align: left; }
 .app-shell__settings-section svg { width: 1rem; height: 1rem; flex: 0 0 auto; }
 .app-shell__settings-section:hover { background: var(--muted); color: var(--fg); }
 .app-shell__settings-section--active { color: var(--primary-copy); font-weight: 650; }
+.app-shell__settings-section--active:hover { background: transparent; color: var(--primary-copy); }
 .app-shell__settings-section:focus-visible { outline: 3px solid color-mix(in srgb, var(--ring) 50%, transparent); outline-offset: 2px; }
 .app-shell__sidebar-bottom { display: grid; flex: 0 0 auto; gap: 0.75rem; margin-top: 0.75rem; }
 .app-shell__sidebar-bottom > .app-shell__runtime-status { width: 100%; justify-content: center; }
 .app-shell__account { display: flex; min-height: 3.25rem; width: 100%; align-items: center; gap: 0.65rem; border: 0; border-top: 1px solid var(--border); background: transparent; padding: 0.75rem 0.45rem 0 0.4rem; color: inherit; font: inherit; text-align: left; }
 .app-shell__account:hover { color: var(--primary); }
 .app-shell__account:focus-visible { border-radius: 0.75rem; outline: 3px solid color-mix(in srgb, var(--ring) 50%, transparent); outline-offset: 2px; }
-.app-shell__account-avatar { display: inline-grid; width: 2rem; height: 2rem; flex: 0 0 auto; place-items: center; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); font-size: 0.85rem; font-weight: 650; }
+.user-avatar { --user-avatar-tone: var(--chart-1); display: inline-grid; width: 2rem; height: 2rem; flex: 0 0 auto; place-items: center; border: 1px solid color-mix(in srgb, var(--user-avatar-tone) 42%, var(--border)); border-radius: 999px; background: color-mix(in srgb, var(--user-avatar-tone) 24%, var(--surface)); color: var(--fg); font-size: 0.85rem; font-weight: 700; letter-spacing: -0.02em; }
+.user-avatar--tone-0 { --user-avatar-tone: var(--chart-1); }
+.user-avatar--tone-1 { --user-avatar-tone: var(--chart-2); }
+.user-avatar--tone-2 { --user-avatar-tone: var(--chart-3); }
+.user-avatar--tone-3 { --user-avatar-tone: var(--chart-4); }
+.user-avatar--tone-4 { --user-avatar-tone: var(--chart-5); }
+.app-shell__account-avatar { width: 2rem; height: 2rem; font-size: 0.85rem; }
 .app-shell__account-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); font-size: 0.875rem; }
-.app-shell__account-panel { display: flex; justify-content: center; border-top: 1px solid var(--border); padding-top: 0.75rem; }
-.app-shell__account-trigger { display: inline-grid; width: 2.75rem; height: 2.75rem; place-items: center; border: 1px solid transparent; border-radius: 999px; background: transparent; color: inherit; transition: background-color 160ms ease, border-color 160ms ease, transform 180ms ease; }
-.app-shell__account-trigger:hover, .app-shell__account-trigger[data-popup-open] { border-color: color-mix(in srgb, var(--primary) 28%, var(--border)); background: var(--primary-soft); transform: translateY(-1px); }
+.app-shell__account-panel { display: flex; width: 100%; justify-content: center; border-top: 1px solid var(--border); padding-top: 0.75rem; }
+.app-shell__account-trigger { display: flex; width: 100%; min-height: 2.75rem; align-items: center; justify-content: flex-start; gap: 0.65rem; border: 1px solid transparent; border-radius: 0.75rem; background: transparent; padding: 0.35rem 0.5rem; color: inherit; font: inherit; text-align: left; transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease; }
+.app-shell__account-trigger:hover { background: var(--muted); color: var(--fg); }
+.app-shell__account-trigger[data-popup-open] { border-color: color-mix(in srgb, var(--primary) 28%, var(--border)); background: var(--primary-soft); color: var(--primary-copy); }
 .app-shell__account-trigger:focus-visible { outline: 3px solid color-mix(in srgb, var(--ring) 50%, transparent); outline-offset: 2px; }
 .app-shell__account-popover { width: 15rem; padding: 0.65rem; }
 .app-shell__account-popover-header { display: flex; align-items: center; gap: 0.65rem; padding: 0.45rem 0.5rem 0.7rem; border-bottom: 1px solid var(--border); }
@@ -373,7 +383,7 @@
 .app-shell__main { min-height: 100vh; margin-left: var(--app-shell-sidebar-width); padding: 2rem clamp(1.25rem, 2vw, 2rem); transition: margin-left 220ms ease; }
 .app-shell__desktop-status { position: fixed; z-index: 20; top: 1rem; right: 1.5rem; display: flex; align-items: center; gap: 0.5rem; }
 .jobs-sheet-trigger { position: fixed; z-index: 31; top: 0.75rem; right: 7.75rem; }
-.app-shell__runtime-status { display: inline-flex; min-height: 2.25rem; align-items: center; gap: 0.45rem; border: 1px solid; border-radius: 999px; padding: 0.35rem 0.7rem; font-size: 0.75rem; font-weight: 650; outline: none; }
+.app-shell__runtime-status { display: inline-flex; min-height: 2.25rem; align-items: center; gap: 0.45rem; border: 1px solid; border-radius: 0.625rem; padding: 0.35rem 0.7rem; font-size: 0.75rem; font-weight: 650; outline: none; }
 .app-shell__runtime-status--live { border-color: var(--status-success-border); background: var(--status-success-bg); color: var(--status-success); }
 .app-shell__runtime-status--dry { border-color: var(--status-warning-border); background: var(--status-warning-bg); color: var(--status-warning); }
 .app-shell__status-icon { width: 1rem; height: 1rem; flex: 0 0 auto; }
@@ -408,63 +418,51 @@
 
 @media (min-width: 75rem) {
   .app-shell--sidebar-collapsed .app-shell__sidebar { align-items: center; padding-inline: 0.625rem; }
-  .app-shell--sidebar-collapsed .app-shell__brand { width: 100%; min-height: 5rem; flex-direction: column; justify-content: flex-start; gap: 0.1rem; padding-inline: 0; }
-  .app-shell--sidebar-collapsed .app-shell__brand-mark { margin-top: -0.45rem; }
+  .app-shell--sidebar-collapsed .app-shell__brand { min-height: 3.5rem; justify-content: space-between; gap: 0.125rem; padding-inline: 0; }
   .app-shell--sidebar-collapsed .app-shell__brand-name,
   .app-shell--sidebar-collapsed .app-shell__nav-item > span:not([data-slot="animated-icon"]):not(.app-shell__nav-active-indicator),
   .app-shell--sidebar-collapsed .app-shell__account-name,
-  .app-shell--sidebar-collapsed .app-shell__storage-heading span,
-  .app-shell--sidebar-collapsed .app-shell__storage-state,
-  .app-shell--sidebar-collapsed .app-shell__storage-headline,
-  .app-shell--sidebar-collapsed .app-shell__storage-detail,
-  .app-shell--sidebar-collapsed .app-shell__storage-meta,
-  .app-shell--sidebar-collapsed .app-shell__storage-meter,
   .app-shell--sidebar-collapsed .app-shell__runtime-status span:last-child { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .app-shell--sidebar-collapsed .app-shell__settings-sections { display: none; }
   .app-shell--sidebar-collapsed .app-shell__brand-github { position: absolute; width: 1px; height: 1px; min-height: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .app-shell--sidebar-collapsed .app-shell__collapse { width: 1.875rem; height: 1.875rem; margin-left: 0; }
   .app-shell--sidebar-collapsed .app-shell__nav-list,
   .app-shell--sidebar-collapsed .app-shell__settings-group,
   .app-shell--sidebar-collapsed .app-shell__sidebar-bottom { width: 100%; }
-  .app-shell--sidebar-collapsed .app-shell__nav-list { margin-top: 0.75rem; }
-  .app-shell--sidebar-collapsed .app-shell__nav-item { justify-content: center; padding-inline: 0; }
-  .app-shell--sidebar-collapsed .app-shell__nav-item [data-slot="animated-icon"] { display: inline-grid; width: 2.5rem; height: 2.5rem; place-items: center; border-radius: 0.625rem; transition: background-color 160ms ease, box-shadow 160ms ease, color 160ms ease; }
-  .app-shell--sidebar-collapsed .app-shell__nav-item:hover { background: transparent; }
-  .app-shell--sidebar-collapsed .app-shell__nav-item:hover [data-slot="animated-icon"],
-  .app-shell--sidebar-collapsed .app-shell__nav-item:focus-visible [data-slot="animated-icon"] { background: var(--muted); box-shadow: inset 0 0 0 1px var(--border); color: var(--fg); }
-  .app-shell--sidebar-collapsed .app-shell__navigation-highlight > .app-shell__nav-active-indicator { left: 50% !important; width: 2.5rem !important; height: 2.5rem !important; margin-top: 0.125rem; margin-left: -1.25rem; border-radius: 0.625rem; }
-  .app-shell--sidebar-collapsed .app-shell__navigation-highlight > .app-shell__nav-active-indicator--settings { margin-top: 0.5625rem; }
-  .app-shell--sidebar-collapsed .app-shell__storage { width: 3.75rem; min-height: 2.75rem; place-items: center; padding: 0.45rem; }
-  .app-shell--sidebar-collapsed .app-shell__storage-heading { justify-content: center; }
-  .app-shell--sidebar-collapsed .app-shell__sidebar-bottom > .app-shell__runtime-status { width: 3.75rem; min-height: 2.75rem; justify-content: center; padding-inline: 0.45rem; }
-  .app-shell--sidebar-collapsed .app-shell__account-panel { width: 100%; }
+  .app-shell--sidebar-collapsed .app-shell__nav-list,
+  .app-shell--sidebar-collapsed .app-shell__settings-group { justify-items: center; }
+  .app-shell--sidebar-collapsed .app-shell__nav-highlight-item { width: 2.75rem; }
+  .app-shell--sidebar-collapsed .app-shell__nav-item { width: 2.75rem; height: 2.75rem; min-height: 2.75rem; justify-content: center; padding: 0; }
+  .app-shell--sidebar-collapsed .app-shell__nav-item [data-slot="animated-icon"] { display: inline-grid; width: 2.5rem; height: 2.5rem; place-items: center; }
+  .app-shell--sidebar-collapsed .app-shell__nav-item:hover { background: var(--muted); color: var(--fg); }
+  .app-shell--sidebar-collapsed .app-shell__nav-item--active:hover { background: transparent; color: var(--primary-copy); }
+  .app-shell--sidebar-collapsed .app-shell__sidebar-bottom > .app-shell__runtime-status { width: 2.75rem; min-height: 2.75rem; justify-content: center; padding: 0; }
+  .app-shell--sidebar-collapsed .app-shell__account-trigger { width: 2.75rem; min-height: 2.75rem; justify-content: center; padding: 0; }
 }
 
 @media (min-width: 48rem) and (max-width: 74.9375rem) {
   .app-shell { --app-shell-sidebar-width: 5rem; }
   .app-shell__sidebar { align-items: center; padding-inline: 0.625rem; }
-  .app-shell__brand { justify-content: center; padding-inline: 0; }
+  .app-shell__brand { min-height: 3.5rem; justify-content: center; padding-inline: 0; }
   .app-shell__collapse { display: none; }
   .app-shell__brand-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .app-shell__brand-github { position: absolute; width: 1px; height: 1px; min-height: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  .app-shell__nav-list { width: 100%; }
-  .app-shell__nav-item { justify-content: center; padding-inline: 0; }
-  .app-shell__nav-item [data-slot="animated-icon"] { display: inline-grid; width: 2.5rem; height: 2.5rem; place-items: center; border-radius: 0.625rem; transition: background-color 160ms ease, box-shadow 160ms ease, color 160ms ease; }
-  .app-shell__nav-item:hover { background: transparent; }
-  .app-shell__nav-item:hover [data-slot="animated-icon"],
-  .app-shell__nav-item:focus-visible [data-slot="animated-icon"] { background: var(--muted); box-shadow: inset 0 0 0 1px var(--border); color: var(--fg); }
-  .app-shell__navigation-highlight > .app-shell__nav-active-indicator { left: 50% !important; width: 2.5rem !important; height: 2.5rem !important; margin-top: 0.125rem; margin-left: -1.25rem; border-radius: 0.625rem; }
-  .app-shell__navigation-highlight > .app-shell__nav-active-indicator--settings { margin-top: 0.5625rem; }
-  .app-shell__nav-item span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  .app-shell__settings-group { width: 100%; }
+  .app-shell__nav-list { width: 100%; justify-items: center; }
+  .app-shell__nav-highlight-item { width: 2.75rem; }
+  .app-shell__nav-item { width: 2.75rem; height: 2.75rem; min-height: 2.75rem; justify-content: center; padding: 0; }
+  .app-shell__nav-item [data-slot="animated-icon"] { display: inline-grid; width: 2.5rem; height: 2.5rem; place-items: center; }
+  .app-shell__nav-item:hover { background: var(--muted); color: var(--fg); }
+  .app-shell__nav-item--active:hover { background: transparent; color: var(--primary-copy); }
+  .app-shell__nav-item > span:not([data-slot="animated-icon"]):not(.app-shell__nav-active-indicator) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .app-shell__settings-group { width: 100%; justify-items: center; }
   .app-shell__settings-sections { margin-left: 0; padding-left: 0; border-left: 0; }
   .app-shell__settings-section { width: 100%; justify-content: center; padding-inline: 0; }
   .app-shell__settings-section span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  .app-shell__storage { width: 3.75rem; min-height: 2.75rem; place-items: center; padding: 0.45rem; }
-  .app-shell__sidebar-bottom > .app-shell__runtime-status { width: 3.75rem; min-height: 2.75rem; justify-content: center; padding-inline: 0.45rem; }
+  .app-shell__storage { display: none; }
+  .app-shell__sidebar-bottom > .app-shell__runtime-status { width: 2.75rem; min-height: 2.75rem; justify-content: center; padding: 0; }
   .app-shell__sidebar-bottom > .app-shell__runtime-status span:last-child { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  .app-shell__storage-heading { justify-content: center; }
-  .app-shell__storage-heading span, .app-shell__storage-state, .app-shell__storage-headline, .app-shell__storage-detail, .app-shell__storage-meta, .app-shell__storage-meter { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  .app-shell__account-panel { width: 100%; }
+  .app-shell__account-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .app-shell__account-trigger { width: 2.75rem; min-height: 2.75rem; justify-content: center; padding: 0; }
 }
 
 .library-card__delete {
@@ -486,7 +484,7 @@
   html::-webkit-scrollbar, body::-webkit-scrollbar, *::-webkit-scrollbar { display: none; width: 0; height: 0; }
   .app-shell__sidebar, .app-shell__desktop-status { display: none; }
   .app-shell__mobile-topbar { position: sticky; z-index: 30; top: 0; display: flex; min-height: 4rem; align-items: center; justify-content: space-between; gap: 0.75rem; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 94%, transparent); padding: 0.6rem 1rem; backdrop-filter: blur(10px); }
-  .app-shell__mobile-topbar .app-shell__brand { padding-inline: 0; font-size: 1.05rem; }
+  .app-shell__mobile-topbar .app-shell__brand { min-height: 0; width: auto; border-bottom: 0; padding: 0; font-size: 1.05rem; }
   .app-shell__mobile-topbar .app-shell__brand-mark { width: 1.2rem; height: 1.2rem; font-size: 1.3rem; }
   .app-shell__mobile-topbar .app-shell__brand-github { display: none; }
   .app-shell__mobile-topbar .app-shell__runtime-status { margin-left: auto; }

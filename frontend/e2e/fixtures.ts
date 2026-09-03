@@ -25,6 +25,7 @@ export const fixtureMovie = { radarr_id: 101, title: "Fixture Movie", jellyfin_m
 export const fixtureSeries = { sonarr_id: 201, title: "Fixture Series", jellyfin_series_title: "Fixture Series", jellyfin_series_id: "fixture-series", has_seerr_request: false, seasons: [{ season_number: 1, episode_count: 1, episode_file_count: 1, size_bytes: 1_000_000, jellyfin_title: "Fixture Series · Season 1", jellyfin_season_id: "fixture-season", has_seerr_request: false }] }
 export const safePlan = { status: "success", display_name: "Fixture Movie", actions: [{ system: "qbittorrent", action: "remove_torrent", details: { client_name: "Fixture downloader", client_kind: "qbittorrent" } }], correlation_id: "fixture-correlation" }
 export const storage = { headline: "Healthy", status: "healthy", freshness: "fresh", partial: false, warning_free_percent: 15, critical_free_percent: 5, observed_at: "2026-01-01T00:00:00Z", volumes: [{ volume_id: "volume-1", service: "radarr", profile_id: "fixture-radarr", display_label: "Media", total_bytes: 1_000_000_000, free_bytes: 500_000_000, free_percent: 50, status: "healthy", freshness: "fresh", observed_at: "2026-01-01T00:00:00Z", error_code: null, possible_duplicate: false }] }
+export const fixtureUsers = [{ username: "fixture-admin", role: "admin", auth_source: "local", created_at: "2026-01-01T00:00:00Z", last_seen_at: "2026-09-03T12:00:00Z" }]
 export function clone<T>(value: T): T { return structuredClone(value) }
 export function downloadItem(overrides: Record<string, unknown> = {}) { return { client_id: "fixture-client", client_name: "Fixture downloader", client_kind: "qbittorrent", info_hash: "fixture-hash", observed_at: "2026-01-01T00:00:00Z", display_name: "Fixture torrent", state: "seeding", freshness: "fresh", ownership: "managed", progress: 1, total_bytes: 1_000_000, downloaded_bytes: 1_000_000, uploaded_bytes: 2_000_000, ratio: 2, seeding_time_seconds: 3600, download_speed_bytes_per_second: 0, upload_speed_bytes_per_second: 0, eta_seconds: null, added_at: null, completed_at: null, activity_at: null, category: null, tags: [], tracker_summary: null, unavailable_reason: null, policy_decision: "eligible", policy_reason_code: null, policy_facts: null, latest_action: null, ...overrides } }
 
@@ -39,11 +40,11 @@ export class ApiController {
   readonly config: typeof runtimeConfig
   readonly handlers: ApiHandler[]
   readonly auth: Record<string, unknown>
-  constructor(options: { config?: typeof runtimeConfig; dashboard?: typeof dashboard; auth?: Record<string, unknown>; handlers?: ApiHandler[]; movies?: unknown[]; series?: unknown[]; downloads?: unknown[]; cleanup?: unknown[]; jobs?: unknown[]; batches?: unknown[] } = {}) {
+  constructor(options: { config?: typeof runtimeConfig; dashboard?: typeof dashboard; auth?: Record<string, unknown>; handlers?: ApiHandler[]; movies?: unknown[]; series?: unknown[]; downloads?: unknown[]; cleanup?: unknown[]; jobs?: unknown[]; batches?: unknown[]; users?: unknown[] } = {}) {
     this.config = clone(options.config ?? runtimeConfig)
     this.handlers = options.handlers ?? []
     this.auth = { authenticated: true, username: "fixture-admin", role: "admin", csrf_token: "fixture-csrf", requires_registration: false, sso_mode: "password_only", sso_configured: false, ui_language: this.config.general.ui_language, ...options.auth }
-    const currentDashboard = clone(options.dashboard ?? dashboard); const movies = options.movies ?? []; const series = options.series ?? []; const downloads = options.downloads ?? []; const cleanup = options.cleanup ?? []; const jobs = options.jobs ?? []; const batches = options.batches ?? []
+    const currentDashboard = clone(options.dashboard ?? dashboard); const movies = options.movies ?? []; const series = options.series ?? []; const downloads = options.downloads ?? []; const cleanup = options.cleanup ?? []; const jobs = options.jobs ?? []; const batches = options.batches ?? []; const users = options.users ?? fixtureUsers
     const libraryMovies = movies.map((value, index) => toLibraryMovie(value, index))
     const librarySeries = series.map((value, index) => toLibrarySeries(value, index))
     this.handlers.push((request) => {
@@ -53,6 +54,7 @@ export class ApiController {
       if (request.pathname === "/api/dashboard") return { body: currentDashboard }
       if (request.pathname === "/api/storage/volumes") return { body: storage }
       if (request.pathname === "/api/storage/refresh" && request.method === "POST") return { body: storage }
+      if (request.pathname === "/api/users") return { body: { users } }
       if (request.pathname === "/api/library/items") {
         const items = request.query.get("media_type") === "series" ? librarySeries : libraryMovies
         return { body: { items, state: "complete", failures: [], next_cursor: null, revision: "fixture-catalog", catalog_revision: "fixture-catalog" } }

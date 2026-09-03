@@ -15,6 +15,10 @@
   [Files highlight](https://animate-ui.com/docs/components/base/files) registry sources to
   CleanArr tokens, reduced-motion behavior, semantic links, and navigation ARIA. They are
   distributed under the **MIT + Commons Clause** notice reproduced below.
+- **Animate UI Tooltip**: local `src/components/ui/tooltip.tsx` adapts the official
+  [Base UI Tooltip](https://animate-ui.com/docs/components/base/tooltip) Motion popup while
+  retaining the project's current `@base-ui/react` trigger and positioning contract. It is
+  distributed under the **MIT + Commons Clause** notice reproduced below.
 - **Morphicons**: `morphicons` is used for stateful direction and theme icon transitions and is
   distributed under the **MIT License**. See https://github.com/guillermolg00/morphicons.
 - **React Bits FadeContent**: downloader profile rows use a local, presentation-only

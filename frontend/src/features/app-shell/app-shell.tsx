@@ -8,6 +8,7 @@ import {
   Languages,
   LibraryBig,
   LogOut,
+  Menu,
   MoreHorizontal,
   Plug,
   RadioTower,
@@ -21,8 +22,6 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import {
-  ChevronLeft as ChevronLeftData,
-  ChevronRight as ChevronRightData,
   Laptop as LaptopData,
   Moon as MoonData,
   Sun as SunData,
@@ -38,6 +37,7 @@ import type { ThemeMode } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverClose, PopoverContent, PopoverDescription, PopoverTitle, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { UserAvatar } from "@/components/user-avatar"
 import {
   Sheet,
   SheetBackdrop,
@@ -200,7 +200,6 @@ function mergeLabels(labels?: AppShellProps["labels"]): AppShellLabels {
 }
 
 function Brand({ labels, collapsed, onToggle }: { labels: AppShellLabels; collapsed?: boolean; onToggle?: () => void }) {
-  const sidebarIcon = collapsed ? ChevronRightData : ChevronLeftData
   return (
     <AnimateIcon><div className="app-shell__brand" aria-label={labels.logo}>
       <AnimatedIcon animation="wiggle"><Zap className="app-shell__brand-mark" /></AnimatedIcon>
@@ -214,7 +213,7 @@ function Brand({ labels, collapsed, onToggle }: { labels: AppShellLabels; collap
         size="sm"
         aria-label={`GitHub: ${labels.githubStars}`}
       />
-      {onToggle ? <Tooltip><TooltipTrigger render={<button type="button" className="app-shell__collapse" onClick={onToggle} aria-label={collapsed ? labels.expandSidebar : labels.collapseSidebar}><MorphIcon icon={sidebarIcon} reducedMotion="user" size={18} /></button>} /><TooltipContent side="right">{collapsed ? labels.expandSidebar : labels.collapseSidebar}</TooltipContent></Tooltip> : null}
+      {onToggle ? <Tooltip><TooltipTrigger render={<button type="button" className="app-shell__collapse" onClick={onToggle} aria-label={collapsed ? labels.expandSidebar : labels.collapseSidebar}><Menu aria-hidden="true" /></button>} /><TooltipContent side="right">{collapsed ? labels.expandSidebar : labels.collapseSidebar}</TooltipContent></Tooltip> : null}
     </div></AnimateIcon>
   )
 }
@@ -365,7 +364,7 @@ function MorePanel({ labels, storageHeadline, username, theme, language, onTheme
     <Sheet open={open} onOpenChange={setPanelOpen}>
       {desktop ? (
         <SheetTrigger render={<button ref={triggerRef} type="button" className="app-shell__account" aria-label={`${labels.account}: ${username || labels.account}`} />}>
-          <span className="app-shell__account-avatar" aria-hidden="true">{(username?.trim().charAt(0) || "A").toUpperCase()}</span>
+          <UserAvatar name={username} className="app-shell__account-avatar" />
           <span className="app-shell__account-name">{username || labels.account}</span>
         </SheetTrigger>
       ) : (
@@ -405,7 +404,7 @@ function MorePanel({ labels, storageHeadline, username, theme, language, onTheme
               <AnimateIcon><button type="button" className={cn("app-shell__sheet-action", desktop && "app-shell__sheet-icon-action")} onClick={() => onLanguageChange?.(currentLanguage === "en" ? "ru" : "en")} aria-label={desktop ? `${labels.language}: ${currentLanguage.toUpperCase()}` : undefined} title={desktop ? `${labels.language}: ${currentLanguage.toUpperCase()}` : undefined}><AnimatedIcon animation="wiggle"><Languages /></AnimatedIcon>{!desktop ? <><span>{labels.language}</span><strong>{currentLanguage.toUpperCase()}</strong></> : null}</button></AnimateIcon>
             </div>
             <AnimateIcon><Button type="button" variant="outline" className="app-shell__logout" onClick={() => { setOpen(false); onLogout?.() }}><AnimatedIcon animation="bounce"><LogOut /></AnimatedIcon>{labels.logOut}</Button></AnimateIcon>
-            <div className="app-shell__sheet-account"><span className="app-shell__account-avatar" aria-hidden="true">{(username?.trim().charAt(0) || "A").toUpperCase()}</span><strong>{username || labels.account}</strong></div>
+            <div className="app-shell__sheet-account"><UserAvatar name={username} className="app-shell__account-avatar" /><strong>{username || labels.account}</strong></div>
           </div>
         </SheetContent>
       </SheetPortal>
@@ -413,25 +412,23 @@ function MorePanel({ labels, storageHeadline, username, theme, language, onTheme
   )
 }
 
-function DesktopAccountPopover({ labels, username, theme = "system", language = "en", onThemeChange, onLanguageChange, onLogout }: Pick<AppShellProps, "username" | "theme" | "language" | "onThemeChange" | "onLanguageChange" | "onLogout"> & { labels: AppShellLabels }) {
+function DesktopAccountPopover({ labels, username, theme = "system", language = "en", onThemeChange, onLanguageChange, onLogout, collapsed = false }: Pick<AppShellProps, "username" | "theme" | "language" | "onThemeChange" | "onLanguageChange" | "onLogout"> & { labels: AppShellLabels; collapsed?: boolean }) {
   const nextTheme: ThemeMode = theme === "light" ? "dark" : theme === "dark" ? "system" : "light"
   const themeIcon = theme === "dark" ? MoonData : theme === "light" ? SunData : LaptopData
   const themeLabel = theme === "dark" ? labels.themeDark : theme === "light" ? labels.themeLight : labels.themeSystem
   const accountLabel = `${labels.account}: ${username || labels.account}`
   const trigger = <PopoverTrigger render={<button type="button" className="app-shell__account-trigger" aria-label={accountLabel} />}>
-    <span className="app-shell__account-avatar" aria-hidden="true">{(username?.trim().charAt(0) || "A").toUpperCase()}</span>
+    <UserAvatar name={username} className="app-shell__account-avatar" />
+    <span className="app-shell__account-name">{username || labels.account}</span>
   </PopoverTrigger>
 
   return (
     <div className="app-shell__account-panel">
       <Popover>
-        <Tooltip>
-          <TooltipTrigger render={trigger} />
-          <TooltipContent side="right">{accountLabel}</TooltipContent>
-        </Tooltip>
+        {collapsed ? <Tooltip><TooltipTrigger render={trigger} /><TooltipContent side="right">{accountLabel}</TooltipContent></Tooltip> : trigger}
         <PopoverContent className="app-shell__account-popover" aria-label={labels.account}>
           <div className="app-shell__account-popover-header">
-            <span className="app-shell__account-avatar" aria-hidden="true">{(username?.trim().charAt(0) || "A").toUpperCase()}</span>
+            <UserAvatar name={username} className="app-shell__account-avatar" />
             <div>
               <PopoverTitle className="app-shell__account-popover-title">{username || labels.account}</PopoverTitle>
               <PopoverDescription className="app-shell__account-popover-description">{labels.account}</PopoverDescription>
@@ -484,8 +481,8 @@ export function AppShell({ activePage, onPageChange, onNavigate, settingsSection
         </div>
         <div className="app-shell__sidebar-bottom">
           <RuntimeStatus dryRun={dryRun} labels={labels} />
-          <StorageCard storage={resolvedStorage} labels={labels} />
-          <DesktopAccountPopover labels={labels} username={username} theme={theme} language={language} onThemeChange={onThemeChange} onLanguageChange={onLanguageChange} onLogout={onLogout} />
+          {!collapsed ? <StorageCard storage={resolvedStorage} labels={labels} /> : null}
+          <DesktopAccountPopover labels={labels} username={username} theme={theme} language={language} onThemeChange={onThemeChange} onLanguageChange={onLanguageChange} onLogout={onLogout} collapsed={collapsed} />
         </div>
       </aside>
       <header className="app-shell__mobile-topbar">

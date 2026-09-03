@@ -137,6 +137,8 @@ it("keeps Settings and Storage in mobile More while desktop account actions live
 
   const account = screen.getByRole("button", { name: "Account: admin" })
   expect(account).toHaveClass("app-shell__account-trigger")
+  expect(account).toHaveTextContent("Aadmin")
+  expect(account.querySelector("[data-initials=A]")).toBeInTheDocument()
   expect(screen.queryByRole("button", { name: "Theme: System" })).not.toBeInTheDocument()
 
   await user.click(account)
@@ -164,6 +166,7 @@ it("collapses the desktop sidebar and keeps every destination available by acces
   expect(container.querySelector(".app-shell")).toHaveClass("app-shell--sidebar-collapsed")
   expect(screen.getAllByRole("button", { name: "Activity" })[0]).toBeEnabled()
   expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument()
+  expect(container.querySelector(".app-shell__sidebar .app-shell__storage")).not.toBeInTheDocument()
 })
 
 it("wires tooltip triggers for icon-only destinations in the collapsed sidebar", async () => {

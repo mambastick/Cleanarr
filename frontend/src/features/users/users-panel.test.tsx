@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { expect, it, vi } from "vitest"
 
@@ -19,8 +19,11 @@ it("loads, searches, and updates user roles for an administrator", async () => {
   render(<UsersPanel active language="ru" currentUsername="admin" currentRole="admin" fetchJson={fetchJson as never} />)
 
   expect(await screen.findByText("anna")).toBeInTheDocument()
+  expect(screen.getByLabelText("Пользователи: 2")).toBeInTheDocument()
+  expect(screen.getByText("В системе должен остаться хотя бы один администратор.")).toBeInTheDocument()
+  expect(screen.getAllByText("A", { selector: "[data-initials]" })).toHaveLength(2)
   await user.type(screen.getByRole("textbox", { name: "Поиск пользователя" }), "anna")
-  expect(screen.queryByText("admin")).not.toBeInTheDocument()
+  expect(within(screen.getByRole("table")).queryByText("admin")).not.toBeInTheDocument()
 
   await user.click(screen.getByRole("combobox", { name: "Роль: anna" }))
   await user.click(screen.getByRole("option", { name: "Администратор" }))
