@@ -6,6 +6,7 @@ import { AppShell, type AppShellPage, type SettingsSection, type StorageHeadline
 import { SHELL_COPY } from "@/features/app-shell/shell-copy"
 import { ActivityPanel } from "@/features/activity/activity-panel"
 import { AuthScreen, AuthScreenSkeleton } from "@/features/auth/auth-screen"
+import { validateAuthForm } from "@/features/auth/auth-validation"
 import { DashboardPanel } from "@/features/dashboard/dashboard-panel"
 import { STORAGE_COPY, type StorageCopy } from "@/features/dashboard/storage-copy"
 const DownloadsPanel = lazy(() => import("@/features/downloads/downloads-panel").then((module) => ({ default: module.DownloadsPanel })))
@@ -439,8 +440,9 @@ function CleanArrApp() {
   const latestActivity = dashboard?.recent_activity[0] ?? null
 
   const submitAuthForm = async () => {
-    if (authMode === "register" && authForm.password !== authForm.confirmPassword) {
-      toast.error(uiText.passwordsDoNotMatch)
+    const validationError = validateAuthForm(authMode, authForm)
+    if (validationError) {
+      toast.error(uiText[validationError])
       return
     }
     setIsAuthSubmitting(true)
@@ -449,7 +451,7 @@ function CleanArrApp() {
         authMode === "register" ? "/api/auth/register" : "/api/auth/login",
         {
           method: "POST",
-          body: JSON.stringify({ username: authForm.username, password: authForm.password }),
+          body: JSON.stringify({ username: authForm.username.trim(), password: authForm.password }),
         },
       )
       setCsrfToken(payload.csrf_token)

@@ -5,7 +5,13 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
-import { FormField } from "@/features/settings/form-presentation"
+import {
+  AUTH_PASSWORD_MAX_LENGTH,
+  AUTH_PASSWORD_MIN_LENGTH,
+  AUTH_USERNAME_MAX_LENGTH,
+  AUTH_USERNAME_MIN_LENGTH,
+} from "@/features/auth/auth-validation"
+import { FieldHint, FormField } from "@/features/settings/form-presentation"
 import type { SsoAuthMode } from "@/lib/auth"
 import type { UiTextMap } from "@/lib/i18n"
 
@@ -91,8 +97,14 @@ export function AuthScreen({
                   id="auth-username"
                   value={authForm.username}
                   autoComplete="username"
+                  minLength={AUTH_USERNAME_MIN_LENGTH}
+                  maxLength={AUTH_USERNAME_MAX_LENGTH}
+                  aria-describedby="auth-username-hint"
                   onChange={(e) => onFieldChange("username", e.target.value)}
                 />
+                <div id="auth-username-hint">
+                  <FieldHint text={text.usernameLengthRequirement} />
+                </div>
               </FormField>
 
               <FormField label={text.password} htmlFor="auth-password">
@@ -100,12 +112,18 @@ export function AuthScreen({
                   id="auth-password"
                   type="password"
                   value={authForm.password}
-                  autoComplete="current-password"
+                  autoComplete={requiresRegistration ? "new-password" : "current-password"}
+                  minLength={AUTH_PASSWORD_MIN_LENGTH}
+                  maxLength={AUTH_PASSWORD_MAX_LENGTH}
+                  aria-describedby="auth-password-hint"
                   onChange={(e) => onFieldChange("password", e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !requiresRegistration) onSubmit()
                   }}
                 />
+                <div id="auth-password-hint">
+                  <FieldHint text={text.passwordLengthRequirement} />
+                </div>
               </FormField>
 
               {requiresRegistration && (
@@ -114,6 +132,9 @@ export function AuthScreen({
                     id="auth-confirm"
                     type="password"
                     value={authForm.confirmPassword}
+                    autoComplete="new-password"
+                    minLength={AUTH_PASSWORD_MIN_LENGTH}
+                    maxLength={AUTH_PASSWORD_MAX_LENGTH}
                     onChange={(e) => onFieldChange("confirmPassword", e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") onSubmit()

@@ -181,6 +181,8 @@ export type UiTextKey =
   | "unexpectedRequestError"
   | "unknownError"
   | "passwordsDoNotMatch"
+  | "usernameLengthRequirement"
+  | "passwordLengthRequirement"
   | "adminCreated"
   | "signedIn"
   | "deletionStarted"
@@ -492,6 +494,8 @@ export const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     unexpectedRequestError: "Unexpected request error",
     unknownError: "Unknown error",
     passwordsDoNotMatch: "Passwords do not match.",
+    usernameLengthRequirement: "Use 3–64 characters for the username.",
+    passwordLengthRequirement: "Use 8–256 characters for the password.",
     adminCreated: "Administrator created. Use the setup wizard to configure your services.",
     signedIn: "Signed in successfully.",
     deletionStarted: "Deletion started in the background.",
@@ -789,6 +793,8 @@ export const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     unexpectedRequestError: "Неожиданная ошибка запроса",
     unknownError: "Неизвестная ошибка",
     passwordsDoNotMatch: "Пароли не совпадают.",
+    usernameLengthRequirement: "Имя пользователя должно содержать от 3 до 64 символов.",
+    passwordLengthRequirement: "Пароль должен содержать от 8 до 256 символов.",
     adminCreated: "Администратор создан. Настройте сервисы в мастере настройки.",
     signedIn: "Вход выполнен.",
     deletionStarted: "Удаление запущено в фоне.",
