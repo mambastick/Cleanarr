@@ -17,7 +17,7 @@ test("settings Select is a themed portal and keeps English/Russian copy localize
   const account = page.getByRole("button", { name: "Account: fixture-admin" })
   await account.click()
   await page.getByRole("button", { name: /Theme.*System/i }).click()
-  await page.getByRole("button", { name: "Close" }).click()
+  await page.locator(".app-shell__sheet-backdrop").click({ position: { x: 700, y: 100 } })
   await expect(account).toBeFocused()
   await navButton(page, "Settings").click()
   const language = page.locator("#settings-ui-language")
@@ -32,7 +32,7 @@ test("settings Select is a themed portal and keeps English/Russian copy localize
 
   await account.click()
   await page.getByRole("button", { name: /Theme.*Light/i }).click()
-  await page.getByRole("button", { name: "Close" }).click()
+  await page.locator(".app-shell__sheet-backdrop").click({ position: { x: 700, y: 100 } })
   await expect(account).toBeFocused()
   await language.focus()
   await page.keyboard.press("Enter")

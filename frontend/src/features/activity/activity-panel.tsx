@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { EmptyState, StatusPill } from "@/features/settings/service-presentation"
 import type { DashboardAction, DashboardActivity, DashboardUnifiedActivityItem, DashboardWebhookAttempt } from "@/lib/dashboard"
 import type { UiTextMap } from "@/lib/i18n"
-import { getItemTypeLabel, getStatusLabel } from "@/lib/service-config"
+import { getStatusLabel } from "@/lib/service-config"
 import { getWebhookStatusLabel, getWebhookStatusTone } from "@/lib/status-format"
 import { cn } from "@/lib/utils"
 
@@ -26,6 +26,10 @@ export function ActivityPanel({ text, filteredActivity, webhookAttempts, activit
   const selected = activityItems.find((item) => activityKey(item) === activeKey) ?? null
 
   return <section className="space-y-5">
+    <header>
+      <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{text.activity}</h1>
+      <p className="mt-1 text-sm text-muted-foreground">{text.activityPageDescription}</p>
+    </header>
     <div className="flex flex-wrap items-center gap-3">
       <Input value={activityFilter} onChange={(event) => onFilterChange(event.target.value)} placeholder={text.filter} aria-label={text.filter} className="max-w-sm" />
       {activityFilter ? <Button variant="ghost" size="sm" onClick={() => onFilterChange("")}>{text.clear}</Button> : null}
@@ -59,11 +63,12 @@ function ActivityEventCard({ item, text, selected, onSelect }: { item: ActivityI
   const tone = processed ? item.result.status === "partial_failure" ? "red" : "green" : getWebhookStatusTone(item.outcome)
   const timestamp = processed ? item.processed_at : item.attempted_at
 
-  return <Card role="listitem" className={cn("transition-colors", selected && "border-primary/50 bg-primary/5")}>
-    <CardContent className="space-y-4 p-4">
-      <div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-start gap-3"><div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted"><Icon className="size-4 text-primary" /></div><div className="min-w-0"><p className="truncate text-sm font-semibold">{title}</p><p className="mt-1 text-xs text-muted-foreground">{processed ? text.recentActivityProcessed.replace("{{item}}", getItemTypeLabel(item.result.item_type, text)) : text.recentActivityWebhook.replace("{{item}}", text.item)}</p></div></div><StatusPill tone={tone} label={outcome} /></div>
-      <div className="flex items-center justify-between gap-3"><time className="text-xs text-muted-foreground">{new Date(timestamp).toLocaleString()}</time><Button variant="ghost" size="sm" onClick={onSelect} aria-pressed={selected}>{text.viewDetails}</Button></div>
+  return <Card role="listitem" className={cn("relative transition-colors", selected && "border-primary/50 bg-primary/5")}>
+    <CardContent className="pointer-events-none space-y-4 p-4">
+      <div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-start gap-3"><div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted"><Icon className="size-4 text-primary" /></div><div className="min-w-0"><p className="truncate text-sm font-semibold">{title}</p><p className="mt-1 text-xs text-muted-foreground">{processed ? text.recentActivityProcessed.replace("{{item}}", title) : text.recentActivityWebhook.replace("{{item}}", title)}</p></div></div><StatusPill tone={tone} label={outcome} /></div>
+      <div className="flex items-center justify-between gap-3"><time className="text-xs text-muted-foreground">{new Date(timestamp).toLocaleString()}</time><span className="text-xs font-medium text-primary">{text.viewDetails}</span></div>
     </CardContent>
+    <button type="button" className="absolute inset-0 rounded-xl focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50" onClick={onSelect} aria-label={`${text.viewDetails}: ${title}`} aria-pressed={selected} />
   </Card>
 }
 

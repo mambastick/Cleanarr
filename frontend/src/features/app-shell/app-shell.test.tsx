@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, vi } from "vitest"
 
@@ -65,12 +65,12 @@ it("closes More from the backdrop and Escape, returning focus to its trigger", a
   await user.click(trigger)
   await user.click(document.querySelector(".app-shell__sheet-backdrop")!)
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
-  expect(trigger).toHaveFocus()
+  await waitFor(() => expect(trigger).toHaveFocus())
 
   await user.click(trigger)
   await user.keyboard("{Escape}")
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
-  expect(trigger).toHaveFocus()
+  await waitFor(() => expect(trigger).toHaveFocus())
 })
 
 it("navigates to Settings from More before closing the sheet", async () => {
@@ -139,6 +139,6 @@ it("renders semantic runtime and storage status with an accessible meter", () =>
   })
 
   expect(screen.getAllByText("Live").length).toBeGreaterThan(0)
-  expect(screen.getByRole("progressbar", { name: "2% free: 98%" })).toHaveAttribute("aria-valuenow", "98")
+  expect(screen.getByRole("progressbar", { name: "Used: 98%" })).toHaveAttribute("aria-valuenow", "98")
   expect(screen.getByText("Clear space soon")).toBeInTheDocument()
 })

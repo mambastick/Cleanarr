@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useR
 import { toast } from "sonner"
 
 import { useTheme } from "@/components/theme-provider"
-import { AppShell, type AppShellPage, type StorageHeadline } from "@/features/app-shell/app-shell"
+import { AppShell, type AppShellPage, type SettingsSection, type StorageHeadline } from "@/features/app-shell/app-shell"
 import { SHELL_COPY } from "@/features/app-shell/shell-copy"
 import { ActivityPanel } from "@/features/activity/activity-panel"
 import { AuthScreen, AuthScreenSkeleton } from "@/features/auth/auth-screen"
@@ -51,6 +51,7 @@ function CleanArrApp() {
   const [authMode, setAuthMode] = useState<AuthMode>("login")
   const [showWizard, setShowWizard] = useState(false)
   const [activeTab, setActiveTab] = useState<AppShellPage>("overview")
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("general")
   const [, setDownloadsActiveCount] = useState<number | null>(null)
   const [authForm, setAuthForm] = useState({ username: "", password: "", confirmPassword: "" })
   const [ssoError, setSsoError] = useState<string | null>(null)
@@ -79,6 +80,10 @@ function CleanArrApp() {
   const batchDeleteReturnFocusRef = useRef<HTMLElement | null>(null)
   const setupWizardReturnFocusRef = useRef<HTMLElement | null>(null)
   const settingsModalReturnFocusRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" })
+  }, [activeTab])
 
   const deferredFilter = useDeferredValue(activityFilter)
   const uiLanguage = useMemo(
@@ -619,6 +624,8 @@ function CleanArrApp() {
       <AppShell
         activePage={activeTab}
         onPageChange={setActiveTab}
+        settingsSection={settingsSection}
+        onSettingsSectionChange={setSettingsSection}
         username={authStatus.username}
         theme={theme}
         onThemeChange={setTheme}
@@ -706,6 +713,8 @@ function CleanArrApp() {
             <SettingsPanel
               text={uiText}
               language={uiLanguage}
+              settingsSection={settingsSection}
+              onSettingsSectionChange={setSettingsSection}
               config={config}
               isConfigLoading={isConfigLoading}
               onSaveGeneral={saveGeneralSettings}

@@ -42,7 +42,7 @@ describe("LibraryPanelV2", () => {
     expect(screen.queryByText("Technical details")).not.toBeInTheDocument()
 
     expect(screen.getByText(LIBRARY_COPY.en.selectionUnavailable)).toBeInTheDocument()
-    expect(screen.getByRole("checkbox", { name: "Select: Unlinked movie" })).toBeDisabled()
+    expect(screen.getByRole("checkbox", { name: "Select: Unlinked movie" })).toHaveAttribute("aria-disabled", "true")
     expect(screen.getAllByRole("button", { name: "Select: Unlinked movie" })[0]).toBeDisabled()
   })
 
@@ -59,8 +59,8 @@ describe("LibraryPanelV2", () => {
 
     await waitFor(() => expect(screen.getByText("Zeta")).toBeInTheDocument())
     const sort = screen.getByRole("combobox", { name: "Sort" })
-    sort.focus()
-    await user.keyboard("{ArrowDown}{ArrowDown}{Enter}")
+    await user.click(sort)
+    await user.click(screen.getByRole("option", { name: "Title" }))
     await waitFor(() => expect(fetchJson).toHaveBeenCalledWith(expect.stringContaining("sort=title&direction=desc"), expect.anything()))
     await waitFor(() => expect(screen.getAllByRole("listitem").map((card) => card.textContent)).toEqual([expect.stringContaining("Zeta"), expect.stringContaining("Alpha")]))
 

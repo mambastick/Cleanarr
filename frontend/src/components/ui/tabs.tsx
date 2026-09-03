@@ -1,25 +1,12 @@
 import { Tabs as TabsPrimitive } from "@base-ui/react/tabs"
 import { cva, type VariantProps } from "class-variance-authority"
-import { motion, useReducedMotion } from "motion/react"
+import { motion } from "motion/react"
 import { createContext, useContext, useEffect, useId, useState } from "react"
 
+import { useReducedMotionPreference } from "@/hooks/use-reduced-motion-preference"
 import { cn } from "@/lib/utils"
 
 const TabsScopeContext = createContext("tabs")
-
-function useReducedMotionPreference() {
-  const motionPreference = useReducedMotion()
-  const [mediaPreference, setMediaPreference] = useState(() => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches)
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") return
-    const media = window.matchMedia("(prefers-reduced-motion: reduce)")
-    const update = () => setMediaPreference(media.matches)
-    update()
-    media.addEventListener("change", update)
-    return () => media.removeEventListener("change", update)
-  }, [])
-  return Boolean(motionPreference || mediaPreference)
-}
 
 function Tabs({
   className,
@@ -56,6 +43,37 @@ const tabsListVariants = cva(
   }
 )
 
+type TabsIndicatorState = {
+  activeTabPosition?: { left: number; top: number } | null
+  activeTabSize?: { width: number; height: number } | null
+}
+
+function TabsHighlight({ state, scope, reducedMotion }: { state: TabsIndicatorState; scope: string; reducedMotion: boolean }) {
+  const [positioned, setPositioned] = useState(false)
+  const ready = Boolean(state.activeTabPosition && state.activeTabSize)
+
+  useEffect(() => {
+    if (ready) setPositioned(true)
+  }, [ready])
+
+  return (
+    <motion.span
+      className="absolute left-0 top-0 rounded-md border border-border bg-background shadow-sm"
+      data-indicator-id={`cleanarr-tab-indicator-${scope}`}
+      data-slot="tabs-highlight"
+      initial={false}
+      animate={ready ? {
+        x: state.activeTabPosition!.left,
+        y: state.activeTabPosition!.top,
+        width: state.activeTabSize!.width,
+        height: state.activeTabSize!.height,
+        opacity: 1,
+      } : { opacity: 0 }}
+      transition={reducedMotion || !positioned ? { duration: 0 } : { type: "spring", stiffness: 200, damping: 25 }}
+    />
+  )
+}
+
 function TabsList({
   className,
   variant = "default",
@@ -77,20 +95,7 @@ function TabsList({
         aria-hidden="true"
         render={(indicatorProps, state) => (
           <span {...indicatorProps}>
-            <motion.span
-              className="absolute left-0 top-0 rounded-md border border-border bg-background shadow-sm"
-              data-indicator-id={`cleanarr-tab-indicator-${scope}`}
-              data-slot="tabs-highlight"
-              initial={false}
-              animate={state.activeTabPosition && state.activeTabSize ? {
-                x: state.activeTabPosition.left,
-                y: state.activeTabPosition.top,
-                width: state.activeTabSize.width,
-                height: state.activeTabSize.height,
-                opacity: 1,
-              } : { opacity: 0 }}
-              transition={reducedMotion ? { duration: 0 } : { type: "spring", stiffness: 200, damping: 25 }}
-            />
+            <TabsHighlight state={state} scope={scope} reducedMotion={reducedMotion} />
           </span>
         )}
       />

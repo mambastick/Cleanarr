@@ -299,6 +299,7 @@ export type UiTextKey =
   | "eventDetails"
   | "technicalDetails"
   | "viewDetails"
+  | "activityPageDescription"
 
 export type UiTextMap = Record<UiTextKey, string>
 
@@ -310,15 +311,16 @@ export const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     library: "Library",
     downloads: "Downloads",
     downloadsActive: "active",
-    storageProvenance: "Storage is read from each configured Radarr and Sonarr root folder and disk-space endpoint. Paths and credentials stay hidden; preview data is never used here.",
+    storageProvenance: "CleanArr reads free space for each media folder from its configured Radarr or Sonarr. Paths and credentials stay hidden.",
     serviceDetails: "Technical details",
     recentActivitySummary: "Recent activity",
     recentActivitySummaryDescription: "The latest delivery or cleanup outcome, with technical details available when needed.",
-    recentActivityProcessed: "Cleanup processed for {{item}}",
-    recentActivityWebhook: "Webhook received for {{item}}",
+    recentActivityProcessed: "Cleanup checked: {{item}}",
+    recentActivityWebhook: "Media server event: {{item}}",
     eventDetails: "Event details",
     technicalDetails: "Technical details",
     viewDetails: "View details",
+    activityPageDescription: "Review recent cleanup checks and media-server events. Open an item only when you need more detail.",
     live: "Live",
     dryRun: "Dry run",
     liveMode: "Live mode",
@@ -606,15 +608,16 @@ export const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     library: "Библиотека",
     downloads: "Загрузки",
     downloadsActive: "активно",
-    storageProvenance: "Данные о хранилище поступают из root-папок и endpoint’ов свободного места каждого настроенного Radarr и Sonarr. Пути и учётные данные скрыты; тестовые данные здесь не используются.",
+    storageProvenance: "CleanArr получает свободное место для каждой папки медиатеки из настроенного Radarr или Sonarr. Пути и учётные данные остаются скрыты.",
     serviceDetails: "Технические сведения",
     recentActivitySummary: "Последняя активность",
     recentActivitySummaryDescription: "Последний результат доставки или очистки; технические сведения доступны при необходимости.",
-    recentActivityProcessed: "Очистка обработана для {{item}}",
-    recentActivityWebhook: "Webhook получен для {{item}}",
+    recentActivityProcessed: "Проверка очистки: {{item}}",
+    recentActivityWebhook: "Событие медиасервера: {{item}}",
     eventDetails: "Сведения о событии",
     technicalDetails: "Технические сведения",
     viewDetails: "Открыть сведения",
+    activityPageDescription: "Просматривайте результаты проверок очистки и события медиасервера. Подробности открываются только при необходимости.",
     live: "Включен",
     dryRun: "Тестовый режим",
     liveMode: "Рабочий режим",

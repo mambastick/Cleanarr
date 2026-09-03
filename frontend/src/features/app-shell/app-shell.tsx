@@ -4,23 +4,22 @@ import {
   Download,
   Home,
   Languages,
-  Laptop,
   LogOut,
   MoreHorizontal,
-  Moon,
   Plug,
   SlidersHorizontal,
   Zap,
   Settings,
   Star,
-  Sun,
-  UserRound,
   X,
   HardDrive,
   type LucideIcon,
 } from "lucide-react"
+import { Laptop as LaptopData, Moon as MoonData, Sun as SunData } from "lucide"
+import { MorphIcon } from "morphicons/react"
 import { useRef, useState, type ReactNode } from "react"
 
+import { AnimateIcon, AnimatedIcon, type IconAnimation } from "@/components/animate-ui/animated-icon"
 import type { ThemeMode } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
 import {
@@ -58,6 +57,7 @@ export type AppShellLabels = {
   live: string
   dryRun: string
   storage: string
+  storageUsed: string
   storagePartial: string
   storageUnavailable: string
   account: string
@@ -83,9 +83,10 @@ const DEFAULT_LABELS: AppShellLabels = {
   status: "Runtime status",
   live: "Live",
   dryRun: "Dry-run",
-    storage: "Storage",
-    storagePartial: "Partial data",
-    storageUnavailable: "Storage unavailable",
+  storage: "Storage",
+  storageUsed: "Used",
+  storagePartial: "Partial data",
+  storageUnavailable: "Storage unavailable",
   account: "Account",
   settings: "Settings",
   settingsGeneral: "General",
@@ -140,6 +141,14 @@ type AppShellProps = {
 
 type NavItem = { page: AppShellPage; icon: LucideIcon }
 
+const NAV_ICON_ANIMATION: Record<AppShellPage, IconAnimation> = {
+  overview: "pulse",
+  library: "lift",
+  downloads: "bounce",
+  activity: "pulse",
+  settings: "wiggle",
+}
+
 const NAV_ITEMS: NavItem[] = [
   { page: "overview", icon: Home },
   { page: "library", icon: BookOpen },
@@ -161,10 +170,10 @@ function mergeLabels(labels?: AppShellProps["labels"]): AppShellLabels {
 
 function Brand({ labels }: { labels: AppShellLabels }) {
   return (
-    <div className="app-shell__brand" aria-label={labels.logo}>
-      <Zap className="app-shell__brand-mark" aria-hidden="true" />
+    <AnimateIcon><div className="app-shell__brand" aria-label={labels.logo}>
+      <AnimatedIcon animation="wiggle"><Zap className="app-shell__brand-mark" /></AnimatedIcon>
       <span className="app-shell__brand-name"><span>Clean</span><strong>Arr</strong></span>
-      <a
+      <AnimateIcon><a
         className="app-shell__brand-github"
         href="https://github.com/mambastick/Cleanarr"
         target="_blank"
@@ -172,10 +181,10 @@ function Brand({ labels }: { labels: AppShellLabels }) {
         aria-label={`GitHub: ${labels.githubStars}`}
         title={`GitHub: ${labels.githubStars}`}
       >
-        <Star aria-hidden="true" />
+        <AnimatedIcon animation="pulse"><Star /></AnimatedIcon>
         <span>15</span>
-      </a>
-    </div>
+      </a></AnimateIcon>
+    </div></AnimateIcon>
   )
 }
 
@@ -199,7 +208,7 @@ function StorageCard({ storage, labels }: { storage: StorageHeadline; labels: Ap
       </div>
       <p className="app-shell__storage-headline">{storage.headline}</p>
       {storage.detail ? <p className="app-shell__storage-detail">{storage.detail}</p> : null}
-      {percent != null ? <div className="app-shell__storage-meter" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label={`${storage.headline}: ${percent}%`}><span style={{ transform: `scaleX(${percent / 100})` }} /></div> : null}
+      {percent != null ? <div className="app-shell__storage-meter" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label={`${labels.storageUsed}: ${percent}%`}><span style={{ transform: `scaleX(${percent / 100})` }} /></div> : null}
       {storage.partial || storage.freshness ? <p className="app-shell__storage-meta">{storage.partial ? labels.storagePartial : null}{storage.partial && storage.freshness ? " · " : null}{storage.freshness}</p> : null}
     </section>
   )
@@ -211,10 +220,10 @@ function NavigationItems({ items, activePage, labels, onNavigate, mobile = false
       {items.map(({ page, icon: Icon }) => {
         const active = activePage === page
         return (
-          <button key={page} type="button" className={cn("app-shell__nav-item", active && "app-shell__nav-item--active")} aria-current={active ? "page" : undefined} aria-label={labels.nav[page]} title={labels.nav[page]} onClick={() => onNavigate(page)}>
-            <Icon aria-hidden="true" />
+          <AnimateIcon key={page}><button type="button" className={cn("app-shell__nav-item", active && "app-shell__nav-item--active")} aria-current={active ? "page" : undefined} aria-label={labels.nav[page]} title={labels.nav[page]} onClick={() => onNavigate(page)}>
+            <AnimatedIcon animation={NAV_ICON_ANIMATION[page]}><Icon /></AnimatedIcon>
             <span>{labels.nav[page]}</span>
-          </button>
+          </button></AnimateIcon>
         )
       })}
     </div>
@@ -230,7 +239,7 @@ function SettingsNavigation({ activePage, settingsSection = "general", labels, o
 
   return (
     <div className="app-shell__settings-group">
-      <button
+      <AnimateIcon><button
         type="button"
         className={cn("app-shell__nav-item", expanded && "app-shell__nav-item--active")}
         aria-current={expanded ? "page" : undefined}
@@ -240,31 +249,31 @@ function SettingsNavigation({ activePage, settingsSection = "general", labels, o
         title={labels.nav.settings}
         onClick={() => selectSection("general")}
       >
-        <Settings aria-hidden="true" />
+        <AnimatedIcon animation="wiggle"><Settings /></AnimatedIcon>
         <span>{labels.nav.settings}</span>
-      </button>
+      </button></AnimateIcon>
       {expanded ? (
         <div id="app-shell-settings-sections" className="app-shell__settings-sections" role="group" aria-label={labels.settings}>
-          <button
+          <AnimateIcon><button
             type="button"
             className={cn("app-shell__settings-section", settingsSection === "general" && "app-shell__settings-section--active")}
             aria-current={settingsSection === "general" ? "page" : undefined}
             title={labels.settingsGeneral}
             onClick={() => selectSection("general")}
           >
-            <SlidersHorizontal aria-hidden="true" />
+            <AnimatedIcon animation="rotate"><SlidersHorizontal /></AnimatedIcon>
             <span>{labels.settingsGeneral}</span>
-          </button>
-          <button
+          </button></AnimateIcon>
+          <AnimateIcon><button
             type="button"
             className={cn("app-shell__settings-section", settingsSection === "services" && "app-shell__settings-section--active")}
             aria-current={settingsSection === "services" ? "page" : undefined}
             title={labels.settingsServices}
             onClick={() => selectSection("services")}
           >
-            <Plug aria-hidden="true" />
+            <AnimatedIcon animation="bounce"><Plug /></AnimatedIcon>
             <span>{labels.settingsServices}</span>
-          </button>
+          </button></AnimateIcon>
         </div>
       ) : null}
     </div>
@@ -276,10 +285,14 @@ function MorePanel({ labels, storageHeadline, username, theme, language, onTheme
   const currentTheme = theme ?? "system"
   const currentLanguage = language ?? "en"
   const nextTheme: ThemeMode = currentTheme === "light" ? "dark" : currentTheme === "dark" ? "system" : "light"
-  const ThemeIcon = currentTheme === "dark" ? Moon : currentTheme === "light" ? Sun : Laptop
+  const themeIcon = currentTheme === "dark" ? MoonData : currentTheme === "light" ? SunData : LaptopData
   const themeLabel = currentTheme === "dark" ? labels.themeDark : currentTheme === "light" ? labels.themeLight : labels.themeSystem
+  const setPanelOpen = (nextOpen: boolean) => {
+    setOpen(nextOpen)
+    if (!nextOpen) window.setTimeout(() => triggerRef.current?.focus(), 0)
+  }
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
+    <Sheet open={open} onOpenChange={setPanelOpen}>
       {desktop ? (
         <SheetTrigger render={<button ref={triggerRef} type="button" className="app-shell__account" aria-label={`${labels.account}: ${username || labels.account}`} />}>
           <span className="app-shell__account-avatar" aria-hidden="true">{(username?.trim().charAt(0) || "A").toUpperCase()}</span>
@@ -313,10 +326,12 @@ function MorePanel({ labels, storageHeadline, username, theme, language, onTheme
           <div className="app-shell__sheet-body">
             {!desktop ? <NavigationItems items={[{ page: "settings", icon: Settings }]} activePage={activePage} labels={labels} onNavigate={(page) => { setOpen(false); if (page === "settings") onSettings() }} /> : null}
             {!desktop ? <StorageCard storage={storageHeadline} labels={labels} /> : null}
-            <div className="app-shell__sheet-account"><UserRound aria-hidden="true" /><span>{labels.account}</span><strong>{username || labels.account}</strong></div>
-            <button type="button" className={cn("app-shell__sheet-action", desktop && "app-shell__sheet-icon-action")} onClick={() => onThemeChange?.(nextTheme)} aria-label={desktop ? `${labels.theme}: ${themeLabel}` : undefined} title={desktop ? `${labels.theme}: ${themeLabel}` : undefined}><ThemeIcon aria-hidden="true" />{!desktop ? <><span>{labels.theme}</span><strong>{themeLabel}</strong></> : null}</button>
-            <button type="button" className={cn("app-shell__sheet-action", desktop && "app-shell__sheet-icon-action")} onClick={() => onLanguageChange?.(currentLanguage === "en" ? "ru" : "en")} aria-label={desktop ? `${labels.language}: ${currentLanguage.toUpperCase()}` : undefined} title={desktop ? `${labels.language}: ${currentLanguage.toUpperCase()}` : undefined}><Languages aria-hidden="true" />{!desktop ? <><span>{labels.language}</span><strong>{currentLanguage.toUpperCase()}</strong></> : null}</button>
-            <Button type="button" variant="outline" className="app-shell__logout" onClick={() => { setOpen(false); onLogout?.() }}><LogOut aria-hidden="true" />{labels.logOut}</Button>
+            <div className={cn(desktop && "app-shell__sheet-icon-actions")}>
+              <AnimateIcon><button type="button" className={cn("app-shell__sheet-action", desktop && "app-shell__sheet-icon-action")} onClick={() => onThemeChange?.(nextTheme)} aria-label={desktop ? `${labels.theme}: ${themeLabel}` : undefined} title={desktop ? `${labels.theme}: ${themeLabel}` : undefined}><AnimatedIcon animation="pulse"><MorphIcon icon={themeIcon} reducedMotion="user" size={18} /></AnimatedIcon>{!desktop ? <><span>{labels.theme}</span><strong>{themeLabel}</strong></> : null}</button></AnimateIcon>
+              <AnimateIcon><button type="button" className={cn("app-shell__sheet-action", desktop && "app-shell__sheet-icon-action")} onClick={() => onLanguageChange?.(currentLanguage === "en" ? "ru" : "en")} aria-label={desktop ? `${labels.language}: ${currentLanguage.toUpperCase()}` : undefined} title={desktop ? `${labels.language}: ${currentLanguage.toUpperCase()}` : undefined}><AnimatedIcon animation="wiggle"><Languages /></AnimatedIcon>{!desktop ? <><span>{labels.language}</span><strong>{currentLanguage.toUpperCase()}</strong></> : null}</button></AnimateIcon>
+            </div>
+            <AnimateIcon><Button type="button" variant="outline" className="app-shell__logout" onClick={() => { setOpen(false); onLogout?.() }}><AnimatedIcon animation="bounce"><LogOut /></AnimatedIcon>{labels.logOut}</Button></AnimateIcon>
+            <div className="app-shell__sheet-account"><span className="app-shell__account-avatar" aria-hidden="true">{(username?.trim().charAt(0) || "A").toUpperCase()}</span><strong>{username || labels.account}</strong></div>
           </div>
         </SheetContent>
       </SheetPortal>

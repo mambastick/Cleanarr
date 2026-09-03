@@ -13,9 +13,9 @@ const entry = {
 it("presents friendly localized activity cards and keeps action codes in the inspector disclosure", async () => {
   const user = userEvent.setup()
   render(<ActivityPanel text={getUiText("ru")} filteredActivity={[entry]} webhookAttempts={[]} activityFilter="" onFilterChange={() => {}} />)
-  expect(screen.getByText("Очистка обработана для Фильм")).toBeInTheDocument()
-  expect(screen.getByText("Успешно")).toBeInTheDocument()
-  await user.click(screen.getByRole("button", { name: "Открыть сведения" }))
+  expect(screen.getByText("Проверка очистки: Example film")).toBeInTheDocument()
+  expect(screen.getAllByText("Успешно")).not.toHaveLength(0)
+  await user.click(screen.getByRole("button", { name: "Открыть сведения: Example film" }))
   await user.click(screen.getByText("Технические сведения"))
   expect(screen.getByText("radarr/delete")).toBeInTheDocument()
 })
