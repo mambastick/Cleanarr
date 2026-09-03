@@ -166,6 +166,13 @@ test("places user identity and the administrator safeguard in the Users header",
   await expect(page.getByText("At least one administrator must remain.")).toBeVisible()
   await expect(page.locator("[data-initials=FA]").last()).toBeVisible()
   await expect(page.getByText("You", { exact: true })).toHaveCount(0)
+  const usersIndicator = page.locator(".app-shell__navigation-highlight > .app-shell__nav-active-indicator")
+  const usersItem = page.locator('[data-slot="motion-highlight-item-container"][data-value="users"]')
+  await expect.poll(async () => {
+    const [indicatorBounds, itemBounds] = await Promise.all([usersIndicator.boundingBox(), usersItem.boundingBox()])
+    if (!indicatorBounds || !itemBounds) return Number.POSITIVE_INFINITY
+    return Math.max(Math.abs(indicatorBounds.x - itemBounds.x), Math.abs(indicatorBounds.y - itemBounds.y), Math.abs(indicatorBounds.width - itemBounds.width), Math.abs(indicatorBounds.height - itemBounds.height))
+  }, { timeout: 2_000 }).toBeLessThan(1)
   const usersCard = page.locator('[data-slot="card"]').last()
   const cardPadding = await usersCard.evaluate((node) => {
     const style = getComputedStyle(node)
