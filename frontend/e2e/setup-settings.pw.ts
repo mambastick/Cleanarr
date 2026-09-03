@@ -14,11 +14,9 @@ test("setup dialog traps focus, supports escape/backdrop restoration, and remain
 
 test("settings Select is a themed portal and keeps English/Russian copy localized", async ({ page }) => {
   await boot(page)
-  const account = page.getByRole("button", { name: "Account: fixture-admin" })
-  await account.click()
+  const account = page.getByLabel("Account: fixture-admin"); await expect(account).toBeVisible()
   await page.getByRole("button", { name: /Theme.*System/i }).click()
-  await page.locator(".app-shell__sheet-backdrop").click({ position: { x: 700, y: 100 } })
-  await expect(account).toBeFocused()
+  await expect(page.getByRole("button", { name: /Theme.*Light/i })).toBeFocused()
   await navButton(page, "Settings").click()
   const language = page.locator("#settings-ui-language")
   await language.focus()
@@ -30,10 +28,8 @@ test("settings Select is a themed portal and keeps English/Russian copy localize
   expect(await lightPopup.evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)")
   await page.keyboard.press("Escape")
 
-  await account.click()
   await page.getByRole("button", { name: /Theme.*Light/i }).click()
-  await page.locator(".app-shell__sheet-backdrop").click({ position: { x: 700, y: 100 } })
-  await expect(account).toBeFocused()
+  await expect(page.getByRole("button", { name: /Theme.*Dark/i })).toBeFocused()
   await language.focus()
   await page.keyboard.press("Enter")
   await expect(russian).toBeVisible()
