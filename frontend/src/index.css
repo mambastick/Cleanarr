@@ -276,10 +276,10 @@
 .app-shell__brand-github:hover { background: var(--muted); color: var(--fg); }
 .app-shell__brand-github:focus-visible { outline: 3px solid color-mix(in srgb, var(--ring) 50%, transparent); outline-offset: 2px; }
 .app-shell__brand-github svg { width: 0.82rem; height: 0.82rem; }
-.app-shell__collapse { display: inline-grid; width: 2.25rem; height: 2.25rem; flex: 0 0 auto; place-items: center; border: 0; border-radius: 0.625rem; background: transparent; color: var(--muted-copy); }
-.app-shell__collapse:hover { background: var(--muted); color: var(--fg); }
+.app-shell__collapse { position: absolute; z-index: 2; top: 1.625rem; right: -1rem; display: inline-grid; width: 2rem; height: 2rem; place-items: center; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted-copy); box-shadow: 0 0.35rem 1rem color-mix(in srgb, var(--fg) 12%, transparent); transition: color 160ms ease, background-color 160ms ease, transform 180ms ease; }
+.app-shell__collapse:hover { background: var(--primary-soft); color: var(--primary-copy); transform: scale(1.06); }
 .app-shell__collapse:focus-visible { outline: 3px solid color-mix(in srgb, var(--ring) 50%, transparent); outline-offset: 2px; }
-.app-shell__collapse svg { width: 1.2rem; height: 1.2rem; }
+.app-shell__collapse svg { width: 1rem; height: 1rem; }
 .app-shell__navigation-scroll { min-height: 0; flex: 1 1 auto; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; margin-right: -0.25rem; padding-right: 0.25rem; outline: none; scrollbar-width: none; }
 .app-shell__navigation-scroll::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .app-shell__navigation-scroll:focus-visible { border-radius: 0.75rem; box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent); }
@@ -320,11 +320,14 @@
 .app-shell__nav-item--active { color: var(--primary-copy); font-weight: 650; }
 .app-shell__nav-item--active:hover { background: transparent; color: var(--primary-copy); }
 .app-shell__settings-group { display: grid; gap: 0.35rem; margin-top: 0.35rem; }
-.app-shell__settings-sections { display: grid; gap: 0.2rem; margin-left: 1.55rem; padding-left: 0.8rem; border-left: 1px solid var(--border); }
+.app-shell__settings-sections { overflow: hidden; margin-left: 1.55rem; padding-left: 0.8rem; border-left: 1px solid var(--border); }
+.app-shell__settings-highlight { display: grid; gap: 0.2rem; }
+.app-shell__settings-highlight-item { position: relative; z-index: 1; width: 100%; }
+.app-shell__settings-active-indicator { position: absolute; z-index: 0; border: 1px solid color-mix(in srgb, var(--primary) 22%, transparent); border-radius: 0.625rem; background: color-mix(in srgb, var(--primary-soft) 72%, transparent); }
 .app-shell__settings-section { display: flex; min-height: 2.75rem; align-items: center; gap: 0.55rem; border: 0; border-radius: 0.625rem; background: transparent; padding: 0.5rem 0.65rem; color: var(--muted-copy); font: inherit; font-size: 0.8rem; font-weight: 560; text-align: left; }
 .app-shell__settings-section svg { width: 1rem; height: 1rem; flex: 0 0 auto; }
 .app-shell__settings-section:hover { background: var(--muted); color: var(--fg); }
-.app-shell__settings-section--active { background: color-mix(in srgb, var(--primary-soft) 72%, transparent); color: var(--primary-copy); font-weight: 650; }
+.app-shell__settings-section--active { color: var(--primary-copy); font-weight: 650; }
 .app-shell__settings-section:focus-visible { outline: 3px solid color-mix(in srgb, var(--ring) 50%, transparent); outline-offset: 2px; }
 .app-shell__sidebar-bottom { display: grid; flex: 0 0 auto; gap: 0.75rem; margin-top: 0.75rem; }
 .app-shell__sidebar-bottom > .app-shell__runtime-status { width: 100%; justify-content: center; }
@@ -333,14 +336,22 @@
 .app-shell__account:focus-visible { border-radius: 0.75rem; outline: 3px solid color-mix(in srgb, var(--ring) 50%, transparent); outline-offset: 2px; }
 .app-shell__account-avatar { display: inline-grid; width: 2rem; height: 2rem; flex: 0 0 auto; place-items: center; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); font-size: 0.85rem; font-weight: 650; }
 .app-shell__account-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); font-size: 0.875rem; }
-.app-shell__account-panel { display: flex; min-width: 0; align-items: center; gap: 0.25rem; border-top: 1px solid var(--border); padding-top: 0.75rem; }
-.app-shell__account-summary { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: 0.5rem; padding-inline: 0.2rem; }
-.app-shell__account-actions { display: flex; flex: 0 0 auto; gap: 0.1rem; }
-.app-shell__account-action { display: inline-grid; width: 2.15rem; min-height: 2.15rem; place-items: center; border: 1px solid transparent; border-radius: 0.6rem; background: transparent; color: var(--muted-copy); }
-.app-shell__account-action:hover { border-color: color-mix(in srgb, var(--primary) 30%, var(--border)); background: var(--muted); color: var(--primary); }
-.app-shell__account-action--logout:hover { border-color: var(--status-danger-border); background: var(--status-danger-bg); color: var(--status-danger); }
-.app-shell__account-action:focus-visible { outline: 3px solid color-mix(in srgb, var(--ring) 50%, transparent); outline-offset: 2px; }
-.app-shell__account-action svg { width: 1.1rem; height: 1.1rem; }
+.app-shell__account-panel { display: flex; justify-content: center; border-top: 1px solid var(--border); padding-top: 0.75rem; }
+.app-shell__account-trigger { display: inline-grid; width: 2.75rem; height: 2.75rem; place-items: center; border: 1px solid transparent; border-radius: 999px; background: transparent; color: inherit; transition: background-color 160ms ease, border-color 160ms ease, transform 180ms ease; }
+.app-shell__account-trigger:hover, .app-shell__account-trigger[data-popup-open] { border-color: color-mix(in srgb, var(--primary) 28%, var(--border)); background: var(--primary-soft); transform: translateY(-1px); }
+.app-shell__account-trigger:focus-visible { outline: 3px solid color-mix(in srgb, var(--ring) 50%, transparent); outline-offset: 2px; }
+.app-shell__account-popover { width: 15rem; padding: 0.65rem; }
+.app-shell__account-popover-header { display: flex; align-items: center; gap: 0.65rem; padding: 0.45rem 0.5rem 0.7rem; border-bottom: 1px solid var(--border); }
+.app-shell__account-popover-title { color: var(--fg); font-size: 0.9rem; font-weight: 700; }
+.app-shell__account-popover-description { margin-top: 0.1rem; color: var(--muted-copy); font-size: 0.72rem; }
+.app-shell__account-popover-actions { display: grid; gap: 0.2rem; padding-top: 0.45rem; }
+.app-shell__account-popover-action { display: flex; min-height: 2.5rem; width: 100%; align-items: center; gap: 0.55rem; border: 0; border-radius: 0.625rem; background: transparent; padding: 0.45rem 0.55rem; color: var(--muted-copy); font: inherit; font-size: 0.8rem; text-align: left; }
+.app-shell__account-popover-action strong { margin-left: auto; color: var(--fg); font-size: 0.75rem; font-weight: 650; }
+.app-shell__account-popover-action svg { width: 1rem; height: 1rem; color: var(--primary); }
+.app-shell__account-popover-action:hover { background: var(--muted); color: var(--fg); }
+.app-shell__account-popover-action--logout:hover { background: var(--status-danger-bg); color: var(--status-danger); }
+.app-shell__account-popover-action--logout:hover svg { color: var(--status-danger); }
+.app-shell__account-popover-action:focus-visible { outline: 3px solid color-mix(in srgb, var(--ring) 50%, transparent); outline-offset: 1px; }
 .app-shell__storage { display: grid; gap: 0.4rem; border: 1px solid var(--border); border-radius: 0.75rem; background: var(--background); padding: 0.8rem; }
 .app-shell__storage-heading { display: flex; align-items: center; gap: 0.4rem; color: var(--muted-copy); font-size: 0.75rem; font-weight: 650; }
 .app-shell__storage-heading svg { width: 1rem; height: 1rem; color: var(--primary); }
@@ -410,7 +421,6 @@
   .app-shell--sidebar-collapsed .app-shell__storage-meter,
   .app-shell--sidebar-collapsed .app-shell__runtime-status span:last-child { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .app-shell--sidebar-collapsed .app-shell__settings-sections { display: none; }
-  .app-shell--sidebar-collapsed .app-shell__collapse { margin-left: 0; }
   .app-shell--sidebar-collapsed .app-shell__brand-github { position: absolute; width: 1px; height: 1px; min-height: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .app-shell--sidebar-collapsed .app-shell__nav-list,
   .app-shell--sidebar-collapsed .app-shell__settings-group,
@@ -421,14 +431,11 @@
   .app-shell--sidebar-collapsed .app-shell__nav-item:hover { background: transparent; }
   .app-shell--sidebar-collapsed .app-shell__nav-item:hover [data-slot="animated-icon"],
   .app-shell--sidebar-collapsed .app-shell__nav-item:focus-visible [data-slot="animated-icon"] { background: var(--muted); box-shadow: inset 0 0 0 1px var(--border); color: var(--fg); }
-  .app-shell--sidebar-collapsed .app-shell__navigation-highlight > .app-shell__nav-active-indicator { margin-inline: 0.5rem; width: calc(100% - 1rem) !important; }
+  .app-shell--sidebar-collapsed .app-shell__navigation-highlight > .app-shell__nav-active-indicator { left: 50% !important; width: 2.5rem !important; height: 2.5rem !important; margin-top: 0.125rem; margin-left: -1.25rem; border-radius: 0.625rem; }
   .app-shell--sidebar-collapsed .app-shell__storage { width: 3.75rem; min-height: 2.75rem; place-items: center; padding: 0.45rem; }
   .app-shell--sidebar-collapsed .app-shell__storage-heading { justify-content: center; }
   .app-shell--sidebar-collapsed .app-shell__sidebar-bottom > .app-shell__runtime-status { width: 3.75rem; min-height: 2.75rem; justify-content: center; padding-inline: 0.45rem; }
-  .app-shell--sidebar-collapsed .app-shell__account-summary { justify-content: center; padding-inline: 0; }
-  .app-shell--sidebar-collapsed .app-shell__account-panel { flex-direction: column; }
-  .app-shell--sidebar-collapsed .app-shell__account-actions { flex-direction: column; }
-  .app-shell--sidebar-collapsed .app-shell__account-action { width: 2.5rem; min-height: 2.5rem; }
+  .app-shell--sidebar-collapsed .app-shell__account-panel { width: 100%; }
 }
 
 @media (min-width: 48rem) and (max-width: 74.9375rem) {
@@ -444,7 +451,7 @@
   .app-shell__nav-item:hover { background: transparent; }
   .app-shell__nav-item:hover [data-slot="animated-icon"],
   .app-shell__nav-item:focus-visible [data-slot="animated-icon"] { background: var(--muted); box-shadow: inset 0 0 0 1px var(--border); color: var(--fg); }
-  .app-shell__navigation-highlight > .app-shell__nav-active-indicator { margin-inline: 0.5rem; width: calc(100% - 1rem) !important; }
+  .app-shell__navigation-highlight > .app-shell__nav-active-indicator { left: 50% !important; width: 2.5rem !important; height: 2.5rem !important; margin-top: 0.125rem; margin-left: -1.25rem; border-radius: 0.625rem; }
   .app-shell__nav-item span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .app-shell__settings-group { width: 100%; }
   .app-shell__settings-sections { margin-left: 0; padding-left: 0; border-left: 0; }
@@ -455,8 +462,7 @@
   .app-shell__sidebar-bottom > .app-shell__runtime-status span:last-child { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .app-shell__storage-heading { justify-content: center; }
   .app-shell__storage-heading span, .app-shell__storage-state, .app-shell__storage-headline, .app-shell__storage-detail, .app-shell__storage-meta, .app-shell__storage-meter { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  .app-shell__account { justify-content: center; padding-inline: 0; }
-  .app-shell__account-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .app-shell__account-panel { width: 100%; }
 }
 
 .library-card__delete {
@@ -483,11 +489,13 @@
   .app-shell__mobile-topbar .app-shell__brand-github { display: none; }
   .app-shell__mobile-topbar .app-shell__runtime-status { margin-left: auto; }
   .app-shell__main { min-height: calc(100vh - 4rem); margin-left: 0; padding: 1.25rem 1rem calc(7.5rem + env(safe-area-inset-bottom)); }
-  .app-shell__bottom-nav { position: fixed; z-index: 40; right: 0.5rem; bottom: calc(0.5rem + env(safe-area-inset-bottom)); left: 0.5rem; display: grid; grid-template-columns: 1fr auto; align-items: stretch; overflow: hidden; border: 1px solid var(--border); border-radius: 1rem; background: color-mix(in srgb, var(--surface) 96%, transparent); padding: 0.35rem 0.4rem; box-shadow: 0 0.65rem 2rem color-mix(in srgb, var(--foreground) 14%, transparent); backdrop-filter: blur(10px); }
+  .app-shell__bottom-nav { position: fixed; z-index: 40; right: 0.5rem; bottom: calc(0.5rem + env(safe-area-inset-bottom)); left: 0.5rem; display: block; overflow: hidden; border: 1px solid var(--border); border-radius: 1rem; background: color-mix(in srgb, var(--surface) 96%, transparent); padding: 0.35rem 0.4rem; box-shadow: 0 0.65rem 2rem color-mix(in srgb, var(--foreground) 14%, transparent); backdrop-filter: blur(10px); }
+  .app-shell__bottom-highlight { display: grid; grid-template-columns: 1fr auto; align-items: stretch; }
   .app-shell__nav-list--mobile { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.15rem; margin-top: 0; }
+  .app-shell__nav-list--mobile .app-shell__nav-highlight-item, .app-shell__more-highlight-item { position: relative; z-index: 1; width: 100%; }
   .app-shell__nav-list--mobile .app-shell__nav-item { display: grid; min-height: 3.25rem; justify-items: center; gap: 0.2rem; border: 0; border-radius: 0.6rem; padding: 0.4rem 0.15rem; font-size: 0.68rem; }
   .app-shell__nav-list--mobile .app-shell__nav-item svg { width: 1.2rem; height: 1.2rem; }
-  .app-shell__bottom-nav > button { display: flex; min-height: 3.25rem; min-width: 3.8rem; flex-direction: column; justify-content: center; gap: 0.2rem; padding: 0.4rem 0.5rem; font-size: 0.68rem; }
+  .app-shell__more-highlight-item > button { display: flex; min-height: 3.25rem; min-width: 3.8rem; flex-direction: column; justify-content: center; gap: 0.2rem; padding: 0.4rem 0.5rem; font-size: 0.68rem; }
   .jobs-sheet-trigger { top: 0.625rem; right: 6.75rem; }
   .jobs-sheet-trigger button { width: 2.75rem; padding-inline: 0; }
   .jobs-sheet-trigger button span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

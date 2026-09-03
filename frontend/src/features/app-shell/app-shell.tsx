@@ -21,14 +21,14 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import {
+  ChevronLeft as ChevronLeftData,
+  ChevronRight as ChevronRightData,
   Laptop as LaptopData,
   Moon as MoonData,
-  PanelLeftClose as PanelLeftCloseData,
-  PanelLeftOpen as PanelLeftOpenData,
   Sun as SunData,
 } from "lucide"
 import { MorphIcon } from "morphicons/react"
-import { motion } from "motion/react"
+import { AnimatePresence, motion } from "motion/react"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 
 import { AnimateIcon, AnimatedIcon, type IconAnimation } from "@/components/animate-ui/animated-icon"
@@ -36,6 +36,7 @@ import { GitHubStarsButton } from "@/components/animate-ui/components/buttons/gi
 import { Highlight, HighlightItem } from "@/components/animate-ui/primitives/effects/highlight"
 import type { ThemeMode } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
+import { Popover, PopoverClose, PopoverContent, PopoverDescription, PopoverTitle, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Sheet,
@@ -47,6 +48,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet"
+import { useReducedMotionPreference } from "@/hooks/use-reduced-motion-preference"
 import { cn } from "@/lib/utils"
 
 export type AppShellPage = "overview" | "library" | "downloads" | "activity" | "users" | "settings"
@@ -198,7 +200,7 @@ function mergeLabels(labels?: AppShellProps["labels"]): AppShellLabels {
 }
 
 function Brand({ labels, collapsed, onToggle }: { labels: AppShellLabels; collapsed?: boolean; onToggle?: () => void }) {
-  const sidebarIcon = collapsed ? PanelLeftOpenData : PanelLeftCloseData
+  const sidebarIcon = collapsed ? ChevronRightData : ChevronLeftData
   return (
     <AnimateIcon><div className="app-shell__brand" aria-label={labels.logo}>
       <AnimatedIcon animation="wiggle"><Zap className="app-shell__brand-mark" /></AnimatedIcon>
@@ -212,7 +214,7 @@ function Brand({ labels, collapsed, onToggle }: { labels: AppShellLabels; collap
         size="sm"
         aria-label={`GitHub: ${labels.githubStars}`}
       />
-      {onToggle ? <Tooltip><TooltipTrigger render={<button type="button" className="app-shell__collapse" onClick={onToggle} aria-label={collapsed ? labels.expandSidebar : labels.collapseSidebar}><MorphIcon icon={sidebarIcon} reducedMotion="user" size={19} /></button>} /><TooltipContent side="right">{collapsed ? labels.expandSidebar : labels.collapseSidebar}</TooltipContent></Tooltip> : null}
+      {onToggle ? <Tooltip><TooltipTrigger render={<button type="button" className="app-shell__collapse" onClick={onToggle} aria-label={collapsed ? labels.expandSidebar : labels.collapseSidebar}><MorphIcon icon={sidebarIcon} reducedMotion="user" size={18} /></button>} /><TooltipContent side="right">{collapsed ? labels.expandSidebar : labels.collapseSidebar}</TooltipContent></Tooltip> : null}
     </div></AnimateIcon>
   )
 }
@@ -257,7 +259,6 @@ function NavigationItems({ items, activePage, labels, onNavigate, mobile = false
       {items.map(({ page, icon: Icon }) => {
         const active = activePage === page
         const button = <button type="button" className={cn("app-shell__nav-item", active && "app-shell__nav-item--active")} aria-current={active ? "page" : undefined} aria-label={labels.nav[page]} onClick={() => onNavigate(page)}>
-          {mobile && active ? <motion.span layoutId="mobile-active-navigation" initial={false} transition={{ type: "spring", stiffness: 350, damping: 35 }} className="app-shell__nav-active-indicator" /> : null}
           <AnimatedIcon animation={NAV_ICON_ANIMATION[page]}><Icon /></AnimatedIcon>
           <span>{labels.nav[page]}</span>
         </button>
@@ -283,6 +284,7 @@ const SETTINGS_ITEMS: Array<{ section: SettingsSection; label: keyof Pick<AppShe
 
 function SettingsNavigation({ activePage, settingsSection = "cleanarr", labels, onNavigate, onSettingsSectionChange, collapsed = false }: { activePage: AppShellPage; settingsSection?: SettingsSection; labels: AppShellLabels; onNavigate: (page: AppShellPage) => void; onSettingsSectionChange?: (section: SettingsSection) => void; collapsed?: boolean }) {
   const expanded = activePage === "settings"
+  const reducedMotion = useReducedMotionPreference()
   const selectSection = (section: SettingsSection) => {
     onSettingsSectionChange?.(section)
     onNavigate("settings")
@@ -302,20 +304,47 @@ function SettingsNavigation({ activePage, settingsSection = "cleanarr", labels, 
           <AnimatedIcon animation="wiggle"><Settings /></AnimatedIcon>
           <span>{labels.nav.settings}</span>
         </button>} /></AnimateIcon>{collapsed ? <TooltipContent side="right">{labels.nav.settings}</TooltipContent> : null}</Tooltip></HighlightItem>
-      {expanded ? (
-        <div id="app-shell-settings-sections" className="app-shell__settings-sections" role="group" aria-label={labels.settings}>
-          {SETTINGS_ITEMS.map(({ section, label, icon: Icon, animation }) => <Tooltip key={section}><AnimateIcon><TooltipTrigger render={<button
-              type="button"
-              className={cn("app-shell__settings-section", settingsSection === section && "app-shell__settings-section--active")}
-              aria-current={settingsSection === section ? "page" : undefined}
-              aria-label={labels[label]}
-              onClick={() => selectSection(section)}
+      <AnimatePresence initial={false}>
+        {expanded && !collapsed ? (
+          <motion.div
+            id="app-shell-settings-sections"
+            className="app-shell__settings-sections"
+            role="group"
+            aria-label={labels.settings}
+            data-motion-tree="true"
+            initial={reducedMotion ? false : { height: 0, opacity: 0, y: -6 }}
+            animate={{ height: "auto", opacity: 1, y: 0 }}
+            exit={reducedMotion ? { opacity: 0 } : { height: 0, opacity: 0, y: -6 }}
+            transition={reducedMotion ? { duration: 0 } : { duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
+          >
+            <Highlight
+              mode="parent"
+              controlledItems
+              value={settingsSection}
+              hover={false}
+              click={false}
+              transition={{ type: "spring", stiffness: 350, damping: 35 }}
+              className="app-shell__settings-active-indicator"
+              containerClassName="app-shell__settings-highlight"
             >
-              <AnimatedIcon animation={animation}><Icon /></AnimatedIcon>
-              <span>{labels[label]}</span>
-            </button>} /></AnimateIcon>{collapsed ? <TooltipContent side="right">{labels[label]}</TooltipContent> : null}</Tooltip>)}
-        </div>
-      ) : null}
+              {SETTINGS_ITEMS.map(({ section, label, icon: Icon, animation }) => (
+                <HighlightItem key={section} value={section} className="app-shell__settings-highlight-item">
+                  <AnimateIcon><button
+                    type="button"
+                    className={cn("app-shell__settings-section", settingsSection === section && "app-shell__settings-section--active")}
+                    aria-current={settingsSection === section ? "page" : undefined}
+                    aria-label={labels[label]}
+                    onClick={() => selectSection(section)}
+                  >
+                    <AnimatedIcon animation={animation}><Icon /></AnimatedIcon>
+                    <span>{labels[label]}</span>
+                  </button></AnimateIcon>
+                </HighlightItem>
+              ))}
+            </Highlight>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   )
 }
@@ -341,7 +370,6 @@ function MorePanel({ labels, storageHeadline, username, theme, language, onTheme
         </SheetTrigger>
       ) : (
         <SheetTrigger render={<Button ref={triggerRef} type="button" variant="ghost" className={cn("app-shell__more-trigger", moreActive && "app-shell__more-trigger--active")} aria-current={moreActive ? "page" : undefined} aria-label={labels.more} />}>
-          {moreActive ? <motion.span layoutId="mobile-active-navigation" initial={false} transition={{ type: "spring", stiffness: 310, damping: 30 }} className="app-shell__nav-active-indicator" /> : null}
           <MoreHorizontal aria-hidden="true" />
           <span>{labels.more}</span>
         </SheetTrigger>
@@ -385,21 +413,39 @@ function MorePanel({ labels, storageHeadline, username, theme, language, onTheme
   )
 }
 
-function DesktopAccountControls({ labels, username, theme = "system", language = "en", onThemeChange, onLanguageChange, onLogout }: Pick<AppShellProps, "username" | "theme" | "language" | "onThemeChange" | "onLanguageChange" | "onLogout"> & { labels: AppShellLabels }) {
+function DesktopAccountPopover({ labels, username, theme = "system", language = "en", onThemeChange, onLanguageChange, onLogout }: Pick<AppShellProps, "username" | "theme" | "language" | "onThemeChange" | "onLanguageChange" | "onLogout"> & { labels: AppShellLabels }) {
   const nextTheme: ThemeMode = theme === "light" ? "dark" : theme === "dark" ? "system" : "light"
   const themeIcon = theme === "dark" ? MoonData : theme === "light" ? SunData : LaptopData
   const themeLabel = theme === "dark" ? labels.themeDark : theme === "light" ? labels.themeLight : labels.themeSystem
-  return <div className="app-shell__account-panel">
-    <div className="app-shell__account-summary" aria-label={`${labels.account}: ${username || labels.account}`}>
-      <span className="app-shell__account-avatar" aria-hidden="true">{(username?.trim().charAt(0) || "A").toUpperCase()}</span>
-      <span className="app-shell__account-name">{username || labels.account}</span>
+  const accountLabel = `${labels.account}: ${username || labels.account}`
+  const trigger = <PopoverTrigger render={<button type="button" className="app-shell__account-trigger" aria-label={accountLabel} />}>
+    <span className="app-shell__account-avatar" aria-hidden="true">{(username?.trim().charAt(0) || "A").toUpperCase()}</span>
+  </PopoverTrigger>
+
+  return (
+    <div className="app-shell__account-panel">
+      <Popover>
+        <Tooltip>
+          <TooltipTrigger render={trigger} />
+          <TooltipContent side="right">{accountLabel}</TooltipContent>
+        </Tooltip>
+        <PopoverContent className="app-shell__account-popover" aria-label={labels.account}>
+          <div className="app-shell__account-popover-header">
+            <span className="app-shell__account-avatar" aria-hidden="true">{(username?.trim().charAt(0) || "A").toUpperCase()}</span>
+            <div>
+              <PopoverTitle className="app-shell__account-popover-title">{username || labels.account}</PopoverTitle>
+              <PopoverDescription className="app-shell__account-popover-description">{labels.account}</PopoverDescription>
+            </div>
+          </div>
+          <div className="app-shell__account-popover-actions">
+            <AnimateIcon><button type="button" className="app-shell__account-popover-action" onClick={() => onThemeChange?.(nextTheme)} aria-label={`${labels.theme}: ${themeLabel}`}><AnimatedIcon animation="pulse"><MorphIcon icon={themeIcon} reducedMotion="user" size={18} /></AnimatedIcon><span>{labels.theme}</span><strong>{themeLabel}</strong></button></AnimateIcon>
+            <AnimateIcon><button type="button" className="app-shell__account-popover-action" onClick={() => onLanguageChange?.(language === "en" ? "ru" : "en")} aria-label={`${labels.language}: ${language.toUpperCase()}`}><AnimatedIcon animation="wiggle"><Languages /></AnimatedIcon><span>{labels.language}</span><strong>{language.toUpperCase()}</strong></button></AnimateIcon>
+            <AnimateIcon><PopoverClose render={<button type="button" className="app-shell__account-popover-action app-shell__account-popover-action--logout" onClick={onLogout} aria-label={labels.logOut} />}><AnimatedIcon animation="bounce"><LogOut /></AnimatedIcon><span>{labels.logOut}</span></PopoverClose></AnimateIcon>
+          </div>
+        </PopoverContent>
+      </Popover>
     </div>
-    <div className="app-shell__account-actions">
-      <Tooltip><AnimateIcon><TooltipTrigger render={<button type="button" className="app-shell__account-action" onClick={() => onThemeChange?.(nextTheme)} aria-label={`${labels.theme}: ${themeLabel}`}><AnimatedIcon animation="pulse"><MorphIcon icon={themeIcon} reducedMotion="user" size={18} /></AnimatedIcon></button>} /></AnimateIcon><TooltipContent side="top">{labels.theme}: {themeLabel}</TooltipContent></Tooltip>
-      <Tooltip><AnimateIcon><TooltipTrigger render={<button type="button" className="app-shell__account-action" onClick={() => onLanguageChange?.(language === "en" ? "ru" : "en")} aria-label={`${labels.language}: ${language.toUpperCase()}`}><AnimatedIcon animation="wiggle"><Languages /></AnimatedIcon></button>} /></AnimateIcon><TooltipContent side="top">{labels.language}: {language.toUpperCase()}</TooltipContent></Tooltip>
-      <Tooltip><AnimateIcon><TooltipTrigger render={<button type="button" className="app-shell__account-action app-shell__account-action--logout" onClick={onLogout} aria-label={labels.logOut}><AnimatedIcon animation="bounce"><LogOut /></AnimatedIcon></button>} /></AnimateIcon><TooltipContent side="top">{labels.logOut}</TooltipContent></Tooltip>
-    </div>
-  </div>
+  )
 }
 
 export function AppShell({ activePage, onPageChange, onNavigate, settingsSection, onSettingsSectionChange, username, canAdmin = true, theme, onThemeChange, language, onLanguageChange, onLogout, dryRun, storageHeadline, storage, jobsSlot, jobs, jobsCount, labels: labelOverrides, children }: AppShellProps) {
@@ -408,6 +454,7 @@ export function AppShell({ activePage, onPageChange, onNavigate, settingsSection
   const resolvedStorage = storageHeadline ?? storage ?? { status: "unknown" as const, headline: labels.storageUnavailable }
   const resolvedJobs = jobsSlot ?? jobs
   const mobileMoreTriggerRef = useRef<HTMLButtonElement>(null)
+  const mobileHighlightValue = MOBILE_ITEMS.some(({ page }) => page === activePage) ? activePage : "more"
   useEffect(() => {
     window.localStorage.setItem("cleanarr.sidebar.collapsed", String(collapsed))
   }, [collapsed])
@@ -438,7 +485,7 @@ export function AppShell({ activePage, onPageChange, onNavigate, settingsSection
         <div className="app-shell__sidebar-bottom">
           <RuntimeStatus dryRun={dryRun} labels={labels} />
           <StorageCard storage={resolvedStorage} labels={labels} />
-          <DesktopAccountControls labels={labels} username={username} theme={theme} language={language} onThemeChange={onThemeChange} onLanguageChange={onLanguageChange} onLogout={onLogout} />
+          <DesktopAccountPopover labels={labels} username={username} theme={theme} language={language} onThemeChange={onThemeChange} onLanguageChange={onLanguageChange} onLogout={onLogout} />
         </div>
       </aside>
       <header className="app-shell__mobile-topbar">
@@ -448,8 +495,12 @@ export function AppShell({ activePage, onPageChange, onNavigate, settingsSection
       <div className="app-shell__desktop-status">{jobsCount != null ? <span className="app-shell__jobs-count">{jobsCount}</span> : null}{resolvedJobs}</div>
       <main className="app-shell__main">{children}</main>
       <nav className="app-shell__bottom-nav" aria-label={labels.navigation}>
-        <NavigationItems items={MOBILE_ITEMS} activePage={activePage} labels={labels} onNavigate={navigate} mobile />
-        <MorePanel labels={labels} storageHeadline={resolvedStorage} username={username} theme={theme} language={language} onThemeChange={onThemeChange} onLanguageChange={onLanguageChange} onLogout={onLogout} onNavigate={navigate} settingsSection={settingsSection} onSettingsSectionChange={onSettingsSectionChange} triggerRef={mobileMoreTriggerRef} activePage={activePage} canAdmin={canAdmin} />
+        <Highlight mode="parent" controlledItems value={mobileHighlightValue} hover={false} click={false} transition={{ type: "spring", stiffness: 350, damping: 35 }} className="app-shell__nav-active-indicator app-shell__nav-active-indicator--mobile" containerClassName="app-shell__bottom-highlight">
+          <NavigationItems items={MOBILE_ITEMS} activePage={activePage} labels={labels} onNavigate={navigate} mobile highlight />
+          <HighlightItem value="more" className="app-shell__more-highlight-item">
+            <MorePanel labels={labels} storageHeadline={resolvedStorage} username={username} theme={theme} language={language} onThemeChange={onThemeChange} onLanguageChange={onLanguageChange} onLogout={onLogout} onNavigate={navigate} settingsSection={settingsSection} onSettingsSectionChange={onSettingsSectionChange} triggerRef={mobileMoreTriggerRef} activePage={activePage} canAdmin={canAdmin} />
+          </HighlightItem>
+        </Highlight>
       </nav>
     </div>
   )

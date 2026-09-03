@@ -112,18 +112,20 @@ it("reveals the active Settings sections and reports the selected section", asyn
   const user = userEvent.setup()
   const onPageChange = vi.fn()
   const onSettingsSectionChange = vi.fn()
-  renderShell({ activePage: "settings", onPageChange, onSettingsSectionChange })
+  const { container } = renderShell({ activePage: "settings", onPageChange, onSettingsSectionChange })
 
   const settings = screen.getByRole("button", { name: "Settings" })
   expect(settings).toHaveAttribute("aria-expanded", "true")
+  expect(screen.getByRole("group", { name: "Settings" })).toHaveAttribute("data-motion-tree", "true")
   expect(screen.getByRole("button", { name: "CleanArr" })).toHaveAttribute("aria-current", "page")
+  expect(container.querySelector('.app-shell__settings-highlight [data-slot="motion-highlight-item-container"][data-value="cleanarr"]')).toHaveAttribute("data-active", "true")
 
   await user.click(screen.getByRole("button", { name: "Connected services" }))
   expect(onSettingsSectionChange).toHaveBeenCalledWith("services")
   expect(onPageChange).toHaveBeenCalledWith("settings")
 })
 
-it("keeps Settings and Storage in mobile More while desktop account actions stay directly accessible", async () => {
+it("keeps Settings and Storage in mobile More while desktop account actions live in the avatar popover", async () => {
   const user = userEvent.setup()
   renderShell()
 
@@ -133,10 +135,26 @@ it("keeps Settings and Storage in mobile More while desktop account actions stay
   expect(within(mobileDialog).getByRole("region", { name: "Storage" })).toBeInTheDocument()
   await user.keyboard("{Escape}")
 
-  expect(screen.queryByRole("button", { name: "Account: admin" })).not.toBeInTheDocument()
-  expect(screen.getByRole("button", { name: "Theme: System" })).toBeInTheDocument()
-  expect(screen.getByRole("button", { name: "Language: EN" })).toBeInTheDocument()
-  expect(screen.getByRole("button", { name: "Log out" })).toBeInTheDocument()
+  const account = screen.getByRole("button", { name: "Account: admin" })
+  expect(account).toHaveClass("app-shell__account-trigger")
+  expect(screen.queryByRole("button", { name: "Theme: System" })).not.toBeInTheDocument()
+
+  await user.click(account)
+  const accountPopover = screen.getByRole("dialog", { name: "admin" })
+  expect(within(accountPopover).getByRole("button", { name: "Theme: System" })).toBeInTheDocument()
+  expect(within(accountPopover).getByRole("button", { name: "Language: EN" })).toBeInTheDocument()
+  expect(within(accountPopover).getByRole("button", { name: "Log out" })).toBeInTheDocument()
+  await user.keyboard("{Escape}")
+  await waitFor(() => expect(account).toHaveFocus())
+})
+
+it("uses one measured moving highlight for the mobile bottom navigation", () => {
+  const { container } = renderShell({ activePage: "library" })
+  const mobileHighlight = container.querySelector(".app-shell__bottom-highlight")
+  const activeItem = mobileHighlight?.querySelector('[data-slot="motion-highlight-item-container"][data-value="library"]')
+
+  expect(mobileHighlight).toBeInTheDocument()
+  expect(activeItem).toHaveAttribute("data-active", "true")
 })
 
 it("collapses the desktop sidebar and keeps every destination available by accessible name", async () => {
