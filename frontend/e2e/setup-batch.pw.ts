@@ -1,10 +1,11 @@
 import { expect, test } from "@playwright/test"
 import { boot, clone, fixtureMovie, navButton, runtimeConfig, safePlan } from "./fixtures"
 
-test("downloader wizard uses client-specific test routes and invalidates visible readiness after a draft edit", async ({ page }) => {
+test("downloader wizard uses client-specific test routes and invalidates visible readiness after a draft edit", async ({ page }, testInfo) => {
   const tested: string[] = []
   await boot(page, { handlers: [(request) => { if (!request.pathname.endsWith("/test")) return undefined; tested.push(request.pathname); return { body: { ok: true, message: "Fixture connection succeeded", version: "fixture", details: {} } } }] })
   await page.getByRole("button", { name: /setup wizard/i }).click(); await page.getByRole("button", { name: "Setup 6" }).click()
+  await expect(page.getByRole("heading", { name: "Downloader" })).toBeVisible(); await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0); await expect(page.getByText("Saves on continue")).toBeVisible(); await testInfo.attach("setup-downloader-followup", { body: await page.screenshot(), contentType: "image/png" })
   const kind = page.locator("#wizard-downloader-kind")
   for (const [label, endpoint] of [["qBittorrent", "/api/config/downloaders/qbittorrent/test"], ["Transmission", "/api/config/downloaders/transmission/test"], ["Deluge", "/api/config/downloaders/deluge/test"], ["rTorrent", "/api/config/downloaders/rtorrent/test"]] as const) {
     await kind.click(); await page.getByRole("option", { name: label }).click(); await page.getByRole("button", { name: /test current profile/i }).click(); await expect.poll(() => tested.includes(endpoint)).toBeTruthy()
@@ -22,7 +23,7 @@ test("downloader wizard shows existing profiles and saves a tested kind-specific
   ] })
   await page.getByRole("button", { name: /setup wizard/i }).click(); await page.getByRole("button", { name: "Setup 6" }).click(); await expect(page.getByText("Existing qBittorrent · qBittorrent")).toBeVisible(); await expect(page.getByText("Enabled · Default", { exact: true })).toBeVisible()
   await page.getByRole("button", { name: /add another (client|profile)/i }).click(); await page.locator("#wizard-downloader-kind").click(); await page.getByRole("option", { name: "Transmission" }).click(); await page.locator("#wizard-downloaders-name").fill("Transmission fixture"); await page.locator("#wizard-downloaders-url").fill("https://transmission.fixture.invalid"); await page.locator("#wizard-downloaders-username").fill("fixture-user"); await page.locator("#wizard-downloaders-password").fill("fixture-pass")
-  const enabled = page.getByRole("switch", { name: "Enabled" }); const preferred = page.getByRole("switch", { name: "Mark as preferred/default" }); await enabled.click(); await enabled.click(); await preferred.click(); await preferred.click(); await page.getByRole("button", { name: /test current profile/i }).click(); await expect(page.getByText(/tested with current connection settings/i)).toBeVisible(); await page.getByRole("button", { name: "Save" }).click(); await expect.poll(() => api.count("/api/config/downloaders/transmission", "POST")).toBe(1)
+  const enabled = page.getByRole("switch", { name: "Enabled" }); const preferred = page.getByRole("switch", { name: "Mark as preferred/default" }); await enabled.click(); await enabled.click(); await preferred.click(); await preferred.click(); await page.getByRole("button", { name: /test current profile/i }).click(); await expect(page.getByText(/tested with current connection settings/i)).toBeVisible(); await page.getByRole("button", { name: "Done" }).click(); await expect.poll(() => api.count("/api/config/downloaders/transmission", "POST")).toBe(1)
   const payload = JSON.parse(api.last("/api/config/downloaders/transmission", "POST")?.body ?? "{}"); expect(payload).toEqual({ name: "Transmission fixture", url: "https://transmission.fixture.invalid", enabled: true, is_default: true, seeding_policy: "immediate", min_seed_ratio: null, min_seed_time_minutes: null, username: "fixture-user", password: "fixture-pass" })
 })
 

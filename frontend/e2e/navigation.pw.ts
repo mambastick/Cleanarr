@@ -67,6 +67,20 @@ test("matches the annotated sidebar and library-card interactions", async ({ pag
   await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible()
   await expect(page.getByRole("status", { name: /Runtime status/ }).first()).toBeVisible()
   await expect(page.locator(".app-shell__sidebar .app-shell__storage")).toHaveCount(0)
+  const [collapsedSidebarBounds, brandMarkSlotBounds, expandBounds, runtimeBounds] = await Promise.all([
+    sidebar.boundingBox(),
+    page.locator(".app-shell__sidebar .app-shell__brand-mark-slot").boundingBox(),
+    page.getByRole("button", { name: "Expand sidebar" }).boundingBox(),
+    page.locator(".app-shell__sidebar .app-shell__runtime-status").boundingBox(),
+  ])
+  expect(collapsedSidebarBounds).not.toBeNull()
+  expect(brandMarkSlotBounds).not.toBeNull()
+  expect(expandBounds).not.toBeNull()
+  expect(runtimeBounds).not.toBeNull()
+  const sidebarCenter = collapsedSidebarBounds!.x + collapsedSidebarBounds!.width / 2
+  expect(Math.abs((brandMarkSlotBounds!.x + brandMarkSlotBounds!.width / 2) - sidebarCenter)).toBeLessThan(1)
+  expect(Math.abs((expandBounds!.x + expandBounds!.width / 2) - sidebarCenter)).toBeLessThan(1)
+  expect(Math.abs((runtimeBounds!.x + runtimeBounds!.width / 2) - sidebarCenter)).toBeLessThan(1)
   const desktopFocusLocator = page.locator(".app-shell__navigation-highlight > .app-shell__nav-active-indicator")
   const activeDesktopIconLocator = page.locator('[data-slot="motion-highlight-item-container"][data-value="settings"] [data-slot="animated-icon"]')
   await expect.poll(async () => {
@@ -88,13 +102,27 @@ test("matches the annotated sidebar and library-card interactions", async ({ pag
   expect(Math.abs((desktopFocus!.y + desktopFocus!.height / 2) - (activeDesktopIcon!.y + activeDesktopIcon!.height / 2))).toBeLessThan(1)
   await testInfo.attach("desktop-collapsed-focus-followup", { body: await page.screenshot(), contentType: "image/png" })
 
-  const activity = navButton(page, "Activity")
-  await activity.hover()
-  await expect(activity).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)")
   const tooltip = page.locator('[data-slot="tooltip-content"]')
-  await expect(tooltip).toHaveText("Activity")
-  await expect(tooltip).toHaveCSS("background-color", "rgb(109, 92, 231)")
+  for (const name of ["Overview", "Library", "Downloads", "Activity", "Users", "Settings"]) {
+    await navButton(page, name).hover()
+    await expect(tooltip).toHaveText(name)
+    await expect(tooltip).toHaveCSS("background-color", "rgb(109, 92, 231)")
+  }
 
+  const library = navButton(page, "Library")
+  await library.click()
+  await library.hover()
+  await expect(library).toHaveCSS("background-color", "rgba(0, 0, 0, 0)")
+  const libraryIcon = page.locator('[data-slot="motion-highlight-item-container"][data-value="library"] [data-slot="animated-icon"]')
+  await expect.poll(async () => {
+    const focus = await desktopFocusLocator.boundingBox()
+    const icon = await libraryIcon.boundingBox()
+    if (!focus || !icon) return Number.POSITIVE_INFINITY
+    return Math.max(Math.abs((focus.x + focus.width / 2) - (icon.x + icon.width / 2)), Math.abs((focus.y + focus.height / 2) - (icon.y + icon.height / 2)))
+  }, { timeout: 2_000 }).toBeLessThan(1)
+  await testInfo.attach("desktop-collapsed-library-followup", { body: await page.screenshot(), contentType: "image/png" })
+
+  const activity = navButton(page, "Activity")
   await activity.click()
   await activity.hover()
   await expect(activity).toHaveCSS("background-color", "rgba(0, 0, 0, 0)")
@@ -134,6 +162,12 @@ test("places user identity and the administrator safeguard in the Users header",
   await expect(page.getByText("At least one administrator must remain.")).toBeVisible()
   await expect(page.locator("[data-initials=FA]").last()).toBeVisible()
   await expect(page.getByText("You", { exact: true })).toHaveCount(0)
+  const usersCard = page.locator('[data-slot="card"]').last()
+  const cardPadding = await usersCard.evaluate((node) => {
+    const style = getComputedStyle(node)
+    return [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft]
+  })
+  expect(new Set(cardPadding).size).toBe(1)
   await testInfo.attach("desktop-users-followup", { body: await page.screenshot(), contentType: "image/png" })
 })
 

@@ -82,6 +82,14 @@ export type UiTextKey =
   | "dryRunModeNotice"
   | "titleNotConfigured"
   | "general"
+  | "basicSettings"
+  | "ssoSettings"
+  | "ssoProvider"
+  | "ssoAccessPolicy"
+  | "connectionSettings"
+  | "savedOnContinue"
+  | "savingProgress"
+  | "downloaderServiceTitle"
   | "settingsUnavailable"
   | "tryAgain"
   | "runtimeSettings"
@@ -323,9 +331,9 @@ export const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     technicalDetails: "Technical details",
     viewDetails: "View details",
     activityPageDescription: "Review recent cleanup checks and media-server events. Open an item only when you need more detail.",
-    live: "Live",
+    live: "Real deletion",
     dryRun: "Dry run",
-    liveMode: "Live mode",
+    liveMode: "Real deletions",
     liveModeDescription: "Real deletions are active",
     dryRunDescription: "No deletions will be made",
     status: "Status",
@@ -398,6 +406,14 @@ export const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     noMoviesFound: "No movies found",
     noMoviesMatch: "No movies match your search",
     general: "General",
+    basicSettings: "Basic",
+    ssoSettings: "SSO",
+    ssoProvider: "OIDC provider",
+    ssoAccessPolicy: "Access policy",
+    connectionSettings: "Connection",
+    savedOnContinue: "Saves on continue",
+    savingProgress: "Saving…",
+    downloaderServiceTitle: "Downloader",
     settingsUnavailable: "Settings unavailable",
     tryAgain: "Refresh the configuration and try again.",
     runtimeSettings: "Runtime settings",
@@ -622,9 +638,9 @@ export const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     technicalDetails: "Технические сведения",
     viewDetails: "Открыть сведения",
     activityPageDescription: "Просматривайте результаты проверок очистки и события медиасервера. Подробности открываются только при необходимости.",
-    live: "Включен",
-    dryRun: "Тестовый режим",
-    liveMode: "Рабочий режим",
+    live: "Реальные удаления",
+    dryRun: "Тестовый",
+    liveMode: "Реальные удаления",
     liveModeDescription: "Выполняются реальные удаления",
     dryRunDescription: "Реальные удаления отключены",
     status: "Статус",
@@ -675,7 +691,7 @@ export const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     libraryDescription:
       "Просматривайте медиатеку и проверяйте привязанный к безопасности план очистки для настроенных сервисов перед подтверждением.",
     dryRunModeInfo: "Тестовый режим",
-    noLiveChanges: "Реальные изменения не выполняются. Включите рабочий режим в настройках приложения, чтобы разрешить удаление.",
+    noLiveChanges: "Реальные изменения не выполняются. Разрешите реальные удаления в настройках приложения, чтобы продолжить.",
     deleteButton: "Удалить",
     confirmDelete: "Удалить",
     simulate: "Симулировать (тест)",
@@ -697,6 +713,14 @@ export const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     noMoviesFound: "Фильмы не найдены",
     noMoviesMatch: "Нет совпадений по вашему поиску",
     general: "Общее",
+    basicSettings: "Основное",
+    ssoSettings: "SSO",
+    ssoProvider: "OIDC-провайдер",
+    ssoAccessPolicy: "Политика доступа",
+    connectionSettings: "Подключение",
+    savedOnContinue: "Сохраним при переходе",
+    savingProgress: "Сохраняем…",
+    downloaderServiceTitle: "Загрузчик",
     settingsUnavailable: "Настройки недоступны",
     tryAgain: "Обновите конфигурацию и повторите.",
     runtimeSettings: "Настройки приложения",
@@ -777,7 +801,7 @@ export const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     alreadyConfigured: "Уже настроено",
     ...SETUP_CONNECTION_COPY.ru,
     beforeYouSave: "Перед сохранением",
-    beforeSaveDescription: "Укажите URL и учётные данные сервиса, затем запустите проверку. До включения рабочего режима результат должен быть успешным.",
+    beforeSaveDescription: "Укажите URL и учётные данные сервиса, затем запустите проверку. До включения реальных удалений результат должен быть успешным.",
     webhook: "Webhook",
     notConfigured: "Не настроено",
     healthy: "Доступен",
@@ -878,7 +902,7 @@ export const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     copyCurl: "Копировать cURL",
     generalSetupStep1: "Оставьте CleanArr в тестовом режиме, пока все проверки сервисов не будут успешными.",
     generalSetupStep2: "Задайте токен webhook. Jellyfin должен отправлять его в заголовке X-Webhook-Token.",
-    generalSetupStep3: "Включайте рабочий режим только после настройки всех внешних сервисов.",
+    generalSetupStep3: "Разрешайте реальные удаления только после настройки всех внешних сервисов.",
     tryDifferentSearch: "Попробуйте изменить поисковый запрос.",
     noSeriesSetup: "Sonarr не вернул сериалов. Сначала настройте Sonarr.",
     noMoviesSetup: "Radarr не вернул фильмов. Сначала настройте Radarr.",

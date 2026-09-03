@@ -7,7 +7,7 @@ import { useReducedMotionPreference } from "@/hooks/use-reduced-motion-preferenc
 
 const TooltipOpenContext = createContext(false)
 
-function TooltipProvider({ delay = 350, ...props }: TooltipPrimitive.Provider.Props) {
+function TooltipProvider({ delay = 150, ...props }: TooltipPrimitive.Provider.Props) {
   return <TooltipPrimitive.Provider data-slot="tooltip-provider" delay={delay} {...props} />
 }
 

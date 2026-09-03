@@ -202,7 +202,7 @@ function mergeLabels(labels?: AppShellProps["labels"]): AppShellLabels {
 function Brand({ labels, collapsed, onToggle }: { labels: AppShellLabels; collapsed?: boolean; onToggle?: () => void }) {
   return (
     <AnimateIcon><div className="app-shell__brand" aria-label={labels.logo}>
-      <AnimatedIcon animation="wiggle"><Zap className="app-shell__brand-mark" /></AnimatedIcon>
+      <span className="app-shell__brand-mark-slot"><AnimatedIcon animation="wiggle"><Zap className="app-shell__brand-mark" /></AnimatedIcon></span>
       <span className="app-shell__brand-name"><span>Clean</span><strong>Arr</strong></span>
       <GitHubStarsButton
         className="app-shell__brand-github"

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from "react"
+import { useCallback, useEffect, useRef, type RefObject } from "react"
 import { Zap } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -38,6 +38,17 @@ export function SetupWizard({
   testedDownloaderFingerprints: ReadonlySet<string>
 }) {
   const skipRef = useRef<HTMLButtonElement>(null)
+  const stepSavers = useRef(new Map<number, () => Promise<boolean>>())
+  const registerStepSaver = useCallback((step: number, saver: () => Promise<boolean>) => {
+    stepSavers.current.set(step, saver)
+    return () => {
+      if (stepSavers.current.get(step) === saver) stepSavers.current.delete(step)
+    }
+  }, [])
+  const saveBeforeLeavingStep = useCallback(async (currentStep: number) => {
+    const save = stepSavers.current.get(currentStep)
+    return save ? save() : true
+  }, [])
   useEffect(() => {
     const returnFocusTarget = returnFocusRef?.current
     return () => returnFocusTarget?.focus()
@@ -48,7 +59,7 @@ export function SetupWizard({
       <DialogPortal>
         <DialogBackdrop data-testid="setup-wizard-backdrop" className="fixed inset-0 z-50 bg-background/98 backdrop-blur-sm" />
         <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center p-4">
-      <DialogPopup initialFocus={skipRef} finalFocus={returnFocusRef} className="pointer-events-auto flex max-h-[calc(100dvh-2rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl outline-none [&_[data-slot=button]]:min-h-11">
+      <DialogPopup initialFocus={skipRef} finalFocus={returnFocusRef} className="pointer-events-auto flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl outline-none [&_[data-slot=button]]:min-h-11">
         <DialogTitle className="sr-only">{text.firstTimeSetup}</DialogTitle>
         <DialogDescription className="sr-only">{text.firstTimeSetup}</DialogDescription>
         {/* Header */}
@@ -64,21 +75,22 @@ export function SetupWizard({
           </Button>
         </div>
 
-        <div role="region" aria-label={text.firstTimeSetup} tabIndex={0} className="min-h-0 flex-1 overflow-y-auto px-4 py-5 outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring/50 sm:px-7 sm:py-6">
+        <div role="region" aria-label={text.firstTimeSetup} tabIndex={0} className="setup-wizard__viewport min-h-0 flex-1 overflow-y-auto px-4 py-4 outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring/50 sm:px-6 sm:py-5">
         <Stepper
           onFinalStepCompleted={onClose}
+          onBeforeStepChange={saveBeforeLeavingStep}
           nextButtonText={text.next}
           backButtonText={text.back}
           completeButtonText={text.done}
           stepLabel={text.setup}
           stepCircleContainerClassName="border-border bg-card shadow-sm"
-          stepContainerClassName="border-b border-border bg-background py-4 sm:py-5"
-          contentClassName="px-4 pt-5 sm:px-7 sm:pt-7"
-          footerClassName="px-4 pb-5 sm:px-7 sm:pb-7"
+          stepContainerClassName="border-b border-border bg-background py-3 sm:py-4"
+          contentClassName="px-4 pt-4 sm:px-6 sm:pt-5"
+          footerClassName="px-4 pb-4 sm:px-6 sm:pb-5"
         >
           {/* Step 1: General */}
           <Step>
-            <WizardGeneralStep config={config} onSave={onSaveGeneral} text={text} />
+            <WizardGeneralStep config={config} onSave={onSaveGeneral} text={text} registerSave={(save) => registerStepSaver(1, save)} />
           </Step>
 
           {/* Step 2: Jellyfin */}
@@ -90,6 +102,7 @@ export function SetupWizard({
               onSave={onSaveService}
               onTest={onTestService}
               testedDownloaderFingerprints={testedDownloaderFingerprints}
+              registerSave={(save) => registerStepSaver(2, save)}
               jellyfinSetupProps={{
                 dashboard,
                 origin,
@@ -109,6 +122,7 @@ export function SetupWizard({
               onSave={onSaveService}
               onTest={onTestService}
               testedDownloaderFingerprints={testedDownloaderFingerprints}
+              registerSave={(save) => registerStepSaver(3, save)}
             />
           </Step>
 
@@ -121,6 +135,7 @@ export function SetupWizard({
               onSave={onSaveService}
               onTest={onTestService}
               testedDownloaderFingerprints={testedDownloaderFingerprints}
+              registerSave={(save) => registerStepSaver(4, save)}
             />
           </Step>
 
@@ -133,6 +148,7 @@ export function SetupWizard({
               onSave={onSaveService}
               onTest={onTestService}
               testedDownloaderFingerprints={testedDownloaderFingerprints}
+              registerSave={(save) => registerStepSaver(5, save)}
             />
           </Step>
 
@@ -145,6 +161,7 @@ export function SetupWizard({
               onSave={onSaveService}
               onTest={onTestService}
               testedDownloaderFingerprints={testedDownloaderFingerprints}
+              registerSave={(save) => registerStepSaver(6, save)}
             />
           </Step>
         </Stepper>

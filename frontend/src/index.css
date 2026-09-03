@@ -250,6 +250,14 @@
   letter-spacing: -0.03em;
 }
 
+.app-shell__brand-mark-slot {
+  display: inline-grid;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  place-items: center;
+}
+
 .app-shell__brand-mark {
   display: inline-grid;
   width: 1.35rem;
@@ -309,7 +317,7 @@
   transition: transform 180ms ease, color 180ms ease;
 }
 .app-shell__nav-item > *:not(.app-shell__nav-active-indicator) { position: relative; z-index: 1; }
-.app-shell__nav-active-indicator { position: absolute; z-index: 0; border: 1px solid color-mix(in srgb, var(--primary) 28%, transparent); border-radius: 0.75rem; background: var(--primary-soft); box-shadow: 0 0.35rem 0.9rem color-mix(in srgb, var(--primary) 13%, transparent); }
+.app-shell__nav-active-indicator { position: absolute; z-index: 0; border: 1px solid color-mix(in srgb, var(--primary) 28%, transparent); border-radius: 0.75rem; background: var(--primary-soft); }
 .app-shell__nav-item > .app-shell__nav-active-indicator,
 .app-shell__more-trigger > .app-shell__nav-active-indicator { inset: 0; border-radius: inherit; }
 .app-shell__nav-item svg { width: 1.2rem; height: 1.2rem; flex: 0 0 auto; stroke-width: 1.8; }
@@ -321,6 +329,8 @@
 .app-shell__logout:focus-visible { outline: 3px solid color-mix(in srgb, var(--ring) 50%, transparent); outline-offset: 2px; }
 .app-shell__nav-item--active { color: var(--primary-copy); font-weight: 650; }
 .app-shell__nav-item--active:hover { background: transparent; color: var(--primary-copy); }
+.app-shell__nav-item--active:focus-visible,
+.app-shell__more-trigger--active:focus-visible { outline: 0; box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ring) 58%, transparent); }
 .app-shell__settings-group { display: grid; gap: 0.35rem; margin-top: 0.35rem; }
 .app-shell__settings-sections { overflow: hidden; margin-left: 1.55rem; padding-left: 0.8rem; border-left: 1px solid var(--border); }
 .app-shell__settings-highlight { display: grid; gap: 0.2rem; }
@@ -417,15 +427,17 @@
 .app-shell__logout { min-height: 2.75rem; }
 
 @media (min-width: 75rem) {
-  .app-shell--sidebar-collapsed .app-shell__sidebar { align-items: center; padding-inline: 0.625rem; }
-  .app-shell--sidebar-collapsed .app-shell__brand { min-height: 3.5rem; justify-content: space-between; gap: 0.125rem; padding-inline: 0; }
+  .app-shell--sidebar-collapsed .app-shell__sidebar { align-items: center; padding: 0.625rem 0.625rem 0.75rem; }
+  .app-shell--sidebar-collapsed .app-shell__brand { min-height: 6.25rem; flex-direction: column; justify-content: flex-start; gap: 0.25rem; padding: 0 0 0.5rem; }
   .app-shell--sidebar-collapsed .app-shell__brand-name,
   .app-shell--sidebar-collapsed .app-shell__nav-item > span:not([data-slot="animated-icon"]):not(.app-shell__nav-active-indicator),
   .app-shell--sidebar-collapsed .app-shell__account-name,
   .app-shell--sidebar-collapsed .app-shell__runtime-status span:last-child { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .app-shell--sidebar-collapsed .app-shell__settings-sections { display: none; }
   .app-shell--sidebar-collapsed .app-shell__brand-github { position: absolute; width: 1px; height: 1px; min-height: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  .app-shell--sidebar-collapsed .app-shell__collapse { width: 1.875rem; height: 1.875rem; margin-left: 0; }
+  .app-shell--sidebar-collapsed .app-shell__brand-mark-slot,
+  .app-shell--sidebar-collapsed .app-shell__collapse { width: 2.75rem; height: 2.75rem; margin-left: 0; }
+  .app-shell--sidebar-collapsed .app-shell__navigation-scroll { width: 100%; margin-right: 0; padding-right: 0; }
   .app-shell--sidebar-collapsed .app-shell__nav-list,
   .app-shell--sidebar-collapsed .app-shell__settings-group,
   .app-shell--sidebar-collapsed .app-shell__sidebar-bottom { width: 100%; }
@@ -434,16 +446,18 @@
   .app-shell--sidebar-collapsed .app-shell__nav-highlight-item { width: 2.75rem; }
   .app-shell--sidebar-collapsed .app-shell__nav-item { width: 2.75rem; height: 2.75rem; min-height: 2.75rem; justify-content: center; padding: 0; }
   .app-shell--sidebar-collapsed .app-shell__nav-item [data-slot="animated-icon"] { display: inline-grid; width: 2.5rem; height: 2.5rem; place-items: center; }
+  .app-shell--sidebar-collapsed .app-shell__nav-highlight-item[data-value="library"] .app-shell__nav-item svg { transform: translateX(0.5px); }
   .app-shell--sidebar-collapsed .app-shell__nav-item:hover { background: var(--muted); color: var(--fg); }
   .app-shell--sidebar-collapsed .app-shell__nav-item--active:hover { background: transparent; color: var(--primary-copy); }
-  .app-shell--sidebar-collapsed .app-shell__sidebar-bottom > .app-shell__runtime-status { width: 2.75rem; min-height: 2.75rem; justify-content: center; padding: 0; }
-  .app-shell--sidebar-collapsed .app-shell__account-trigger { width: 2.75rem; min-height: 2.75rem; justify-content: center; padding: 0; }
+  .app-shell--sidebar-collapsed .app-shell__sidebar-bottom > .app-shell__runtime-status { width: 2.75rem; min-height: 2.75rem; justify-self: center; justify-content: center; padding: 0; }
+  .app-shell--sidebar-collapsed .app-shell__account-trigger { width: 2.75rem; min-height: 2.75rem; justify-self: center; justify-content: center; padding: 0; }
 }
 
 @media (min-width: 48rem) and (max-width: 74.9375rem) {
   .app-shell { --app-shell-sidebar-width: 5rem; }
   .app-shell__sidebar { align-items: center; padding-inline: 0.625rem; }
   .app-shell__brand { min-height: 3.5rem; justify-content: center; padding-inline: 0; }
+  .app-shell__brand-mark-slot { width: 2.75rem; height: 2.75rem; }
   .app-shell__collapse { display: none; }
   .app-shell__brand-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .app-shell__brand-github { position: absolute; width: 1px; height: 1px; min-height: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -451,6 +465,7 @@
   .app-shell__nav-highlight-item { width: 2.75rem; }
   .app-shell__nav-item { width: 2.75rem; height: 2.75rem; min-height: 2.75rem; justify-content: center; padding: 0; }
   .app-shell__nav-item [data-slot="animated-icon"] { display: inline-grid; width: 2.5rem; height: 2.5rem; place-items: center; }
+  .app-shell__nav-highlight-item[data-value="library"] .app-shell__nav-item svg { transform: translateX(0.5px); }
   .app-shell__nav-item:hover { background: var(--muted); color: var(--fg); }
   .app-shell__nav-item--active:hover { background: transparent; color: var(--primary-copy); }
   .app-shell__nav-item > span:not([data-slot="animated-icon"]):not(.app-shell__nav-active-indicator) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -459,11 +474,14 @@
   .app-shell__settings-section { width: 100%; justify-content: center; padding-inline: 0; }
   .app-shell__settings-section span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .app-shell__storage { display: none; }
-  .app-shell__sidebar-bottom > .app-shell__runtime-status { width: 2.75rem; min-height: 2.75rem; justify-content: center; padding: 0; }
+  .app-shell__sidebar-bottom > .app-shell__runtime-status { width: 2.75rem; min-height: 2.75rem; justify-self: center; justify-content: center; padding: 0; }
   .app-shell__sidebar-bottom > .app-shell__runtime-status span:last-child { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .app-shell__account-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  .app-shell__account-trigger { width: 2.75rem; min-height: 2.75rem; justify-content: center; padding: 0; }
+  .app-shell__account-trigger { width: 2.75rem; min-height: 2.75rem; justify-self: center; justify-content: center; padding: 0; }
 }
+
+.setup-wizard__viewport { scrollbar-width: none; }
+.setup-wizard__viewport::-webkit-scrollbar { display: none; width: 0; height: 0; }
 
 .library-card__delete {
   position: absolute;

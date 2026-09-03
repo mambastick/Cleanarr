@@ -21,7 +21,7 @@ it("uses controlled runtime tabs once and keeps service URLs behind disclosure",
   expect(screen.getByText(/CleanArr reads free space for each media folder/)).toBeInTheDocument()
   expect(screen.getByText("Movies")).toBeInTheDocument()
   expect(screen.getAllByText("Technical details")[0]?.closest("details")).not.toHaveAttribute("open")
-  await user.dblClick(screen.getByRole("tab", { name: "Live" }))
+  await user.dblClick(screen.getByRole("tab", { name: "Real deletion" }))
   expect(onToggleDryRun).toHaveBeenCalledTimes(1)
   resolveToggle?.()
 })
