@@ -42,7 +42,7 @@ export class ApiController {
   constructor(options: { config?: typeof runtimeConfig; dashboard?: typeof dashboard; auth?: Record<string, unknown>; handlers?: ApiHandler[]; movies?: unknown[]; series?: unknown[]; downloads?: unknown[]; cleanup?: unknown[]; jobs?: unknown[]; batches?: unknown[] } = {}) {
     this.config = clone(options.config ?? runtimeConfig)
     this.handlers = options.handlers ?? []
-    this.auth = { authenticated: true, username: "fixture-admin", csrf_token: "fixture-csrf", requires_registration: false, sso_mode: "password_only", sso_configured: false, ui_language: this.config.general.ui_language, ...options.auth }
+    this.auth = { authenticated: true, username: "fixture-admin", role: "admin", csrf_token: "fixture-csrf", requires_registration: false, sso_mode: "password_only", sso_configured: false, ui_language: this.config.general.ui_language, ...options.auth }
     const currentDashboard = clone(options.dashboard ?? dashboard); const movies = options.movies ?? []; const series = options.series ?? []; const downloads = options.downloads ?? []; const cleanup = options.cleanup ?? []; const jobs = options.jobs ?? []; const batches = options.batches ?? []
     const libraryMovies = movies.map((value, index) => toLibraryMovie(value, index))
     const librarySeries = series.map((value, index) => toLibrarySeries(value, index))

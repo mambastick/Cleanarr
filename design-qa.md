@@ -33,6 +33,7 @@ Focused desktop comparison confirmed that the collapsed rail retains every desti
 4. **P2 — a self-demoted administrator could retain stale administrative controls until reload.** Fixed by applying the returned current-user role to the active workspace immediately; backend authorization already resolves the persisted role per request.
 5. **P1 — the long torrent-client editor was visually clipped even though its custom viewport reported scroll styling.** Replaced the flex-trapped viewport with a bounded, keyboard-focusable native scroll region using themed scrollbar tokens. At 590 × 850, an actual wheel gesture moved the form from `scrollTop=0` to `scrollTop=472` while the fixed footer remained visible.
 6. **P2 — the disabled SSO Client Secret icon action had an accessible name but no hover tooltip.** Moved the tooltip trigger to a non-disabled wrapper so the localized explanation is available even while SSO is disabled; verified with a real pointer hover.
+7. **P1 — the browser fixture did not declare an administrator role after role-aware authorization landed, so the CI harness correctly rendered read-only controls and timed out against obsolete admin expectations.** Added the explicit fixture role and updated the setup-wizard scroll assertion to target its new labelled native region.
 
 No actionable P0, P1, or P2 visual or interaction findings remain. The production build reports only the existing large-chunk advisory; it does not affect this visual acceptance pass.
 
