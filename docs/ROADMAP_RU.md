@@ -362,9 +362,11 @@ fail-closed, dry-run, совместимости, миграциям и quality 
   загрузок, ограниченные playback insights, первоначальную настройку нескольких
   downloader и доступную component system на semantic tokens. Automatic
   deletion и остальные последующие opt-in пункты не входят в этот релиз.
-- SQLite schema v5 и config schema v3 проверены через последовательное
+- SQLite schema v5 и прежняя конфигурация v1.1 проверены через последовательное
   обновление, идемпотентность, отказ для будущей версии, проверенный backup и
-  rollback. Финальный локальный candidate прошёл 214 backend-тестов с 7
+  rollback. Workstream UI-v2 переводит runtime configuration на schema v4 со
+  storage thresholds; этот snapshot не утверждает, что работа выпущена.
+  Финальный локальный candidate прошёл 214 backend-тестов с 7
   пропущенными в обычном suite pinned live-service тестами, Ruff format/lint,
   strict mypy, 66 тестов Vitest/Testing Library, 12 browser-тестов
   Playwright/Axe, frontend lint и production build, dependency/source/container
@@ -382,6 +384,41 @@ fail-closed, dry-run, совместимости, миграциям и quality 
   file provenance attestation, а также OCI provenance. Digest image index для
   `linux/amd64` и `linux/arm64` —
   `sha256:67cadfe8caa795ec5c6a5d9daaf61df25260ffce1f54bf72199aec47f5e37336`.
+
+## Tracked Epic #8 — рабочее пространство Library UI-v2
+
+Epic отслеживается в [GitHub Issue #8](https://github.com/mambastick/Cleanarr/issues/8)
+и принят как post-1.1 work. Это план доставки, а не заявление о выпуске. Он
+сохраняет fail-closed, dry-run, ownership, freshness, authentication,
+migration и quality contracts версии 1.0.
+
+Порядок доставки:
+
+1. **Frontend harness и извлечение логики** — расширить существующее покрытие
+   Vitest/Testing Library и Playwright, затем выделить controllers и feature-границы текущего
+   интерфейса без изменения production-вида и поведения.
+2. **Backend-контракты** — реализовать configuration schema v4, ordered
+   migration, storage monitoring, resource-based Library/detail/artwork APIs,
+   compatibility, автоматический backup v3, rollback/restore и backend-тесты.
+3. **Основа shell** — добавить semantic light/dark tokens, адаптивные
+   sidebar/rail/mobile navigation и блоки account/storage, пока не переключая
+   production entry point.
+4. **Dashboard и Library** — реализовать storage dashboard, poster grid,
+   inspector выбранного объекта, устойчивый ограниченный выбор и интеграцию
+   single/batch preflight.
+5. **Production cutover** — перенести Downloads, Cleanup Candidates, Activity,
+   Settings, Setup/Auth/Jobs, удалить устаревший UI, синхронизировать EN/RU docs
+   и зафиксировать browser/accessibility/visual evidence и все обязательные gates.
+
+Пять изменений остаются stacked, связаны с Epic #8 и откатываются независимо.
+Backend и foundational work могут быть объединены отдельно, но новый shell
+становится production default только в финальном cutover; merge, release и
+publication требуют отдельного разрешения.
+
+Пока все пять шагов и их gates не завершены, UI-v2 нельзя описывать как
+выпущенный или ослабляющий безопасность удаления. Missing, stale, partial и
+conflicting watch/download/storage data остаётся `unknown` и не разрешает
+destructive action.
 
 ## Обязательный scope 1.0
 

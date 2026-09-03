@@ -17,6 +17,9 @@ from cleanarr.domain import (
     SonarrEpisodeFile,
     SonarrHistoryRecord,
     SonarrSeries,
+    StorageDiskSpace,
+    StorageProfileListing,
+    StorageRootFolder,
 )
 
 
@@ -29,6 +32,10 @@ class ManagedRadarrClientPort(RadarrClientPort, Protocol):
 
     async def get_version(self) -> str: ...
 
+    async def list_root_folders(self) -> Sequence[StorageRootFolder]: ...
+
+    async def list_disk_space(self) -> Sequence[StorageDiskSpace]: ...
+
 
 class ManagedSonarrClientPort(SonarrClientPort, Protocol):
     """Sonarr operations plus runtime lifecycle methods."""
@@ -38,6 +45,10 @@ class ManagedSonarrClientPort(SonarrClientPort, Protocol):
     async def ping(self) -> None: ...
 
     async def get_version(self) -> str: ...
+
+    async def list_root_folders(self) -> Sequence[StorageRootFolder]: ...
+
+    async def list_disk_space(self) -> Sequence[StorageDiskSpace]: ...
 
 
 @dataclass(frozen=True)
@@ -82,6 +93,39 @@ class MultiRadarrClient:
             for target_index, catalog in enumerate(catalogs)
             for movie in catalog
         ]
+
+    async def list_storage(self) -> Sequence[StorageProfileListing]:
+        """Read each Radarr profile independently for storage health."""
+
+        results = await asyncio.gather(
+            *(self._target_storage(target, "radarr") for target in self._targets),
+        )
+        return results
+
+    @staticmethod
+    async def _target_storage(target: RadarrTarget, service_kind: str) -> StorageProfileListing:
+        try:
+            roots, disk_spaces = await asyncio.gather(
+                target.client.list_root_folders(),
+                target.client.list_disk_space(),
+            )
+            tagged_roots = tuple(replace(root, service_id=target.id, service_name=target.name) for root in roots)
+            return StorageProfileListing(
+                service_kind=service_kind,  # type: ignore[arg-type]
+                service_id=target.id,
+                service_name=target.name,
+                roots=tagged_roots,
+                disk_spaces=tuple(disk_spaces),
+            )
+        except Exception:  # noqa: BLE001 - one profile must not hide another's health
+            return StorageProfileListing(
+                service_kind=service_kind,  # type: ignore[arg-type]
+                service_id=target.id,
+                service_name=target.name,
+                roots=(),
+                disk_spaces=(),
+                error_code="profile_unavailable",
+            )
 
     async def list_movie_history(self, movie_id: int) -> Sequence[RadarrHistoryRecord]:
         target_index, raw_movie_id = _decode_id(movie_id, target_count=len(self._targets))
@@ -138,6 +182,36 @@ class MultiSonarrClient:
             for target_index, catalog in enumerate(catalogs)
             for series in catalog
         ]
+
+    async def list_storage(self) -> Sequence[StorageProfileListing]:
+        """Read each Sonarr profile independently for storage health."""
+
+        return await asyncio.gather(*(self._target_storage(target, "sonarr") for target in self._targets))
+
+    @staticmethod
+    async def _target_storage(target: SonarrTarget, service_kind: str) -> StorageProfileListing:
+        try:
+            roots, disk_spaces = await asyncio.gather(
+                target.client.list_root_folders(),
+                target.client.list_disk_space(),
+            )
+            tagged_roots = tuple(replace(root, service_id=target.id, service_name=target.name) for root in roots)
+            return StorageProfileListing(
+                service_kind=service_kind,  # type: ignore[arg-type]
+                service_id=target.id,
+                service_name=target.name,
+                roots=tagged_roots,
+                disk_spaces=tuple(disk_spaces),
+            )
+        except Exception:  # noqa: BLE001 - one profile must not hide another's health
+            return StorageProfileListing(
+                service_kind=service_kind,  # type: ignore[arg-type]
+                service_id=target.id,
+                service_name=target.name,
+                roots=(),
+                disk_spaces=(),
+                error_code="profile_unavailable",
+            )
 
     async def list_series_history(self, series_id: int) -> Sequence[SonarrHistoryRecord]:
         target_index, raw_series_id = _decode_id(series_id, target_count=len(self._targets))
@@ -225,3 +299,9 @@ def _decode_id(value: int, *, target_count: int) -> tuple[int, int]:
     if target_index < 0 or target_index >= target_count:
         raise ValueError(f"Routed service ID {value} references an unknown target.")
     return target_index, raw_id
+
+
+def decode_routed_id(value: int, *, target_count: int) -> tuple[int, int]:
+    """Public adapter for library projections that need raw Arr IDs."""
+
+    return _decode_id(value, target_count=target_count)

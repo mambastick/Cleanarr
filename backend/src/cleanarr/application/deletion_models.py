@@ -141,6 +141,7 @@ class ManualDeleteRequest(BaseModel):
     radarr_movie_id: int | None = None
     season_number: int | None = None
     jellyfin_item_id: str | None = None
+    library_resource_id: str | None = Field(default=None, min_length=1, max_length=256)
     confirmed_plan_hash: str | None = None
     idempotency_key: UUID | None = None
     display_name: str | None = Field(default=None, max_length=256)

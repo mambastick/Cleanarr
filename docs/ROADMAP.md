@@ -356,8 +356,10 @@ dry-run, compatibility, migration, and quality contracts remain mandatory.
   playback insights, multi-downloader first-run setup, and the accessible
   tokenized component system. Automatic deletion and the other later opt-in
   items remain outside this release.
-- SQLite schema v5 and config schema v3 were exercised through ordered upgrade,
-  idempotency, future-version rejection, verified backup, and rollback paths.
+- SQLite schema v5 and the prior v1.1 configuration were exercised through
+  ordered upgrade, idempotency, future-version rejection, verified backup, and
+  rollback paths. The UI-v2 workstream advances runtime configuration to schema
+  v4 with storage thresholds; this snapshot does not claim that work is released.
   The final local candidate passed 214 backend tests with 7 pinned live-service
   tests skipped in the ordinary suite, Ruff format/lint, strict mypy, 66
   Vitest/Testing Library tests, 12 Playwright/Axe browser tests, frontend lint
@@ -376,6 +378,41 @@ dry-run, compatibility, migration, and quality contracts remain mandatory.
   provenance attestation, and verified the OCI provenance. The `linux/amd64`
   and `linux/arm64` image index digest is
   `sha256:67cadfe8caa795ec5c6a5d9daaf61df25260ffce1f54bf72199aec47f5e37336`.
+
+## Tracked Epic #8 — UI-v2 library workspace
+
+Tracked in [GitHub Issue #8](https://github.com/mambastick/Cleanarr/issues/8) and
+accepted as post-1.1 work. This epic is a planned delivery sequence, not a
+release claim. It preserves the 1.0 fail-closed, dry-run, ownership, freshness,
+authentication, migration, and quality contracts.
+
+Delivery order:
+
+1. **Frontend harness and extraction** — expand the existing Vitest/Testing
+   Library and Playwright coverage, then extract the current controllers and feature
+   boundaries without changing production visuals or behavior.
+2. **Backend contracts** — deliver configuration schema v4, ordered migration,
+   storage monitoring, resource-based Library/detail/artwork APIs, compatibility,
+   automatic v3 backup, rollback/restore, and backend tests.
+3. **Shell foundation** — add semantic light/dark tokens, the responsive
+   sidebar/rail/mobile navigation, and account/storage blocks without switching
+   the production entry point yet.
+4. **Dashboard and Library** — deliver the storage dashboard, poster grid,
+   selected-item inspector, persistent bounded selection, and single/batch
+   preflight integration.
+5. **Production cutover** — migrate Downloads, Cleanup Candidates, Activity,
+   Settings, Setup/Auth/Jobs, remove the obsolete UI, synchronize EN/RU docs,
+   and record browser/accessibility/visual evidence and all required gates.
+
+The five changes remain stacked, linked to Epic #8, and independently
+revertible. Backend and foundation work may land separately, but the new shell
+becomes the production default only in the final cutover; merge, release, and
+publication require separate authorization.
+
+Until all five steps and their gates are complete, UI-v2 must not be described as
+released or as weakening existing deletion safety. Missing, stale, partial, or
+conflicting watch/download/storage data remains unknown and cannot authorize a
+destructive action.
 
 ## Required 1.0 scope
 

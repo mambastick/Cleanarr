@@ -7,6 +7,53 @@
 administrator token системам Prometheus, backup jobs или support tooling,
 которым вы не доверяете.
 
+## Операции Library и storage в UI-v2
+
+Authenticated Library workspace использует следующие read-only endpoints:
+
+- `GET /api/library/items?media_type=movie|series&q=&sort=added|title|size&direction=asc|desc&limit=1..50&cursor=` возвращает ограниченную страницу, привязанную к revision. `refresh=true` обходит in-process cache, но не меняет Arr или Jellyfin.
+- `GET /api/library/items/{resource_id}` возвращает detail выбранного opaque resource. Детали эпизодов и файлов сериала ограничены, raw paths исключены.
+- `GET /api/library/artwork/{resource_id}` сначала разрешает объект и проксирует проверенный artwork из Jellyfin. Endpoint требует admin session, является private и разрешает клиентский cache не более часа.
+- `GET /api/storage/volumes` возвращает observations томов Radarr/Sonarr без raw paths. `POST /api/storage/refresh` просит одно объединённое обновление и возвращает `429` с code `refresh_throttled` при повторе в течение 10 секунд.
+
+Library collection results кэшируются 30 секунд на сочетание runtime
+configuration, языка Jellyfin и media type; search и sorting используют
+закэшированный каталог. Storage collection results кэшируются 60 секунд и считаются fresh 120 секунд.
+Параллельные чтения объединяются. Missing, invalid, partial, stale или
+conflicting observation получает `unknown`: он не превращается в healthy storage
+или в разрешение на удаление. Storage status имеет приоритет critical,
+unknown/partial, warning, healthy. Storage status является сигналом и не доказывает
+ownership torrent.
+
+Shell адаптивен (sidebar 240px на desktop, rail 80px на tablet, top bar и bottom
+navigation на mobile) и резервирует safe-area для контента. Это presentation
+layer не меняет authentication, preflight или fail-closed правила удаления.
+
+## Обновление и rollback
+
+Runtime configuration schema 4 добавляет thresholds свободного места storage:
+warning 15% и critical 5% по умолчанию. Значения должны быть конечными
+неотрицательными процентами, а warning — строго выше critical. Неверная
+конфигурация даёт fail-closed. Не удаляйте автоматически созданный
+совместимый с v3 pre-upgrade backup, пока новая binary и конфигурация не
+проверены.
+
+В стандартном SQLite deployment sidecar называется
+`cleanarr.config-v3.backup.db` и лежит рядом с `cleanarr.db`. Legacy file-backed
+configuration создаёт `runtime-config.config-v3.backup.json` рядом с
+`runtime-config.json`. Существующие sidecars никогда не перезаписываются. Перед
+rollback остановите CleanArr, отдельно сохраните неудачное состояние v4,
+скопируйте соответствующий sidecar обратно под исходным именем, для SQLite
+проверьте `PRAGMA integrity_check`, затем запустите старую binary.
+
+Старая binary CleanArr должна отклонить конфигурацию с более новой schema и не
+перезаписать её. Для rollback остановите новую binary, восстановите подходящий
+automatic v3 backup (и соответствующий SQLite backup, если применялись
+миграции БД), установите или закрепите старую binary и запустите её с
+восстановленными файлами. Не запускайте старую binary на мигрированной БД или
+конфигурации v4. Неудачное состояние храните отдельно для диагностики и перед
+запуском проверьте БД через `PRAGMA integrity_check`.
+
 ## Метрики Prometheus
 
 `GET /metrics` возвращает Prometheus text format. Labels намеренно ограничены

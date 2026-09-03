@@ -7,11 +7,12 @@ import base64
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 
 from cleanarr.domain import (
+    ArtworkData,
     AuthenticationError,
     CleanupMediaType,
     DownloadControlAction,
@@ -35,6 +36,8 @@ from cleanarr.domain import (
     SonarrEpisodeFile,
     SonarrHistoryRecord,
     SonarrSeries,
+    StorageDiskSpace,
+    StorageRootFolder,
     TorrentOwnership,
     TorrentSnapshot,
     TorrentState,
@@ -43,6 +46,80 @@ from cleanarr.domain.config import TorrentRemovalPolicy
 from cleanarr.domain.seeding import TorrentSeedingStatus, seeding_policy_skip_reason
 
 _CONTROL_VERIFICATION_DELAYS = (0.0, 0.05, 0.1, 0.2, 0.4, 0.8)
+_JELLYFIN_LIBRARY_PAGE_SIZE = 500
+_JELLYFIN_LIBRARY_MAX_ITEMS = 20_000
+
+
+def _optional_datetime(value: object) -> datetime | None:
+    """Parse an Arr timestamp without allowing malformed metadata to escape."""
+
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(UTC)
+
+
+def _optional_nonnegative_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float) and value.is_integer() and value >= 0:
+        return int(value)
+    return None
+
+
+def _arr_size_on_disk(item: dict[str, Any]) -> int | None:
+    """Prefer an explicit Arr size, retaining a valid zero value."""
+
+    size = _optional_nonnegative_int(item.get("sizeOnDisk"))
+    if size is not None:
+        return size
+    statistics = item.get("statistics")
+    return _optional_nonnegative_int(statistics.get("sizeOnDisk")) if isinstance(statistics, dict) else None
+
+
+def _arr_stat(item: dict[str, Any], key: str) -> object:
+    statistics = item.get("statistics")
+    return statistics.get(key) if isinstance(statistics, dict) else None
+
+
+def _arr_has_files(item: dict[str, Any]) -> bool | None:
+    count = _optional_nonnegative_int(_arr_stat(item, "episodeFileCount"))
+    return count > 0 if count is not None else None
+
+
+def _storage_root_folder(value: object) -> StorageRootFolder | None:
+    if not isinstance(value, dict):
+        return None
+    path = value.get("path")
+    if not isinstance(path, str) or not path.strip():
+        return None
+    folder_id = _optional_nonnegative_int(value.get("id"))
+    accessible = value.get("accessible")
+    return StorageRootFolder(
+        path=path.strip(),
+        folder_id=folder_id,
+        accessible=accessible if isinstance(accessible, bool) else None,
+    )
+
+
+def _storage_disk_space(value: object) -> StorageDiskSpace | None:
+    if not isinstance(value, dict):
+        return None
+    path = value.get("path")
+    if not isinstance(path, str) or not path.strip():
+        return None
+    return StorageDiskSpace(
+        path=path.strip(),
+        free_bytes=_optional_nonnegative_int(value.get("freeSpace")),
+        total_bytes=_optional_nonnegative_int(value.get("totalSpace")),
+    )
 
 
 def _optional_float(value: object) -> float | None:
@@ -310,13 +387,23 @@ class JsonServiceClient:
 class RadarrClient(JsonServiceClient):
     """Radarr HTTP client."""
 
-    def __init__(self, *, base_url: str, api_key: str, timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        timeout_seconds: float,
+        service_id: str | None = None,
+        service_name: str | None = None,
+    ) -> None:
         super().__init__(
             system="radarr",
             base_url=base_url,
             timeout_seconds=timeout_seconds,
             headers={"X-Api-Key": api_key},
         )
+        self._service_id = service_id
+        self._service_name = service_name
 
     async def ping(self) -> None:
         """Verify Radarr connectivity."""
@@ -335,11 +422,37 @@ class RadarrClient(JsonServiceClient):
                 path=item["path"],
                 tmdb_id=item.get("tmdbId"),
                 imdb_id=item.get("imdbId"),
-                size_on_disk=item.get("sizeOnDisk") or item.get("statistics", {}).get("sizeOnDisk"),
-                has_file=bool(item.get("hasFile", False)),
+                size_on_disk=_arr_size_on_disk(item),
+                has_file=item.get("hasFile") if isinstance(item.get("hasFile"), bool) else None,
+                added_at=_optional_datetime(item.get("added") or item.get("dateAdded")),
+                service_id=self._service_id,
+                service_name=self._service_name,
+                year=_optional_nonnegative_int(item.get("year")),
             )
             for item in payload
         ]
+
+    async def list_root_folders(self) -> Sequence[StorageRootFolder]:
+        """Return Radarr root folders for the storage read model."""
+
+        payload = await self._request("GET", "/rootfolder")
+        if not isinstance(payload, list):
+            raise ExternalServiceError("radarr", "Radarr returned an invalid root-folder response.")
+        roots = [_storage_root_folder(item) for item in payload]
+        if any(root is None for root in roots):
+            raise ExternalServiceError("radarr", "Radarr returned malformed root-folder metadata.")
+        return tuple(root for root in roots if root is not None)
+
+    async def list_disk_space(self) -> Sequence[StorageDiskSpace]:
+        """Return Radarr disk-space records for the storage read model."""
+
+        payload = await self._request("GET", "/diskspace")
+        if not isinstance(payload, list):
+            raise ExternalServiceError("radarr", "Radarr returned an invalid disk-space response.")
+        spaces = [_storage_disk_space(item) for item in payload]
+        if any(space is None for space in spaces):
+            raise ExternalServiceError("radarr", "Radarr returned malformed disk-space metadata.")
+        return tuple(space for space in spaces if space is not None)
 
     async def list_movie_history(self, movie_id: int) -> Sequence[RadarrHistoryRecord]:
         payload = await self._request(
@@ -395,6 +508,15 @@ class NullRadarrClient:
     async def list_movie_history(self, movie_id: int) -> Sequence[RadarrHistoryRecord]:
         return []
 
+    async def list_root_folders(self) -> Sequence[StorageRootFolder]:
+        return []
+
+    async def list_disk_space(self) -> Sequence[StorageDiskSpace]:
+        return []
+
+    async def list_storage(self) -> Sequence[object]:
+        return []
+
     async def delete_movie(
         self,
         movie_id: int,
@@ -408,13 +530,23 @@ class NullRadarrClient:
 class SonarrClient(JsonServiceClient):
     """Sonarr HTTP client."""
 
-    def __init__(self, *, base_url: str, api_key: str, timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        timeout_seconds: float,
+        service_id: str | None = None,
+        service_name: str | None = None,
+    ) -> None:
         super().__init__(
             system="sonarr",
             base_url=base_url,
             timeout_seconds=timeout_seconds,
             headers={"X-Api-Key": api_key},
         )
+        self._service_id = service_id
+        self._service_name = service_name
 
     async def ping(self) -> None:
         """Verify Sonarr connectivity."""
@@ -434,9 +566,39 @@ class SonarrClient(JsonServiceClient):
                 tvdb_id=item.get("tvdbId"),
                 tmdb_id=item.get("tmdbId"),
                 imdb_id=item.get("imdbId"),
+                added_at=_optional_datetime(item.get("added") or item.get("dateAdded")),
+                size_on_disk=_optional_nonnegative_int(_arr_stat(item, "sizeOnDisk")),
+                has_file=_arr_has_files(item),
+                service_id=self._service_id,
+                service_name=self._service_name,
+                year=_optional_nonnegative_int(item.get("year")),
+                episode_count=(_optional_nonnegative_int(_arr_stat(item, "episodeCount"))),
+                episode_file_count=(_optional_nonnegative_int(_arr_stat(item, "episodeFileCount"))),
             )
             for item in payload
         ]
+
+    async def list_root_folders(self) -> Sequence[StorageRootFolder]:
+        """Return Sonarr root folders for the storage read model."""
+
+        payload = await self._request("GET", "/rootfolder")
+        if not isinstance(payload, list):
+            raise ExternalServiceError("sonarr", "Sonarr returned an invalid root-folder response.")
+        roots = [_storage_root_folder(item) for item in payload]
+        if any(root is None for root in roots):
+            raise ExternalServiceError("sonarr", "Sonarr returned malformed root-folder metadata.")
+        return tuple(root for root in roots if root is not None)
+
+    async def list_disk_space(self) -> Sequence[StorageDiskSpace]:
+        """Return Sonarr disk-space records for the storage read model."""
+
+        payload = await self._request("GET", "/diskspace")
+        if not isinstance(payload, list):
+            raise ExternalServiceError("sonarr", "Sonarr returned an invalid disk-space response.")
+        spaces = [_storage_disk_space(item) for item in payload]
+        if any(space is None for space in spaces):
+            raise ExternalServiceError("sonarr", "Sonarr returned malformed disk-space metadata.")
+        return tuple(space for space in spaces if space is not None)
 
     async def list_series_history(self, series_id: int) -> Sequence[SonarrHistoryRecord]:
         payload = await self._request(
@@ -546,6 +708,15 @@ class NullSonarrClient:
         return []
 
     async def list_series_history(self, series_id: int) -> Sequence[SonarrHistoryRecord]:
+        return []
+
+    async def list_root_folders(self) -> Sequence[StorageRootFolder]:
+        return []
+
+    async def list_disk_space(self) -> Sequence[StorageDiskSpace]:
+        return []
+
+    async def list_storage(self) -> Sequence[object]:
         return []
 
     async def list_episodes(self, series_id: int) -> Sequence[SonarrEpisode]:
@@ -1176,36 +1347,122 @@ class JellyfinServerClient(JsonServiceClient):
         request_kwargs: dict[str, Any] = {}
         if accept_language:
             request_kwargs["headers"] = {"Accept-Language": accept_language}
-        payload = await self._request(
-            "GET",
-            "/Items",
-            params={
-                "Recursive": "true",
-                "IncludeItemTypes": ",".join(include_types),
-                "Fields": "ProviderIds,ParentId,IndexNumber",
-                "Limit": 5000,
-            },
-            **request_kwargs,
-        )
-        raw_items = payload.get("Items", []) if isinstance(payload, dict) else []
         result: list[JellyfinItem] = []
-        for item in raw_items:
-            provider_ids = item.get("ProviderIds") or {}
-            tmdb_raw = provider_ids.get("Tmdb")
-            tvdb_raw = provider_ids.get("Tvdb")
-            result.append(
-                JellyfinItem(
-                    id=item["Id"],
-                    name=item.get("Name", ""),
-                    type=item.get("Type", ""),
-                    tmdb_id=int(tmdb_raw) if tmdb_raw and str(tmdb_raw).isdigit() else None,
-                    tvdb_id=int(tvdb_raw) if tvdb_raw and str(tvdb_raw).isdigit() else None,
-                    imdb_id=provider_ids.get("Imdb"),
-                    parent_id=item.get("ParentId") or item.get("SeriesId"),
-                    season_number=item.get("IndexNumber"),
-                )
+        start_index = 0
+        expected_total: int | None = None
+        total_was_reported: bool | None = None
+        while True:
+            payload = await self._request(
+                "GET",
+                "/Items",
+                params={
+                    "Recursive": "true",
+                    "IncludeItemTypes": ",".join(include_types),
+                    "Fields": "ProviderIds,ParentId,IndexNumber",
+                    "StartIndex": start_index,
+                    "Limit": _JELLYFIN_LIBRARY_PAGE_SIZE,
+                },
+                **request_kwargs,
             )
+            if not isinstance(payload, dict) or not isinstance(payload.get("Items"), list):
+                raise ExternalServiceError("jellyfin", "Jellyfin returned invalid library data.")
+            raw_items = payload["Items"]
+            total = payload.get("TotalRecordCount")
+            if total is not None and (isinstance(total, bool) or not isinstance(total, int) or total < 0):
+                raise ExternalServiceError("jellyfin", "Jellyfin returned invalid library metadata.")
+            reported = isinstance(total, int)
+            if total_was_reported is None:
+                total_was_reported = reported
+                expected_total = total if reported else None
+            elif reported != total_was_reported or (reported and total != expected_total):
+                raise ExternalServiceError("jellyfin", "Jellyfin returned inconsistent library metadata.")
+            for item in raw_items:
+                parsed = self._library_item(item)
+                if parsed is None:
+                    raise ExternalServiceError("jellyfin", "Jellyfin returned invalid library data.")
+                result.append(parsed)
+            start_index += len(raw_items)
+            if isinstance(total, int) and start_index > total:
+                raise ExternalServiceError("jellyfin", "Jellyfin returned inconsistent library metadata.")
+            if len(result) > _JELLYFIN_LIBRARY_MAX_ITEMS or (
+                isinstance(total, int) and total > _JELLYFIN_LIBRARY_MAX_ITEMS
+            ):
+                raise ExternalServiceError("jellyfin", "Jellyfin library exceeds the safe catalogue limit.")
+            if not raw_items:
+                if isinstance(total, int) and start_index < total:
+                    raise ExternalServiceError("jellyfin", "Jellyfin returned an incomplete library catalogue.")
+                break
+            if isinstance(total, int) and start_index >= total:
+                break
+            if total is None and len(raw_items) < _JELLYFIN_LIBRARY_PAGE_SIZE:
+                break
         return result
+
+    @staticmethod
+    def _library_item(item: object) -> JellyfinItem | None:
+        if not isinstance(item, dict):
+            return None
+        item_id = item.get("Id")
+        item_type = item.get("Type")
+        if not isinstance(item_id, str) or not item_id.strip() or len(item_id) > 256 or not isinstance(item_type, str):
+            return None
+        provider_ids = item.get("ProviderIds") or {}
+        if not isinstance(provider_ids, dict):
+            return None
+        tmdb_raw = provider_ids.get("Tmdb")
+        tvdb_raw = provider_ids.get("Tvdb")
+        return JellyfinItem(
+            id=item_id,
+            name=item.get("Name", "") if isinstance(item.get("Name", ""), str) else "",
+            type=item_type,
+            tmdb_id=int(tmdb_raw) if tmdb_raw and str(tmdb_raw).isdigit() else None,
+            tvdb_id=int(tvdb_raw) if tvdb_raw and str(tvdb_raw).isdigit() else None,
+            imdb_id=provider_ids.get("Imdb") if isinstance(provider_ids.get("Imdb"), str) else None,
+            parent_id=(
+                item.get("ParentId") or item.get("SeriesId")
+                if isinstance(item.get("ParentId") or item.get("SeriesId"), str)
+                else None
+            ),
+            season_number=(
+                item.get("IndexNumber")
+                if isinstance(item.get("IndexNumber"), int) and not isinstance(item.get("IndexNumber"), bool)
+                else None
+            ),
+        )
+
+    async def get_primary_artwork(self, item_id: str) -> ArtworkData | None:
+        """Read one Jellyfin Primary image with a strict bounded proxy contract."""
+
+        if not isinstance(item_id, str) or not item_id.strip() or len(item_id) > 256:
+            raise ResourceNotFoundError("jellyfin", "Jellyfin artwork item was not found.")
+        try:
+            async with self._client.stream("GET", f"/Items/{quote(item_id, safe='')}/Images/Primary") as response:
+                if response.status_code in {401, 403}:
+                    raise AuthenticationError("jellyfin", "Jellyfin rejected the configured credentials.")
+                if response.status_code == 404:
+                    return None
+                if response.status_code >= 400:
+                    raise ExternalServiceError("jellyfin", "Jellyfin artwork request failed.")
+                content_length = response.headers.get("content-length")
+                if content_length is not None:
+                    try:
+                        if int(content_length) > 5 * 1024 * 1024:
+                            raise ExternalServiceError("jellyfin", "Jellyfin artwork exceeds the maximum size.")
+                    except ValueError as exc:
+                        raise ExternalServiceError("jellyfin", "Jellyfin returned invalid artwork metadata.") from exc
+                media_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                if media_type not in {"image/jpeg", "image/png", "image/webp", "image/avif"}:
+                    raise ExternalServiceError("jellyfin", "Jellyfin returned an unsupported artwork type.")
+                content = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if len(content) + len(chunk) > 5 * 1024 * 1024:
+                        raise ExternalServiceError("jellyfin", "Jellyfin artwork exceeds the maximum size.")
+                    content.extend(chunk)
+                return ArtworkData(content=bytes(content), media_type=media_type)
+        except httpx.TimeoutException as exc:
+            raise ExternalServiceError("jellyfin", "Jellyfin artwork request timed out.") from exc
+        except httpx.HTTPError as exc:
+            raise ExternalServiceError("jellyfin", "Jellyfin artwork request failed.") from exc
 
     @staticmethod
     def _cleanup_datetime(value: object) -> tuple[datetime | None, bool]:
@@ -1357,7 +1614,9 @@ class JellyfinServerClient(JsonServiceClient):
         return tuple(observations)
 
     async def delete_item(self, item_id: str) -> None:
-        await self._request("DELETE", f"/Items/{item_id}", expected_statuses={200, 204, 404})
+        if not isinstance(item_id, str) or not item_id.strip() or len(item_id) > 256:
+            raise ResourceNotFoundError("jellyfin", "Jellyfin item was not found.")
+        await self._request("DELETE", f"/Items/{quote(item_id, safe='')}", expected_statuses={200, 204, 404})
 
     async def list_plugins(self) -> list[dict[str, Any]]:
         """Return the list of installed Jellyfin plugins."""
@@ -1467,6 +1726,9 @@ class NullJellyfinServerClient:
         accept_language: str | None = None,
     ) -> Sequence[JellyfinItem]:
         return []
+
+    async def get_primary_artwork(self, item_id: str) -> ArtworkData | None:
+        return None
 
     async def list_cleanup_items(
         self, *, accept_language: str | None = None, max_items: int = 200

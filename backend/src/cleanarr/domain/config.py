@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from math import isfinite
 from typing import Annotated, Literal
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
-CURRENT_CONFIG_SCHEMA_VERSION: Literal[3] = 3
+CURRENT_CONFIG_SCHEMA_VERSION: Literal[4] = 4
 
 
 class ServiceKind(StrEnum):
@@ -120,6 +121,8 @@ class GeneralConfig(BaseModel):
     webhook_shared_token: str | None = None
     http_timeout_seconds: float = 15.0
     activity_retention_days: int = 30
+    storage_warning_free_percent: float = Field(default=15.0, ge=0.0, le=100.0)
+    storage_critical_free_percent: float = Field(default=5.0, ge=0.0, le=100.0)
     jellyfin_language: str = "en"
     ui_language: str = "en"
     sso_enabled: bool = False
@@ -227,6 +230,16 @@ class GeneralConfig(BaseModel):
     def validate_sso_access_policy(self) -> GeneralConfig:
         if bool(self.sso_required_claim) != bool(self.sso_required_value):
             raise ValueError("SSO required claim and value must be configured together.")
+        return self
+
+    @model_validator(mode="after")
+    def validate_storage_thresholds(self) -> GeneralConfig:
+        """Keep storage alerts finite and ordered from critical to warning."""
+
+        if not isfinite(self.storage_warning_free_percent) or not isfinite(self.storage_critical_free_percent):
+            raise ValueError("Storage free-space thresholds must be finite numbers.")
+        if not 0 <= self.storage_critical_free_percent < self.storage_warning_free_percent <= 100:
+            raise ValueError("Storage thresholds must satisfy 0 <= critical < warning <= 100.")
         return self
 
     def local_auth_enabled(self) -> bool:
@@ -397,7 +410,7 @@ class JellyfinServiceConfig(BaseServiceConfig):
 class RuntimeConfig(BaseModel):
     """Complete persisted CleanArr runtime configuration."""
 
-    config_schema_version: Literal[3] = CURRENT_CONFIG_SCHEMA_VERSION
+    config_schema_version: Literal[4] = CURRENT_CONFIG_SCHEMA_VERSION
     admin: AdminAccountConfig = Field(default_factory=AdminAccountConfig)
     general: GeneralConfig = Field(default_factory=GeneralConfig)
     radarr: list[RadarrServiceConfig] = Field(default_factory=list)

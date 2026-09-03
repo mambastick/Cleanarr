@@ -7,6 +7,52 @@ configured `ADMIN_SHARED_TOKEN`. Health probes remain public. Do not expose the
 administrator token to Prometheus, backup jobs, or support tooling that you do
 not control.
 
+## UI-v2 library and storage operations
+
+The authenticated Library workspace uses these read-only endpoints:
+
+- `GET /api/library/items?media_type=movie|series&q=&sort=added|title|size&direction=asc|desc&limit=1..50&cursor=` returns a bounded, revision-bound page. `refresh=true` bypasses the in-process read cache but does not mutate Arr or Jellyfin.
+- `GET /api/library/items/{resource_id}` returns one opaque-resource detail projection. Series episode/file detail is bounded and raw paths are omitted.
+- `GET /api/library/artwork/{resource_id}` resolves the item first and proxies validated Jellyfin artwork. It is administrator-authenticated and private; the response permits client caching for up to one hour.
+- `GET /api/storage/volumes` returns Radarr/Sonarr volume observations without raw paths. `POST /api/storage/refresh` requests one coalesced refresh and returns `429` with code `refresh_throttled` when called again inside the 10-second manual throttle.
+
+Library collection results are cached for 30 seconds per runtime configuration,
+Jellyfin language, and media type; search and sorting reuse the cached catalog.
+Storage collection results are cached for 60 seconds and are considered fresh for
+120 seconds. Concurrent reads coalesce. A missing, invalid, partial, stale, or
+conflicting observation is `unknown`; it is never converted to healthy storage or
+deletion permission. Storage status is summarized critical, unknown/partial,
+warning, then healthy. Storage status is informational and does not prove torrent
+ownership.
+
+The shell is responsive (240px desktop sidebar, 80px tablet rail, mobile top bar
+and bottom navigation) and reserves mobile safe-area space. These presentation
+details do not change authentication, preflight, or fail-closed deletion rules.
+
+## Upgrade and rollback
+
+Runtime configuration schema 4 adds the storage warning and critical free-space
+thresholds. The defaults are 15% and 5%; values must be finite,
+non-negative percentages with warning strictly greater than critical. Invalid
+configuration fails closed. Keep the automatically created v3-compatible
+pre-upgrade backup until the new binary and its configuration have been verified.
+
+For the default SQLite deployment, the sidecar is
+`cleanarr.config-v3.backup.db` in the same directory as `cleanarr.db`. A legacy
+file-backed configuration creates `runtime-config.config-v3.backup.json` beside
+`runtime-config.json`. Existing sidecars are never overwritten. Before rollback,
+stop CleanArr, preserve the failed v4 state separately, copy the matching sidecar
+back to its original filename, verify SQLite with `PRAGMA integrity_check` when
+applicable, then start the older binary.
+
+An older CleanArr binary must reject a configuration written with a newer schema
+without rewriting it. If rollback is required, stop the newer binary, restore the
+matching automatic v3 backup (and the matching SQLite backup when database
+migrations were applied), install or pin the old binary, and start it with the
+restored files. Never start an older binary against a migrated database or v4
+configuration. Keep the failed state separately for diagnosis and verify the
+restored database with `PRAGMA integrity_check` before bringing the service back.
+
 ## Prometheus metrics
 
 `GET /metrics` returns Prometheus text format. Labels are intentionally bounded

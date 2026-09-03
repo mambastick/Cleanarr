@@ -302,7 +302,22 @@ class ManualDeletionJobService:
 
         try:
             async with self._execution_lock:
-                current_plan = await self._previewer(job.request, job.event)
+                verified_event = job.event
+                if job.request.library_resource_id is not None:
+                    try:
+                        verified_event = await self._resolver(job.request)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:  # noqa: BLE001 - resource identity must fail closed
+                        if getattr(exc, "code", None) == "library_item_changed":
+                            self._mark_failed(
+                                job,
+                                "library_item_changed: The library item changed; preview it again before retrying.",
+                            )
+                            self._repository.save_job(job)
+                            return
+                        raise
+                current_plan = await self._previewer(job.request, verified_event)
                 if plan_hash(current_plan) != plan_hash(job.preflight):
                     self._mark_failed(
                         job,
@@ -313,7 +328,7 @@ class ManualDeletionJobService:
                 job.progress_percent = max(job.progress_percent, 20)
                 job.message = "Preflight verified; starting cleanup."
                 self._repository.save_job(job)
-                result = await self._runner(job.request, job.event, report)
+                result = await self._runner(job.request, verified_event, report)
         except asyncio.CancelledError:
             raise
         except DeletionExecutionFailure as exc:
@@ -506,6 +521,7 @@ def canonical_submission_request(payload: ManualDeleteRequest) -> str:
             "radarr_movie_id": payload.radarr_movie_id,
             "season_number": payload.season_number,
             "jellyfin_item_id": payload.jellyfin_item_id,
+            "library_resource_id": payload.library_resource_id,
             "confirmed_plan_hash": payload.confirmed_plan_hash,
         },
         separators=(",", ":"),

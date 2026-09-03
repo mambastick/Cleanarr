@@ -26,7 +26,17 @@ from cleanarr.application.deletion_models import (
     ManualDeleteRequest,
     ProcessingResultResponse,
 )
-from cleanarr.domain import ActionStatus, FailureReason, ItemType, MediaDeletionEvent, MediaFingerprint, OverallStatus
+from cleanarr.application.manual_deletion import LibraryItemChangedError
+from cleanarr.domain import (
+    ActionStatus,
+    FailureReason,
+    ItemType,
+    LibraryMediaType,
+    MediaDeletionEvent,
+    MediaFingerprint,
+    OverallStatus,
+    encode_library_resource,
+)
 from cleanarr.infrastructure.deletion_repository import SQLiteDeletionRepository
 
 
@@ -110,6 +120,21 @@ async def test_batch_preview_is_canonical_and_rejects_duplicate_identities(tmp_p
                     ManualDeleteRequest(item_type=ItemType.MOVIE, radarr_movie_id=1, jellyfin_item_id="jellyfin-b"),
                 ]
             )
+        with pytest.raises(BatchValidationError, match="same destructive"):
+            await store.preview(
+                [
+                    ManualDeleteRequest(
+                        item_type=ItemType.MOVIE,
+                        radarr_movie_id=1,
+                        library_resource_id=encode_library_resource(LibraryMediaType.MOVIE, "radarr-a", 1),
+                    ),
+                    ManualDeleteRequest(
+                        item_type=ItemType.MOVIE,
+                        radarr_movie_id=1,
+                        library_resource_id=encode_library_resource(LibraryMediaType.MOVIE, "radarr-b", 1),
+                    ),
+                ]
+            )
         with pytest.raises(BatchValidationError, match="whole-series"):
             await store.preview(
                 [
@@ -152,6 +177,119 @@ async def test_batch_preview_blocks_unexpected_resolution_failures_without_hidin
         assert blocked.blocked_code == "resolution_failed"
         assert blocked.blocked_message == "The item could not be resolved safely."
         assert "downstream" not in blocked.blocked_message
+    finally:
+        await store.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("left_path", "right_path"),
+    [
+        ("/data/shared", "/data/shared"),
+        ("/data/shared", "/data/shared/child"),
+    ],
+)
+async def test_batch_preview_blocks_exact_and_nested_physical_scope_overlap(
+    tmp_path: Path,
+    left_path: str,
+    right_path: str,
+) -> None:
+    async def resolver(payload: ManualDeleteRequest) -> MediaDeletionEvent:
+        event = _event(payload)
+        return replace(
+            event,
+            fingerprint=replace(
+                event.fingerprint,
+                path=left_path if payload.radarr_movie_id == 1 else right_path,
+            ),
+        )
+
+    async def runner(payload, event, report):  # type: ignore[no-untyped-def]
+        return await _previewer(payload, event)
+
+    store = _batch_service(
+        resolver,
+        _previewer,
+        runner,
+        db_path=tmp_path / "cleanarr.db",
+        execution_lock=asyncio.Lock(),
+    )
+    try:
+        preview = await store.preview([_request(1), _request(2)])
+
+        assert preview.ready_count == 0
+        assert preview.blocked_count == 2
+        assert {child.blocked_code for child in preview.children} == {"overlapping_mutation_scope"}
+        assert all("/data" not in (child.blocked_message or "") for child in preview.children)
+    finally:
+        await store.stop()
+
+
+@pytest.mark.asyncio
+async def test_batch_preview_blocks_malformed_physical_scope_and_hash_binds_path(tmp_path: Path) -> None:
+    current_path: str | None = "/data/one"
+
+    async def resolver(payload: ManualDeleteRequest) -> MediaDeletionEvent:
+        event = _event(payload)
+        return replace(event, fingerprint=replace(event.fingerprint, path=current_path))
+
+    async def runner(payload, event, report):  # type: ignore[no-untyped-def]
+        return await _previewer(payload, event)
+
+    store = _batch_service(
+        resolver,
+        _previewer,
+        runner,
+        db_path=tmp_path / "cleanarr.db",
+        execution_lock=asyncio.Lock(),
+    )
+    try:
+        preview = await store.preview([_request(1)])
+        current_path = "/data/two"
+        changed = await store.preview([_request(1)])
+        assert changed.batch_hash != preview.batch_hash
+
+        for invalid_path in ("/data/../private", None):
+            current_path = invalid_path
+            invalid = await store.preview([_request(1)])
+            assert invalid.children[0].blocked_code == "invalid_mutation_scope"
+    finally:
+        await store.stop()
+
+
+@pytest.mark.asyncio
+async def test_batch_resource_mismatch_is_structured_and_cannot_be_submitted(tmp_path: Path) -> None:
+    async def changed_resolver(payload):  # type: ignore[no-untyped-def]
+        raise LibraryItemChangedError()
+
+    async def runner(payload, event, report):  # type: ignore[no-untyped-def]
+        return await _previewer(payload, event)
+
+    store = _batch_service(
+        changed_resolver,
+        _previewer,
+        runner,
+        db_path=tmp_path / "cleanarr.db",
+        execution_lock=asyncio.Lock(),
+    )
+    child = ManualDeleteRequest(
+        item_type=ItemType.MOVIE,
+        radarr_movie_id=1,
+        library_resource_id=encode_library_resource(LibraryMediaType.MOVIE, "radarr-one", 1),
+    )
+    try:
+        preview = await store.preview([child])
+        assert preview.children[0].blocked_code == "library_item_changed"
+        with pytest.raises(BatchPlanChangedError) as changed:
+            await store.submit(
+                ManualDeleteBatchSubmitRequest(
+                    children=[child],
+                    confirmed_batch_hash=preview.batch_hash,
+                    confirmed_item_count=1,
+                    idempotency_key=uuid4(),
+                )
+            )
+        assert changed.value.code == "library_item_changed"
     finally:
         await store.stop()
 

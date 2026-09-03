@@ -9,7 +9,7 @@ import secrets
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 from urllib.parse import quote, urlencode, urlsplit
 from uuid import UUID
 
@@ -48,6 +48,10 @@ from cleanarr.api.dashboard import (
 )
 from cleanarr.api.downloads import create_downloads_router
 from cleanarr.api.library_schemas import (
+    LibraryDetailResponse,
+    LibraryFailureResponse,
+    LibraryItemResponse,
+    LibraryItemsResponse,
     LibraryMoviesResponse,
     LibrarySeriesResponse,
     ManualDeleteBatchListResponse,
@@ -73,6 +77,7 @@ from cleanarr.api.operations import (
     render_metrics,
 )
 from cleanarr.api.schemas import JellyfinWebhookPayload, ProcessingResultResponse, WebhookBatchResponse
+from cleanarr.api.storage import StorageResponse
 from cleanarr.application.authentication import LoginThrottledError
 from cleanarr.application.cleanup_candidates import CleanupCandidatesService
 from cleanarr.application.deletion_batches import (
@@ -94,14 +99,23 @@ from cleanarr.application.deletion_jobs import (
     validate_plan_confirmation,
 )
 from cleanarr.application.downloads import DownloadsService, NullDownloaderFleet, collect_arr_history_evidence
+from cleanarr.application.library import (
+    LibraryArtworkError,
+    LibraryCursorError,
+    LibraryItemNotFoundError,
+    LibraryService,
+    LibraryUnavailableError,
+)
 from cleanarr.application.manual_deletion import (
+    LibraryItemChangedError,
     ManualDeletionNotFoundError,
     ManualDeletionService,
     ManualDeletionValidationError,
 )
 from cleanarr.application.ports import DownloaderFleetPort
 from cleanarr.application.service import CascadeDeletionService
-from cleanarr.domain import MediaDeletionEvent, ProcessingResult, SonarrSeries
+from cleanarr.application.storage import StorageRefreshThrottledError, StorageService
+from cleanarr.domain import LibraryEnrichment, LibraryItem, MediaDeletionEvent, ProcessingResult, SonarrSeries
 from cleanarr.domain.config import BaseServiceConfig, GeneralConfig, ServiceKind
 from cleanarr.infrastructure.clients import NullJellyfinServerClient, NullRadarrClient, NullSonarrClient
 from cleanarr.infrastructure.container import ServiceContainer
@@ -124,6 +138,26 @@ _COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 7
 _SSO_STATE_MAX_AGE_SECONDS = 60 * 5
 _SSO_ERROR_PREFIX = "/?sso_error="
 _HTTP_UNPROCESSABLE_CONTENT = 422
+
+
+def _library_failure(code: str, *, media_type: str | None = None) -> LibraryFailureResponse:
+    """Create a stable, non-sensitive list failure projection."""
+
+    source = {
+        "jellyfin_unavailable": "jellyfin",
+        "ambiguous_jellyfin_match": "jellyfin",
+        "series_detail_unavailable": "sonarr",
+        "ambiguous_profile": "routing",
+        "catalog_unavailable": {"movie": "radarr", "series": "sonarr"}.get(media_type or "", "arr"),
+    }.get(code, "library")
+    message = {
+        "jellyfin_unavailable": "Jellyfin metadata is temporarily unavailable.",
+        "ambiguous_jellyfin_match": "Conflicting Jellyfin provider IDs prevent a safe library match.",
+        "series_detail_unavailable": "Series detail is temporarily unavailable.",
+        "ambiguous_profile": "The library item could not be assigned to one service profile.",
+        "catalog_unavailable": "The Arr library catalogue is temporarily unavailable.",
+    }.get(code, "The library read is incomplete.")
+    return LibraryFailureResponse(source=source, code=code, message=message)
 
 
 def _has_active_service(services: Sequence[BaseServiceConfig]) -> bool:
@@ -210,6 +244,17 @@ async def _download_policy_loop(container: ServiceContainer, downloads_service: 
         else:
             delay = 30
         await asyncio.sleep(max(30, min(delay, 86_400)))
+
+
+async def _storage_refresh_loop(storage_service: StorageService) -> None:
+    """Refresh the in-memory storage sample every minute without blocking startup."""
+
+    while True:
+        await asyncio.sleep(60)
+        try:
+            await storage_service.get()
+        except Exception as exc:  # pragma: no cover - defensive background isolation
+            _logger.warning("Storage refresh cycle failed: %s", type(exc).__name__)
 
 
 def _extract_token(authorization: str | None, header_token: str | None) -> str | None:
@@ -411,6 +456,21 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         downloads_repository=downloads_service.repository,
     )
     cleanup_candidate_fallbacks = (NullJellyfinServerClient(), NullRadarrClient(), NullSonarrClient())
+
+    async def enrich_library_item(item: LibraryItem) -> LibraryEnrichment:
+        """Capture the current runtime graph for detail-only enrichment."""
+
+        request_service = cleanup_candidates_service.with_sources(
+            playback=getattr(resolved_container, "jellyfin_server", cleanup_candidate_fallbacks[0]),
+            radarr=getattr(resolved_container, "radarr", cleanup_candidate_fallbacks[1]),
+            sonarr=getattr(resolved_container, "sonarr", cleanup_candidate_fallbacks[2]),
+        )
+        return await request_service.enrich_library_item(
+            item,
+            accept_language=resolved_container.config.general.jellyfin_language,
+            config=resolved_container.config.general,
+        )
+
     static_dir = Path(__file__).resolve().parents[1] / "ui" / "static"
 
     manual_deletion_service = ManualDeletionService(
@@ -420,6 +480,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         strategy_factory=lambda: resolved_container.strategy_factory,
         is_dry_run=lambda: resolved_container.config.general.dry_run,
         activity_recorder=activity_store,
+        config=lambda: resolved_container.config,
     )
     deletion_jobs = ManualDeletionJobService(
         manual_deletion_service.resolve,
@@ -434,6 +495,18 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         manual_deletion_service.execute,
         repository=deletion_repository,
         execution_lock=execution_coordinator.lock,
+    )
+    library_service = LibraryService(
+        config=lambda: resolved_container.config,
+        radarr=lambda: getattr(resolved_container, "radarr", NullRadarrClient()),
+        sonarr=lambda: getattr(resolved_container, "sonarr", NullSonarrClient()),
+        jellyfin=lambda: getattr(resolved_container, "jellyfin_server", NullJellyfinServerClient()),
+        detail_enricher=enrich_library_item,
+    )
+    storage_service = StorageService(
+        config=lambda: resolved_container.config,
+        radarr=lambda: getattr(resolved_container, "radarr", NullRadarrClient()),
+        sonarr=lambda: getattr(resolved_container, "sonarr", NullSonarrClient()),
     )
 
     @asynccontextmanager
@@ -450,20 +523,26 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         app.state.downloads_service = downloads_service
         app.state.cleanup_candidates_service = cleanup_candidates_service
         app.state.cleanup_candidate_fallbacks = cleanup_candidate_fallbacks
+        app.state.library_service = library_service
+        app.state.storage_service = storage_service
         downloads_service.repository.recover_running_actions()
         await deletion_jobs.start()
         await deletion_batches.start()
         probe_task = asyncio.create_task(_health_probe_loop(resolved_container, health_probe_store))
         policy_task = asyncio.create_task(_download_policy_loop(resolved_container, downloads_service))
+        storage_task = asyncio.create_task(_storage_refresh_loop(storage_service))
         try:
             yield
         finally:
             probe_task.cancel()
             policy_task.cancel()
+            storage_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await probe_task
             with contextlib.suppress(asyncio.CancelledError):
                 await policy_task
+            with contextlib.suppress(asyncio.CancelledError):
+                await storage_task
             await deletion_jobs.stop()
             await deletion_batches.stop()
             if own_container:
@@ -480,6 +559,8 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     app.state.downloads_service = downloads_service
     app.state.cleanup_candidates_service = cleanup_candidates_service
     app.state.cleanup_candidate_fallbacks = cleanup_candidate_fallbacks
+    app.state.library_service = library_service
+    app.state.storage_service = storage_service
     app.include_router(create_downloads_router())
     app.include_router(create_cleanup_candidates_router())
 
@@ -785,6 +866,141 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
             health_probe_store=request.app.state.health_probe_store,
             deletion_jobs=request.app.state.deletion_jobs,
             downloads_repository=request.app.state.downloads_service.repository,
+        )
+
+    @app.get(
+        "/api/storage/volumes",
+        response_model=StorageResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def storage_volumes(request: Request) -> StorageResponse:
+        """Return the cached or newly collected storage read model."""
+
+        snapshot = await request.app.state.storage_service.get()
+        general = request.app.state.container.config.general
+        return StorageResponse.from_snapshot(
+            snapshot,
+            warning_free_percent=general.storage_warning_free_percent,
+            critical_free_percent=general.storage_critical_free_percent,
+        )
+
+    @app.post(
+        "/api/storage/refresh",
+        response_model=StorageResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def refresh_storage(request: Request) -> StorageResponse:
+        """Force one coalesced storage refresh within the manual throttle."""
+
+        try:
+            snapshot = await request.app.state.storage_service.refresh()
+        except StorageRefreshThrottledError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={"code": exc.code, "message": "Storage refresh is temporarily throttled."},
+            ) from exc
+        general = request.app.state.container.config.general
+        return StorageResponse.from_snapshot(
+            snapshot,
+            warning_free_percent=general.storage_warning_free_percent,
+            critical_free_percent=general.storage_critical_free_percent,
+        )
+
+    @app.get(
+        "/api/library/items",
+        response_model=LibraryItemsResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def library_items(
+        request: Request,
+        media_type: Literal["movie", "series"] = Query(default="movie"),
+        q: str = Query(default="", max_length=256),
+        sort: Literal["added", "title", "size"] = Query(default="added"),
+        direction: Literal["asc", "desc"] = Query(default="desc"),
+        limit: int = Query(default=50, ge=1, le=50),
+        cursor: str | None = Query(default=None, max_length=512),
+        refresh: bool = Query(default=False),
+    ) -> LibraryItemsResponse:
+        try:
+            page = await request.app.state.library_service.list_items(
+                media_type=media_type,
+                query=q,
+                sort=sort,
+                direction=direction,
+                limit=limit,
+                cursor=cursor,
+                refresh=refresh,
+            )
+        except LibraryCursorError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
+        return LibraryItemsResponse(
+            items=[LibraryItemResponse.from_domain(item, catalog_revision=page.revision) for item in page.items],
+            next_cursor=page.next_cursor,
+            source_status=page.state.value,
+            source_failures=([_library_failure(page.error_code, media_type=media_type)] if page.error_code else []),
+            catalog_revision=page.revision,
+        )
+
+    @app.get(
+        "/api/library/items/{resource_id}",
+        response_model=LibraryDetailResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def library_item_detail(
+        request: Request,
+        resource_id: str,
+        refresh: bool = Query(default=False),
+    ) -> LibraryDetailResponse:
+        try:
+            detail = await request.app.state.library_service.get_item(resource_id, refresh=refresh)
+        except LibraryItemNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": exc.code, "message": "Library item not found."},
+            ) from exc
+        except LibraryUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"code": exc.code, "message": "Library data is temporarily unavailable."},
+            ) from exc
+        return LibraryDetailResponse.from_domain(detail)
+
+    @app.get(
+        "/api/library/artwork/{resource_id}",
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def library_artwork(
+        request: Request,
+        resource_id: str,
+        refresh: bool = Query(default=False),
+    ) -> Response:
+        try:
+            artwork = await request.app.state.library_service.artwork(resource_id, refresh=refresh)
+        except LibraryItemNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": exc.code, "message": "Library item not found."},
+            ) from exc
+        except LibraryUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"code": exc.code, "message": "Library data is temporarily unavailable."},
+            ) from exc
+        except LibraryArtworkError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": exc.code, "message": "Artwork is unavailable."},
+            ) from exc
+        return Response(
+            content=artwork.content,
+            media_type=artwork.media_type,
+            headers={
+                "Cache-Control": "private, max-age=3600",
+                "X-Content-Type-Options": "nosniff",
+            },
         )
 
     @app.put(
@@ -1589,7 +1805,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                     title=movie.title,
                     jellyfin_movie_title=jellyfin_movie_title,
                     size_bytes=movie.size_on_disk or 0,
-                    has_file=movie.has_file,
+                    has_file=bool(movie.has_file),
                     jellyfin_movie_id=jf_movie_id,
                     has_seerr_request=(seerr_media_id is not None and seerr_media_id in requested_movie_ids),
                 )
@@ -1606,6 +1822,11 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     ) -> ManualDeletePreviewResponse:
         try:
             return await deletion_jobs.preview(payload)
+        except LibraryItemChangedError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
         except (ManualDeletionValidationError, ManualDeletionNotFoundError) as exc:
             raise _manual_deletion_transport_error(exc) from exc
 
@@ -1620,6 +1841,11 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     ) -> ManualDeleteJobResponse:
         try:
             return await deletion_jobs.submit(payload)
+        except LibraryItemChangedError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
         except (ManualDeletionValidationError, ManualDeletionNotFoundError) as exc:
             raise _manual_deletion_transport_error(exc) from exc
         except DeletionPreflightError as exc:
@@ -1720,7 +1946,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         except BatchPlanChangedError as exc:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail={"code": "batch_plan_changed", "message": str(exc)},
+                detail={"code": exc.code, "message": str(exc)},
             ) from exc
         except DeletionJobIdempotencyConflictError as exc:
             raise HTTPException(
@@ -1782,6 +2008,11 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
                 plan = await manual_deletion_service.preview(payload, event)
                 validate_plan_confirmation(payload, plan)
             except DeletionPreflightError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"code": exc.code, "message": str(exc)},
+                ) from exc
+            except LibraryItemChangedError as exc:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail={"code": exc.code, "message": str(exc)},

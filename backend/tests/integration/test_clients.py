@@ -11,6 +11,7 @@ from cleanarr.domain import (
     DownloadControlAction,
     DownloadControlOutcome,
     ExternalServiceError,
+    ResourceNotFoundError,
     SeerrRequest,
     TorrentState,
 )
@@ -23,6 +24,20 @@ from cleanarr.infrastructure.clients import (
     SeerrClient,
     SonarrClient,
 )
+
+
+class _ChunkedArtworkStream(httpx.AsyncByteStream):
+    def __init__(self, *chunks: bytes) -> None:
+        self._chunks = chunks
+        self.iterated = False
+
+    async def __aiter__(self):  # type: ignore[no-untyped-def]
+        self.iterated = True
+        for chunk in self._chunks:
+            yield chunk
+
+    async def aclose(self) -> None:
+        return None
 
 
 @pytest.mark.asyncio
@@ -57,6 +72,196 @@ async def test_jellyfin_ping_validates_the_configured_token() -> None:
             await client.ping()
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_artwork_uses_authenticated_primary_route_and_accepts_safe_mime() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["authorization"] == 'MediaBrowser Token="artwork-secret"'
+        assert "artwork-secret" not in str(request.url)
+        return httpx.Response(200, headers={"content-type": "image/webp"}, content=b"poster")
+
+    route = respx.get("http://jellyfin/Items/jf-1/Images/Primary").mock(side_effect=handler)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="artwork-secret", timeout_seconds=5)
+    try:
+        artwork = await client.get_primary_artwork("jf-1")
+    finally:
+        await client.close()
+
+    assert route.call_count == 1
+    assert artwork is not None
+    assert artwork.content == b"poster"
+    assert artwork.media_type == "image/webp"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_artwork_rejects_oversized_content_length_without_reading_body() -> None:
+    stream = _ChunkedArtworkStream(b"must-not-be-read")
+    respx.get("http://jellyfin/Items/jf-2/Images/Primary").respond(
+        status_code=200,
+        headers={"content-type": "image/jpeg", "content-length": str(5 * 1024 * 1024 + 1)},
+        stream=stream,
+    )
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="maximum size"):
+            await client.get_primary_artwork("jf-2")
+    finally:
+        await client.close()
+
+    assert stream.iterated is False
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_artwork_stops_chunked_body_at_the_five_mib_bound() -> None:
+    stream = _ChunkedArtworkStream(b"a" * (3 * 1024 * 1024), b"b" * (3 * 1024 * 1024))
+    respx.get("http://jellyfin/Items/jf-3/Images/Primary").respond(
+        status_code=200,
+        headers={"content-type": "image/avif"},
+        stream=stream,
+    )
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="maximum size"):
+            await client.get_primary_artwork("jf-3")
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_artwork_missing_unsupported_and_timeout_are_safe() -> None:
+    missing = respx.get("http://jellyfin/Items/missing/Images/Primary").respond(status_code=404)
+    unsupported = respx.get("http://jellyfin/Items/svg/Images/Primary").respond(
+        status_code=200, headers={"content-type": "image/svg+xml"}, content=b"<svg/>"
+    )
+    timed_out = respx.get("http://jellyfin/Items/slow/Images/Primary").mock(
+        side_effect=httpx.ReadTimeout("private-token must stay private")
+    )
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="private-token", timeout_seconds=5)
+    try:
+        assert await client.get_primary_artwork("missing") is None
+        with pytest.raises(ExternalServiceError, match="unsupported artwork type"):
+            await client.get_primary_artwork("svg")
+        with pytest.raises(ExternalServiceError, match="timed out") as exc_info:
+            await client.get_primary_artwork("slow")
+    finally:
+        await client.close()
+
+    assert "private-token" not in str(exc_info.value)
+    assert missing.called and unsupported.called and timed_out.called
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_library_pages_beyond_first_response_without_silent_truncation() -> None:
+    starts: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        start = int(request.url.params["StartIndex"])
+        starts.append(start)
+        count = 500 if start == 0 else 1
+        return httpx.Response(
+            200,
+            json={
+                "Items": [
+                    {
+                        "Id": f"jf-{start + index}",
+                        "Name": f"Movie {start + index}",
+                        "Type": "Movie",
+                        "ProviderIds": {"Tmdb": str(start + index)},
+                    }
+                    for index in range(count)
+                ],
+                "TotalRecordCount": 501,
+            },
+        )
+
+    route = respx.get("http://jellyfin/Items").mock(side_effect=handler)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        items = await client.list_items(include_types=["Movie"])
+    finally:
+        await client.close()
+
+    assert route.call_count == 2
+    assert starts == [0, 500]
+    assert len(items) == 501
+    assert items[-1].id == "jf-500"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_library_rejects_a_premature_empty_page() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        start = int(request.url.params["StartIndex"])
+        items = (
+            [
+                {
+                    "Id": f"jf-{index}",
+                    "Name": f"Movie {index}",
+                    "Type": "Movie",
+                    "ProviderIds": {"Tmdb": str(index)},
+                }
+                for index in range(500)
+            ]
+            if start == 0
+            else []
+        )
+        return httpx.Response(200, json={"Items": items, "TotalRecordCount": 1000})
+
+    respx.get("http://jellyfin/Items").mock(side_effect=handler)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="incomplete library catalogue"):
+            await client.list_items(include_types=["Movie"])
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("items", "total"),
+    [
+        ([{"Id": "jf-1", "Name": "Movie", "Type": "Movie", "ProviderIds": {"Tmdb": "1"}}], 0),
+        (
+            [
+                {"Id": "jf-1", "Name": "Movie 1", "Type": "Movie", "ProviderIds": {"Tmdb": "1"}},
+                {"Id": "jf-2", "Name": "Movie 2", "Type": "Movie", "ProviderIds": {"Tmdb": "2"}},
+            ],
+            1,
+        ),
+    ],
+)
+@respx.mock
+async def test_jellyfin_library_rejects_items_beyond_reported_total(items: list[dict[str, object]], total: int) -> None:
+    respx.get("http://jellyfin/Items").respond(json={"Items": items, "TotalRecordCount": total})
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="inconsistent library metadata"):
+            await client.list_items(include_types=["Movie"])
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_delete_encodes_one_path_segment_and_rejects_empty_ids() -> None:
+    traversal = respx.delete("http://jellyfin/Items/..%2FUsers").respond(status_code=204)
+    query_like = respx.delete("http://jellyfin/Items/abc%3Fx%3D%2FUsers").respond(status_code=204)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        await client.delete_item("../Users")
+        await client.delete_item("abc?x=/Users")
+        with pytest.raises(ResourceNotFoundError, match="not found"):
+            await client.delete_item("   ")
+    finally:
+        await client.close()
+
+    assert traversal.called and query_like.called
 
 
 @pytest.mark.asyncio

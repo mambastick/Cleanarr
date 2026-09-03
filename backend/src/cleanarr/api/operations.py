@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from datetime import UTC, datetime
+from math import isfinite
 from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
 
@@ -59,8 +60,18 @@ class RedactedGeneralConfig(BaseModel):
     log_level: str
     http_timeout_seconds: float
     activity_retention_days: int
+    storage_warning_free_percent: float = Field(default=15.0, ge=0.0, le=100.0)
+    storage_critical_free_percent: float = Field(default=5.0, ge=0.0, le=100.0)
     jellyfin_language: str
     ui_language: str
+
+    @model_validator(mode="after")
+    def validate_storage_thresholds(self) -> RedactedGeneralConfig:
+        if not isfinite(self.storage_warning_free_percent) or not isfinite(self.storage_critical_free_percent):
+            raise ValueError("Storage free-space thresholds must be finite numbers.")
+        if not 0 <= self.storage_critical_free_percent < self.storage_warning_free_percent <= 100:
+            raise ValueError("Storage thresholds must satisfy 0 <= critical < warning <= 100.")
+        return self
 
 
 class RedactedServiceConfig(BaseModel):
@@ -148,6 +159,8 @@ class SupportBundle(BaseModel):
     config_schema_version: int
     database_schema_version: int
     dry_run: bool
+    storage_warning_free_percent: float = 15.0
+    storage_critical_free_percent: float = 5.0
     downstream: list[SupportDownstreamRecord]
     recent_errors: list[SupportErrorRecord]
     webhook_outcomes: dict[str, int]
@@ -190,6 +203,8 @@ def export_redacted_config(config: RuntimeConfig) -> RedactedConfigExport:
             log_level=config.general.log_level,
             http_timeout_seconds=config.general.http_timeout_seconds,
             activity_retention_days=config.general.activity_retention_days,
+            storage_warning_free_percent=config.general.storage_warning_free_percent,
+            storage_critical_free_percent=config.general.storage_critical_free_percent,
             jellyfin_language=config.general.jellyfin_language,
             ui_language=config.general.ui_language,
         ),
@@ -419,6 +434,8 @@ async def build_support_bundle(
         config_schema_version=config.config_schema_version,
         database_schema_version=LATEST_SCHEMA_VERSION,
         dry_run=config.general.dry_run,
+        storage_warning_free_percent=config.general.storage_warning_free_percent,
+        storage_critical_free_percent=config.general.storage_critical_free_percent,
         downstream=downstream,
         recent_errors=recent_errors,
         webhook_outcomes=dict(sorted(webhook_counts.items())),
@@ -439,6 +456,8 @@ def _merge_safe_general(current: GeneralConfig, imported: RedactedGeneralConfig)
             "log_level": imported.log_level,
             "http_timeout_seconds": imported.http_timeout_seconds,
             "activity_retention_days": imported.activity_retention_days,
+            "storage_warning_free_percent": imported.storage_warning_free_percent,
+            "storage_critical_free_percent": imported.storage_critical_free_percent,
             "jellyfin_language": imported.jellyfin_language,
             "ui_language": imported.ui_language,
         }

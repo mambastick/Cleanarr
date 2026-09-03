@@ -108,6 +108,7 @@
 - **Мастер первого запуска** — последовательное подключение сервисов.
 - **Несколько профилей torrent-клиентов** — одновременное сохранение qBittorrent, Transmission, Deluge и rTorrent; включённые профили участвуют в работе, а один предпочитаемый профиль сохраняется для настройки и отображения.
 - **Загрузки и рекомендации очистки** — просмотр ограниченных нормализованных наблюдений раздач и кандидатов Jellyfin без превращения неизвестных данных в разрешение на удаление.
+- **Адаптивное authenticated workspace** — UI-v2 переходит от полной боковой панели к доступному rail и мобильной нижней навигации; Library объединяет posters, inspector выбранного объекта и headline состояния storage.
 - **Локальный вход и SSO** — пароль и строгая проверка OpenID Connect с PKCE, nonce и явной политикой users/groups/claims.
 - **Светлая и тёмная темы** — автоматический выбор по настройкам системы.
 
@@ -213,6 +214,22 @@ kubectl apply -f deploy/k8s/ingress.yaml
 | `SESSION_COOKIE_SECURE` | auto | Принудительный флаг `Secure`; задайте `true`, если TLS завершается на proxy без доверия к forwarded headers |
 
 > **Важно:** `DB_PATH` должен находиться на постоянном хранилище. Иначе после перезапуска будут потеряны настройки сервисов и журнал действий.
+
+Текущая сохраняемая runtime-конфигурация имеет schema **4**. Её упорядоченная
+migration добавляет консервативные storage thresholds: 15% для warning и 5% для
+critical по умолчанию. Принимаются только конечные неотрицательные проценты,
+причём warning должен быть строго выше critical; неверные значения дают
+fail-closed вместо тихого преобразования. Новая установка остаётся в dry-run.
+
+Соответствующие поля Settings — `storage_warning_free_percent` и
+`storage_critical_free_percent`; это runtime configuration fields, а не defaults
+environment variables.
+
+При первом чтении schema 3 CleanArr создаёт неизменяемый sidecar до сохранения
+schema 4: `cleanarr.config-v3.backup.db` рядом с SQLite database либо
+`runtime-config.config-v3.backup.json` рядом с legacy JSON configuration.
+Храните его вместе с соответствующей версией приложения; точная процедура
+возврата описана в [Operations](docs/OPERATIONS_RU.md#обновление-и-rollback).
 
 Существующие профили `jellyseerr` при запуске автоматически и без потери
 данных преобразуются в каноническую конфигурацию `seerr`. Переменные
@@ -324,11 +341,43 @@ Transmission, Deluge и rTorrent. Профиль разрешено сохран
 | `GET` | `/api/downloads/{client_id}/{info_hash}` | сессия | Одно нормализованное наблюдение раздачи |
 | `POST` | `/api/downloads/actions` | сессия | Только обратимые pause/resume; idempotency обязательна |
 | `GET` | `/api/downloads/cleanup-candidates` | сессия | Ограниченные рекомендации очистки на основе Jellyfin |
+| `GET` | `/api/storage/volumes` | сессия | Privacy-safe read model состояния томов Radarr/Sonarr |
+| `POST` | `/api/storage/refresh` | сессия | Объединённое обновление storage с ручным throttle |
+| `GET` | `/api/library/items` | сессия | Cursor-модель библиотеки фильмов/сериалов с ограниченными search и sort |
+| `GET` | `/api/library/items/{resource_id}` | сессия | Выбранный объект библиотеки и ограниченные детали сериала |
+| `GET` | `/api/library/artwork/{resource_id}` | сессия | Authenticated proxy artwork из Jellyfin |
 | `POST` | `/api/auth/login` | — | Локальный вход |
 | `GET` | `/api/auth/status` | — | Возможности входа и состояние сессии |
 | `GET` | `/api/auth/sso/login` | — | Начало входа OpenID Connect |
 | `GET` | `/health/live` | нет | Проверка жизни процесса |
 | `GET` | `/health/ready` | нет | Проверка готовности |
+
+### Контракт UI-v2 для Library и storage
+
+Authenticated workspace адаптивен: на desktop используется sidebar 240px, на
+tablet — доступный rail 80px, на mobile — компактный top bar и фиксированная
+нижняя навигация. Mobile layout резервирует safe-area, чтобы навигация не
+закрывала контент. Library остаётся read-only до явного hash-bound preflight и
+подтверждения удаления; poster cards, inspector выбранного объекта и storage
+headline не заменяют ownership evidence.
+
+Library использует непрозрачные resource IDs и ограниченный cursor (`limit` 1–50),
+search и сортировку `added`/`title`/`size`. Сервер может использовать in-process
+cache до 30 секунд на сочетание runtime configuration, языка Jellyfin и media
+type; search и sorting используют тот же snapshot каталога. `refresh=true`
+запрашивает новое чтение, но не меняет downstream services. Artwork proxy работает только после
+разрешения resource, является private и кэшируется клиентами не более часа.
+Raw paths, credentials, downstream URLs и непроверенные artwork metadata не
+возвращаются.
+
+Storage читает root и disk-space observations из Radarr/Sonarr. Результаты
+сбора кэшируются 60 секунд и считаются fresh 120 секунд; параллельные запросы
+объединяются, а manual refresh ограничен одним запросом за 10 секунд. Partial,
+stale, missing, invalid или conflicting observation получает `unknown`, а не
+healthy и не разрешение на удаление. Приоритет headline:
+critical → unknown/partial → warning → healthy. Storage monitoring остаётся
+read-only. Stop/pause раздачи остаётся отдельным от удаления torrent entry или
+media.
 
 ---
 
