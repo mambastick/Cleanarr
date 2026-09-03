@@ -34,7 +34,7 @@ export function SelectControl({
   disabled?: boolean
 }) {
   return (
-    <Select value={value} onValueChange={(next) => { if (next != null) onValueChange(next) }} disabled={disabled}>
+    <Select items={options} value={value} onValueChange={(next) => { if (next != null) onValueChange(next) }} disabled={disabled}>
       <SelectTrigger id={id}><SelectValue /></SelectTrigger>
       <SelectContent>{options.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
     </Select>

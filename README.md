@@ -110,6 +110,7 @@ Pack torrents, shared files, and anything that can't be safely attributed are al
 - **Downloads and cleanup recommendations** — inspect bounded, normalized torrent observations and Jellyfin-based cleanup candidates without turning unknown data into deletion permission
 - **Responsive authenticated workspace** — UI-v2 adapts from a full sidebar to an accessible rail and mobile bottom navigation; Library combines poster browsing, a selected-item inspector, and a storage-health headline
 - **Local and SSO authentication** — local password login plus strict OpenID Connect validation, PKCE, nonce, and explicit user/group/claim access policies
+- **Persisted user roles** — administrators can search known local/SSO identities and assign administrator or bounded read-only viewer access without exposing configuration or destructive controls
 - **Dark / light mode** — follows system preference
 
 ---

@@ -20,9 +20,14 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": "http://127.0.0.1:8089",
-      "/health": "http://127.0.0.1:8089",
-      "/webhook": "http://127.0.0.1:8089",
+      // Preserve the browser-facing Host header. CleanArr compares it with
+      // Origin/Referer for cookie-authenticated mutations, including the
+      // first-run registration request. Vite enables changeOrigin for string
+      // targets, which would otherwise make every local mutation look
+      // cross-origin to the API.
+      "/api": { target: "http://127.0.0.1:8089", changeOrigin: false },
+      "/health": { target: "http://127.0.0.1:8089", changeOrigin: false },
+      "/webhook": { target: "http://127.0.0.1:8089", changeOrigin: false },
     },
   },
   build: {

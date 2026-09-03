@@ -5,6 +5,7 @@ export interface AuthStatusPayload {
   requires_registration: boolean
   authenticated: boolean
   username: string | null
+  role: "admin" | "viewer" | null
   csrf_token: string | null
   sso_enabled: boolean
   sso_mode: SsoAuthMode
@@ -14,6 +15,7 @@ export interface AuthStatusPayload {
 
 export interface AuthSessionPayload {
   username: string
+  role: "admin" | "viewer"
   csrf_token: string
 }
 

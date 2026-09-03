@@ -414,6 +414,25 @@ released or as weakening existing deletion safety. Missing, stale, partial, or
 conflicting watch/download/storage data remains unknown and cannot authorize a
 destructive action.
 
+### Accepted UI-v2 administration follow-up — 2026-09-03
+
+The annotated UI review extends Epic #8 with an administrator-only user
+directory and persisted `admin`/`viewer` roles. The first admitted identity can
+bootstrap administration; later new SSO identities default to viewer, role
+changes preserve at least one administrator, and viewer sessions expose only
+bounded read projections—never configuration, credentials, user inventory, or
+mutations. Database schema 6 adds the user-account projection and remains
+subject to the normal backup, upgrade, future-version rejection, and restore
+gates.
+
+The same follow-up accepts the collapsible shell and animated active marker,
+expanded Settings information architecture, dense Activity stream, flat
+service list, bounded scrolling dialogs, Library cursor pagination and card
+density controls, explicit selection reset, mobile safe-area navigation, and
+tooltips for icon-only actions. These are implementation targets, not release
+claims, and they do not relax preflight, ownership, freshness, or dry-run
+contracts.
+
 ## Required 1.0 scope
 
 ### 1. Download clients and routing

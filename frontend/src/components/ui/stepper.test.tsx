@@ -48,4 +48,24 @@ describe("Stepper", () => {
     await user.click(screen.getByRole("button", { name: "Step 2" }))
     expect(screen.getByText("Second")).toBeInTheDocument()
   })
+
+  it("waits for the transition guard and stays on the current step when it rejects", async () => {
+    const user = userEvent.setup()
+    let resolveGuard: ((value: boolean) => void) | undefined
+    const guard = vi.fn(() => new Promise<boolean>((resolve) => { resolveGuard = resolve }))
+    render(
+      <Stepper nextButtonText="Next" stepLabel="Step" onBeforeStepChange={guard}>
+        <Step><p>First</p></Step>
+        <Step><p>Second</p></Step>
+      </Stepper>,
+    )
+
+    const next = screen.getByRole("button", { name: "Next" })
+    await user.click(next)
+    expect(next).toBeDisabled()
+    resolveGuard?.(false)
+    await vi.waitFor(() => expect(next).toBeEnabled())
+    expect(screen.getByText("First")).toBeInTheDocument()
+    expect(guard).toHaveBeenCalledWith(1, 2)
+  })
 })

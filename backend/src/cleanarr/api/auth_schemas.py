@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from cleanarr.application.authentication import AuthSession, AuthStatus
 from cleanarr.domain.config import SSOAuthMode
+from cleanarr.domain.users import UserRole
 
 
 class AuthStatusResponse(BaseModel):
@@ -15,6 +16,7 @@ class AuthStatusResponse(BaseModel):
     requires_registration: bool
     authenticated: bool
     username: str | None = None
+    role: UserRole | None = None
     csrf_token: str | None = None
     sso_enabled: bool
     sso_mode: SSOAuthMode
@@ -48,8 +50,9 @@ class AuthSessionResponse(BaseModel):
     """Authenticated browser response without exposing the session identifier."""
 
     username: str
+    role: UserRole
     csrf_token: str
 
     @classmethod
     def from_domain(cls, session: AuthSession) -> AuthSessionResponse:
-        return cls(username=session.username, csrf_token=session.csrf_token)
+        return cls(username=session.username, role=session.role, csrf_token=session.csrf_token)

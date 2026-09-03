@@ -420,6 +420,25 @@ publication требуют отдельного разрешения.
 conflicting watch/download/storage data остаётся `unknown` и не разрешает
 destructive action.
 
+### Принятое административное дополнение UI-v2 — 2026-09-03
+
+Результаты аннотированного UI-review расширяют Epic #8 административным
+каталогом пользователей и сохраняемыми ролями `admin`/`viewer`. Первая
+допущенная identity может создать административную границу; новые SSO identity
+после неё по умолчанию получают роль viewer, изменение ролей сохраняет минимум
+одного администратора, а viewer session открывает только ограниченные read
+projections — без конфигурации, credentials, списка пользователей и mutation.
+Database schema 6 добавляет проекцию учётных записей и проходит обычные gates
+backup, upgrade, future-version rejection и restore.
+
+В том же дополнении приняты collapsible shell с анимированным active marker,
+расширенная информационная архитектура Settings, плотный поток Activity,
+плоский список сервисов, ограниченные по высоте прокручиваемые dialogs, cursor
+pagination и выбор размера карточек Library, явный сброс selection, мобильная
+навигация с safe-area и tooltips у действий без подписи. Это цели реализации,
+а не заявление о релизе; они не ослабляют preflight, ownership, freshness или
+dry-run contracts.
+
 ## Обязательный scope 1.0
 
 ### 1. Torrent-клиенты и маршрутизация

@@ -1,251 +1,62 @@
-import { Activity, ChevronDown, ChevronRight, Film, Tv, Webhook } from "lucide-react"
-import { useMemo, useState } from "react"
+import { ChevronDown, Film, Search, Tv, Webhook } from "lucide-react"
+import { useMemo } from "react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { EmptyState, StatusPill } from "@/features/settings/service-presentation"
 import type { DashboardAction, DashboardActivity, DashboardUnifiedActivityItem, DashboardWebhookAttempt } from "@/lib/dashboard"
 import type { UiTextMap } from "@/lib/i18n"
-import { getItemTypeLabel, getStatusLabel } from "@/lib/service-config"
+import { getStatusLabel } from "@/lib/service-config"
 import { getWebhookStatusLabel, getWebhookStatusTone } from "@/lib/status-format"
 
-export function ActivityPanel({
-  text,
-  filteredActivity,
-  webhookAttempts,
-  activityFilter,
-  onFilterChange,
-}: {
-  text: UiTextMap
-  filteredActivity: DashboardActivity[]
-  webhookAttempts: DashboardWebhookAttempt[]
-  activityFilter: string
-  onFilterChange: (v: string) => void
-}) {
-  const activityItems = useMemo(() => {
-    const merged = [
-      ...filteredActivity.map((entry) => ({
-        kind: "processed_activity" as const,
-        ...entry,
-        sort_at: Date.parse(entry.processed_at),
-      })),
-      ...webhookAttempts.map((attempt) => ({
-        kind: "webhook_attempt" as const,
-        ...attempt,
-        sort_at: Date.parse(attempt.attempted_at),
-      })),
-    ]
-      .map((item) => ({ ...item, sort_at: Number.isNaN(item.sort_at) ? 0 : item.sort_at }))
-      .sort((left, right) => right.sort_at - left.sort_at) as DashboardUnifiedActivityItem[]
+type ActivityItem = DashboardUnifiedActivityItem
 
-    return merged
-  }, [filteredActivity, webhookAttempts])
-
-  const activityCount = activityItems.length
-
-  return (
-    <section className="space-y-4">
-      <div className="flex items-center gap-3">
-        <Input
-          value={activityFilter}
-          onChange={(e) => onFilterChange(e.target.value)}
-          placeholder={text.filter}
-          className="max-w-sm"
-        />
-        {activityFilter && (
-          <Button variant="ghost" size="sm" onClick={() => onFilterChange("")}>
-            {text.clear}
-          </Button>
-        )}
-        <span className="ml-auto text-sm text-muted-foreground">
-          {activityCount} {text.eventCount}
-        </span>
-      </div>
-
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Activity className="size-4 text-status-success" />
-            {text.activityTimeline}
-          </CardTitle>
-          <CardDescription>{text.activityTimelineDescription}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ScrollArea className="h-[480px]">
-            {activityItems.length === 0 ? (
-              <EmptyState
-                title={text.noActivity}
-                description={
-                  activityFilter
-                    ? text.noActivityFiltered
-                    : text.sendWebhookToSeeActivity
-                }
-              />
-            ) : (
-              <div className="space-y-2 p-px">
-                {activityItems.map((item) =>
-                  item.kind === "webhook_attempt" ? (
-                    <WebhookAttemptEntry
-                      key={`${item.kind}-${item.attempted_at}-${item.message}`}
-                      attempt={item}
-                      text={text}
-                    />
-                  ) : (
-                    <ActivityEntry
-                      key={`${item.kind}-${item.processed_at}-${item.result.item_id}`}
-                      entry={item}
-                      text={text}
-                    />
-                  ),
-                )}
-              </div>
-            )}
-          </ScrollArea>
-        </CardContent>
-      </Card>
-    </section>
-  )
-}
-// ─── Settings panel ───────────────────────────────────────────────────────────
-
-
-function WebhookAttemptEntry({ attempt, text }: { attempt: DashboardWebhookAttempt; text: UiTextMap }) {
-  const [open, setOpen] = useState(true)
-  const tone = getWebhookStatusTone(attempt.outcome)
-
-  return (
-    <Card>
-      <button
-        type="button"
-        className="flex w-full items-center gap-3 px-4 py-3 text-left"
-        onClick={() => setOpen((v) => !v)}
-      >
-        {open ? (
-          <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-        )}
-        <Webhook className="size-4 shrink-0 text-primary" />
-        <div className="min-w-0 flex-1 space-y-1">
-          <span className="block truncate text-sm font-medium">{attempt.item_name ?? attempt.message}</span>
-          <span className="text-xs text-muted-foreground">
-            {new Date(attempt.attempted_at).toLocaleString()}
-          </span>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Badge variant="outline" className="text-xs">
-            {attempt.http_status != null ? attempt.http_status : text.noStatus}
-          </Badge>
-          <StatusPill tone={tone} label={getWebhookStatusLabel(attempt.outcome, text)} />
-        </div>
-      </button>
-
-      {open && (
-        <CardContent className="border-t pb-3 pt-3 space-y-3">
-          <div className="space-y-1 text-xs text-muted-foreground">
-            <p>
-              <span className="text-foreground">{text.webhookMessageLabel}</span> {attempt.message}
-            </p>
-            {attempt.payload_event_count != null ? (
-              <p>
-                <span className="text-foreground">{text.webhookPayloadEventsLabel}</span> {attempt.payload_event_count}
-              </p>
-            ) : null}
-            <p>
-              <span className="text-foreground">{text.webhookNotificationLabel}</span>{" "}
-              {attempt.notification_type ?? "—"}
-              {attempt.item_type ? ` / ${attempt.item_type}` : ""}
-            </p>
-            {attempt.result_status && (
-              <p>
-                <span className="text-foreground">{text.webhookResultStatusLabel}</span> {getStatusLabel(attempt.result_status, text)}
-              </p>
-            )}
-          </div>
-        </CardContent>
-      )}
+export function ActivityPanel({ text, filteredActivity, webhookAttempts, activityFilter, onFilterChange }: { text: UiTextMap; filteredActivity: DashboardActivity[]; webhookAttempts: DashboardWebhookAttempt[]; activityFilter: string; onFilterChange: (value: string) => void }) {
+  const activityItems = useMemo(() => mergeActivity(filteredActivity, webhookAttempts), [filteredActivity, webhookAttempts])
+  return <section className="space-y-5">
+    <header><h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{text.activity}</h1><p className="mt-1 text-sm text-muted-foreground">{text.activityPageDescription}</p></header>
+    <Card className="overflow-hidden">
+      <CardHeader className="gap-4 border-b sm:flex-row sm:items-center sm:justify-between"><div><CardTitle className="text-base">{text.activityTimeline}</CardTitle><CardDescription>{text.activityTimelineDescription}</CardDescription></div><div className="flex w-full items-center gap-2 sm:max-w-sm"><div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" value={activityFilter} onChange={(event) => onFilterChange(event.target.value)} placeholder={text.filter} aria-label={text.filter} /></div>{activityFilter ? <Button variant="ghost" size="sm" onClick={() => onFilterChange("")}>{text.clear}</Button> : null}</div></CardHeader>
+      <CardContent className="p-0">{activityItems.length === 0 ? <div className="p-5"><EmptyState title={text.noActivity} description={activityFilter ? text.noActivityFiltered : text.sendWebhookToSeeActivity} /></div> : <div role="list" aria-label={text.activityTimeline} className="divide-y">{activityItems.map((item) => <ActivityEventRow key={activityKey(item)} item={item} text={text} />)}</div>}</CardContent>
     </Card>
-  )
+  </section>
 }
 
-function ActivityEntry({ entry, text }: { entry: DashboardActivity; text: UiTextMap }) {
-  const [open, setOpen] = useState(true)
-  const Icon = entry.result.item_type === "Movie" ? Film : Tv
-  const hasActions = entry.result.actions.length > 0
-  return (
-    <Card>
-      <button
-        type="button"
-        className="flex w-full items-center gap-3 px-4 py-3 text-left"
-        onClick={() => setOpen((v) => !v)}
-      >
-        {open ? (
-          <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-        )}
-        <Icon className="size-4 shrink-0 text-primary" />
-        <span className="flex-1 truncate text-sm font-medium">{entry.result.name}</span>
-        <div className="flex shrink-0 items-center gap-2">
-          <Badge variant="outline" className="text-xs">{getItemTypeLabel(entry.result.item_type, text)}</Badge>
-          <StatusPill
-            tone={entry.result.status === "partial_failure" ? "red" : "green"}
-            label={getStatusLabel(entry.result.status, text)}
-          />
-          <span className="hidden text-xs text-muted-foreground sm:block">
-            {new Date(entry.processed_at).toLocaleString()}
-          </span>
-        </div>
-      </button>
-
-      {open && (
-        <CardContent className="border-t pb-3 pt-3 space-y-3">
-          <div className="text-xs text-muted-foreground sm:hidden">
-            {new Date(entry.processed_at).toLocaleString()}
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {Object.entries(entry.action_summary).map(([k, v]) => (
-              <Badge key={k} variant="outline" className="text-xs">
-                {k}: {v}
-              </Badge>
-            ))}
-          </div>
-          <div className="space-y-1.5">
-            {entry.result.actions.map((action, i) => (
-              <ActionRow key={`${action.system}-${action.action}-${i}`} action={action} text={text} />
-            ))}
-          </div>
-          {!hasActions && (
-            <p className="text-xs text-muted-foreground">{text.noItemsYet}</p>
-          )}
-        </CardContent>
-      )}
-    </Card>
-  )
+function mergeActivity(activity: DashboardActivity[], webhookAttempts: DashboardWebhookAttempt[]): ActivityItem[] {
+  return [...activity.map((entry) => ({ kind: "processed_activity" as const, ...entry, sort_at: Date.parse(entry.processed_at) })), ...webhookAttempts.map((attempt) => ({ kind: "webhook_attempt" as const, ...attempt, sort_at: Date.parse(attempt.attempted_at) }))].map((item) => ({ ...item, sort_at: Number.isNaN(item.sort_at) ? 0 : item.sort_at })).sort((left, right) => right.sort_at - left.sort_at) as ActivityItem[]
 }
 
-function ActionRow({ action, text }: { action: DashboardAction; text: UiTextMap }) {
-  return (
-    <div className="rounded-lg border p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="outline" className="text-xs">{action.system}</Badge>
-          <span className="text-sm font-medium">{action.action}</span>
-        </div>
-        <StatusPill
-          tone={action.status === "failed" ? "red" : action.status === "deleted" ? "green" : "blue"}
-          label={getStatusLabel(action.status, text)}
-        />
-      </div>
-      <p className="mt-1.5 text-xs text-muted-foreground">{action.message}</p>
-      {action.reason && (
-      <p className="mt-1 text-xs text-muted-foreground">
-          {text.reasonLabel} <span className="font-mono">{action.reason}</span>
-        </p>
-      )}
-    </div>
-  )
+function activityKey(item: ActivityItem) { return item.kind === "processed_activity" ? `processed-${item.processed_at}-${item.result.item_id}` : `webhook-${item.attempted_at}-${item.message}` }
+
+function ActivityEventRow({ item, text }: { item: ActivityItem; text: UiTextMap }) {
+  const processed = item.kind === "processed_activity"
+  const Icon = processed ? (item.result.item_type === "Movie" ? Film : Tv) : Webhook
+  const title = processed ? item.result.name : item.item_name ?? text.item
+  const outcome = processed ? friendlyOutcome(item.result.status, text) : getWebhookStatusLabel(item.outcome, text)
+  const tone = processed ? item.result.status === "partial_failure" ? "red" : "green" : getWebhookStatusTone(item.outcome)
+  const timestamp = processed ? item.processed_at : item.attempted_at
+  return <details role="listitem" className="group open:bg-muted/20">
+    <summary className="grid min-h-20 cursor-pointer list-none items-center gap-3 px-4 py-3 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring/50 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] [&::-webkit-details-marker]:hidden">
+      <span className="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary"><Icon className="size-4" /></span>
+      <span className="min-w-0"><span className="block truncate text-sm font-semibold">{title}</span><span className="mt-1 block text-xs text-muted-foreground">{processed ? text.recentActivityProcessed.replace("{{item}}", title) : text.recentActivityWebhook.replace("{{item}}", title)}</span></span>
+      <span className="flex items-center gap-3"><StatusPill tone={tone} label={outcome} /><time className="hidden whitespace-nowrap text-xs text-muted-foreground md:inline">{new Date(timestamp).toLocaleString()}</time></span>
+      <ChevronDown className="size-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" aria-hidden="true" />
+    </summary>
+    <div className="border-t bg-background/60 px-4 py-4 sm:pl-[4.25rem]"><p className="mb-3 text-xs text-muted-foreground md:hidden">{new Date(timestamp).toLocaleString()}</p>{processed ? <ProcessedDetails entry={item} text={text} /> : <WebhookDetails attempt={item} text={text} />}</div>
+  </details>
 }
+
+function ProcessedDetails({ entry, text }: { entry: DashboardActivity; text: UiTextMap }) {
+  return <div className="space-y-2">{entry.result.actions.length ? entry.result.actions.map((action, index) => <ActionDetail key={`${action.system}-${action.action}-${index}`} action={action} text={text} />) : <p className="text-sm text-muted-foreground">{text.noItemsYet}</p>}</div>
+}
+
+function WebhookDetails({ attempt, text }: { attempt: DashboardWebhookAttempt; text: UiTextMap }) {
+  return <dl className="grid gap-2 text-sm sm:grid-cols-2"><div><dt className="text-xs text-muted-foreground">{text.webhookMessageLabel}</dt><dd className="mt-1">{attempt.message}</dd></div><div><dt className="text-xs text-muted-foreground">{text.httpStatus}</dt><dd className="mt-1">{attempt.http_status ?? text.noStatus}</dd></div>{attempt.notification_type ? <div><dt className="text-xs text-muted-foreground">{text.webhookNotificationLabel}</dt><dd className="mt-1"><code>{attempt.notification_type}</code></dd></div> : null}{attempt.result_status ? <div><dt className="text-xs text-muted-foreground">{text.webhookResultStatusLabel}</dt><dd className="mt-1">{getStatusLabel(attempt.result_status, text)}</dd></div> : null}</dl>
+}
+
+function ActionDetail({ action, text }: { action: DashboardAction; text: UiTextMap }) {
+  return <div className="rounded-lg border bg-card p-3 text-xs text-muted-foreground"><div className="flex items-center justify-between gap-2"><code>{action.system}/{action.action}</code><StatusPill tone={action.status === "failed" ? "red" : action.status === "deleted" ? "green" : "blue"} label={getStatusLabel(action.status, text)} /></div><p className="mt-2">{action.message}</p>{action.reason ? <p className="mt-1">{text.reasonLabel} <code>{action.reason}</code></p> : null}</div>
+}
+
+function friendlyOutcome(status: string, text: UiTextMap) { if (status === "dry_run") return text.dryRun; if (status === "ignored") return text.skipped; if (status === "already_absent") return text.deleted; const label = getStatusLabel(status, text); return label === status ? text.unknown : label }

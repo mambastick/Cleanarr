@@ -25,6 +25,7 @@ describe("settings modal accessibility", () => {
     render(<Fixture title="Runtime settings" />)
     await user.click(screen.getByRole("button", { name: "Open settings" }))
     expect(screen.getByRole("dialog", { name: "Runtime settings" })).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Runtime settings" })).toHaveClass("overflow-y-auto")
     expect(screen.getByRole("button", { name: "Close settings" })).toHaveFocus()
     await user.keyboard("{Escape}")
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()

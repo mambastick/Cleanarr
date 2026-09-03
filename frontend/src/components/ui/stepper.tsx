@@ -9,6 +9,7 @@ import React, {
 } from "react"
 import { motion, AnimatePresence, type Variants } from "motion/react"
 import { useReducedMotion } from "motion/react"
+import { Check, LoaderCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -17,6 +18,7 @@ interface StepperProps extends HTMLAttributes<HTMLDivElement> {
   initialStep?: number
   onStepChange?: (step: number) => void
   onFinalStepCompleted?: () => void
+  onBeforeStepChange?: (currentStep: number, nextStep: number) => boolean | void | Promise<boolean | void>
   stepCircleContainerClassName?: string
   stepContainerClassName?: string
   contentClassName?: string
@@ -40,6 +42,7 @@ export default function Stepper({
   initialStep = 1,
   onStepChange = () => {},
   onFinalStepCompleted = () => {},
+  onBeforeStepChange,
   stepCircleContainerClassName = "",
   stepContainerClassName = "",
   contentClassName = "",
@@ -56,6 +59,7 @@ export default function Stepper({
 }: StepperProps) {
   const [currentStep, setCurrentStep] = useState<number>(initialStep)
   const [direction, setDirection] = useState<number>(0)
+  const [isTransitioning, setIsTransitioning] = useState(false)
   const stepsArray = Children.toArray(children)
   const totalSteps = stepsArray.length
   const isCompleted = currentStep > totalSteps
@@ -71,29 +75,23 @@ export default function Stepper({
     }
   }
 
-  const handleBack = () => {
-    if (currentStep > 1) {
-      setDirection(-1)
-      updateStep(currentStep - 1)
+  const requestStep = async (nextStep: number) => {
+    if (isTransitioning || nextStep === currentStep) return
+    setIsTransitioning(true)
+    try {
+      const proceed = await onBeforeStepChange?.(currentStep, nextStep)
+      if (proceed === false) return
+      setDirection(nextStep > currentStep ? 1 : -1)
+      updateStep(nextStep)
+    } finally {
+      setIsTransitioning(false)
     }
-  }
-
-  const handleNext = () => {
-    if (!isLastStep) {
-      setDirection(1)
-      updateStep(currentStep + 1)
-    }
-  }
-
-  const handleComplete = () => {
-    setDirection(1)
-    updateStep(totalSteps + 1)
   }
 
   return (
-    <div className="flex flex-col" data-reduced-motion={reduceMotion ? "true" : "false"} {...rest}>
+    <div className="flex flex-col" data-slot="stepper" data-reduced-motion={reduceMotion ? "true" : "false"} aria-busy={isTransitioning || undefined} {...rest}>
       <div
-        className={`w-full rounded-2xl border bg-card shadow-sm ${stepCircleContainerClassName}`}
+        className={`w-full overflow-hidden rounded-2xl border bg-card shadow-sm ${stepCircleContainerClassName}`}
       >
         <div className={`${stepContainerClassName} flex w-full items-center px-2 py-6 sm:px-8`}>
           {stepsArray.map((_, index) => {
@@ -106,19 +104,17 @@ export default function Stepper({
                     step: stepNumber,
                     currentStep,
                     onStepClick: (clicked) => {
-                      setDirection(clicked > currentStep ? 1 : -1)
-                      updateStep(clicked)
+                      void requestStep(clicked)
                     },
                   })
                 ) : (
                   <StepIndicator
                     step={stepNumber}
                     stepLabel={stepLabel}
-                    disableStepIndicators={disableStepIndicators}
+                    disableStepIndicators={disableStepIndicators || isTransitioning}
                     currentStep={currentStep}
                     onClickStep={(clicked) => {
-                      setDirection(clicked > currentStep ? 1 : -1)
-                      updateStep(clicked)
+                      void requestStep(clicked)
                     }}
                   />
                 )}
@@ -152,16 +148,19 @@ export default function Stepper({
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={handleBack}
                   {...backButtonProps}
+                  disabled={isTransitioning || backButtonProps.disabled}
+                  onClick={() => void requestStep(currentStep - 1)}
                 >
                   {backButtonText}
                 </Button>
               )}
               <Button
-                onClick={isLastStep ? handleComplete : handleNext}
                 {...nextButtonProps}
+                disabled={isTransitioning || nextButtonProps.disabled}
+                onClick={() => void requestStep(isLastStep ? totalSteps + 1 : currentStep + 1)}
               >
+                {isTransitioning ? <LoaderCircle className="size-4 animate-spin" aria-hidden="true" /> : null}
                 {isLastStep ? completeButtonText : nextButtonText}
               </Button>
             </div>
@@ -316,7 +315,7 @@ function StepIndicator({
         )}
       >
         {status === "complete" ? (
-          <CheckIcon className="h-4 w-4" />
+          <Check className="h-4 w-4" aria-hidden="true" />
         ) : status === "active" ? (
           <div className="h-3 w-3 rounded-full bg-primary-foreground" />
         ) : (
@@ -342,13 +341,5 @@ function StepConnector({ isComplete, reduceMotion }: StepConnectorProps) {
         transition={{ duration: reduceMotion ? 0 : 0.4 }}
       />
     </div>
-  )
-}
-
-function CheckIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg {...props} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-    </svg>
   )
 }

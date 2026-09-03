@@ -78,6 +78,7 @@ from cleanarr.api.operations import (
 )
 from cleanarr.api.schemas import JellyfinWebhookPayload, ProcessingResultResponse, WebhookBatchResponse
 from cleanarr.api.storage import StorageResponse
+from cleanarr.api.user_schemas import UserAccountListResponse, UserAccountResponse, UserRoleUpdateRequest
 from cleanarr.application.authentication import LoginThrottledError
 from cleanarr.application.cleanup_candidates import CleanupCandidatesService
 from cleanarr.application.deletion_batches import (
@@ -115,8 +116,10 @@ from cleanarr.application.manual_deletion import (
 from cleanarr.application.ports import DownloaderFleetPort
 from cleanarr.application.service import CascadeDeletionService
 from cleanarr.application.storage import StorageRefreshThrottledError, StorageService
+from cleanarr.application.users import LastAdministratorError, UserNotFoundError
 from cleanarr.domain import LibraryEnrichment, LibraryItem, MediaDeletionEvent, ProcessingResult, SonarrSeries
 from cleanarr.domain.config import BaseServiceConfig, GeneralConfig, ServiceKind
+from cleanarr.domain.users import UserRole
 from cleanarr.infrastructure.clients import NullJellyfinServerClient, NullRadarrClient, NullSonarrClient
 from cleanarr.infrastructure.container import ServiceContainer
 from cleanarr.infrastructure.deletion_repository import SQLiteDeletionRepository
@@ -388,17 +391,22 @@ async def require_admin_token(
     x_csrf_token: str | None = Header(default=None),
     cleanarr_session: str | None = Cookie(default=None, alias=_COOKIE_NAME),
 ) -> None:
-    """Validate admin access via session token or fallback static token."""
+    """Validate authenticated access and enforce the persisted user role."""
 
     container = request.app.state.container
     header_token = _extract_token(authorization, x_admin_token)
     if header_token:
         if container.auth_service.resolve_session(header_token):
+            resolve_role = getattr(container.auth_service, "resolve_user_role", None)
+            role = resolve_role(header_token) if resolve_role else UserRole.ADMIN
+            _require_request_role(request, role)
             return
         expected = container.admin_shared_token
         if expected and _constant_time_equal(expected, header_token):
             return
     elif cleanarr_session and container.auth_service.resolve_session(cleanarr_session):
+        resolve_role = getattr(container.auth_service, "resolve_user_role", None)
+        role = resolve_role(cleanarr_session) if resolve_role else UserRole.ADMIN
         if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             _require_same_origin_browser_request(request)
             if not container.auth_service.verify_csrf_token(cleanarr_session, x_csrf_token):
@@ -406,6 +414,7 @@ async def require_admin_token(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Invalid CSRF token",
                 )
+        _require_request_role(request, role)
         return
 
     if not container.config.admin.configured:
@@ -418,6 +427,33 @@ async def require_admin_token(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid admin session",
     )
+
+
+_VIEWER_READ_PATHS = {
+    "/api/dashboard",
+    "/api/storage/volumes",
+}
+_VIEWER_READ_PREFIXES = (
+    "/api/library/",
+    "/api/downloads",
+    "/api/actions/delete/jobs",
+    "/api/actions/delete/batches",
+)
+
+
+def _require_request_role(request: Request, role: UserRole | None) -> None:
+    """Allow viewers only the bounded read projections used by their workspace."""
+
+    if role is UserRole.ADMIN:
+        return
+    if request.method == "POST" and request.url.path == "/api/auth/logout":
+        return
+    if request.method == "GET" and (
+        request.url.path in _VIEWER_READ_PATHS
+        or any(request.url.path.startswith(prefix) for prefix in _VIEWER_READ_PREFIXES)
+    ):
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator role required")
 
 
 class SetupWebhookRequest(BaseModel):
@@ -795,6 +831,37 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         logout_response = Response(status_code=status.HTTP_204_NO_CONTENT)
         _set_session_cookie(logout_response, request, None)
         return logout_response
+
+    @app.get(
+        "/api/users",
+        response_model=UserAccountListResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def list_users(request: Request) -> UserAccountListResponse:
+        """List identities that have authenticated with this CleanArr instance."""
+
+        accounts = request.app.state.container.users_service.list_users()
+        return UserAccountListResponse(users=[UserAccountResponse.from_domain(account) for account in accounts])
+
+    @app.patch(
+        "/api/users/{username}/role",
+        response_model=UserAccountResponse,
+        dependencies=[Depends(require_admin_token)],
+    )
+    async def update_user_role(
+        request: Request,
+        username: str,
+        payload: UserRoleUpdateRequest,
+    ) -> UserAccountResponse:
+        """Change one role while preserving at least one administrator."""
+
+        try:
+            account = request.app.state.container.users_service.update_role(username, payload.role)
+        except UserNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except LastAdministratorError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        return UserAccountResponse.from_domain(account)
 
     @app.get(
         "/api/config",

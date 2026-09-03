@@ -13,7 +13,7 @@ afterEach(() => vi.unstubAllGlobals())
 function ControlFixture() {
   const [choice, setChoice] = useState("one")
   const [checked, setChecked] = useState(false)
-  return <><Select value={choice} onValueChange={(value) => value && setChoice(value)}><SelectTrigger aria-label="Client"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="one">One</SelectItem><SelectItem value="two">Two</SelectItem></SelectContent></Select><Checkbox aria-label="Enabled" checked={checked} onCheckedChange={setChecked} /><Switch aria-label="Default" checked={checked} onCheckedChange={setChecked} /></>
+  return <><Select items={{ one: "One", two: "Two" }} value={choice} onValueChange={(value) => value && setChoice(value)}><SelectTrigger aria-label="Client"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="one">One</SelectItem><SelectItem value="two">Two</SelectItem></SelectContent></Select><Checkbox aria-label="Enabled" checked={checked} onCheckedChange={setChecked} /><Switch aria-label="Default" checked={checked} onCheckedChange={setChecked} /></>
 }
 
 describe("design-system controls", () => {
@@ -23,7 +23,7 @@ describe("design-system controls", () => {
     const select = screen.getByRole("combobox", { name: "Client" })
     select.focus()
     await user.keyboard("{ArrowDown}{ArrowDown}{Enter}")
-    expect(select).toHaveTextContent("two")
+    expect(select).toHaveTextContent("Two")
     await user.click(screen.getByRole("checkbox", { name: "Enabled" }))
     expect(screen.getByRole("checkbox", { name: "Enabled" })).toBeChecked()
     await user.click(screen.getByRole("switch", { name: "Default" }))
@@ -46,5 +46,9 @@ describe("design-system controls", () => {
     expect(screen.getByText("First").closest("div[data-reduced-motion]")).toHaveAttribute("data-reduced-motion", "true")
     const ids = new Set(Array.from(container.querySelectorAll("[data-indicator-id]")).map((item) => item.getAttribute("data-indicator-id")))
     expect(ids).toHaveLength(2)
+    for (const highlight of container.querySelectorAll("[data-slot=tabs-highlight]")) {
+      expect(highlight).toHaveClass("rounded-md", "border")
+      expect(highlight).not.toHaveClass("h-0.5")
+    }
   })
 })

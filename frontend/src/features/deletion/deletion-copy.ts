@@ -4,6 +4,10 @@ import type { SubmissionRecovery } from "./delete-session"
 
 export type DeletionLanguage = "en" | "ru"
 export const SAFE_RETAINED_SKIP_REASONS = new Set(["pack_torrent", "shared_file", "seeding_policy", "partial_request_retained", "no_partial_request_cleanup"])
+export const DELETION_NOTICES: Record<DeletionLanguage, { jobNeedsAttention: string; jobCompleted: string; batchAccepted: string }> = {
+  en: { jobNeedsAttention: "job needs attention.", jobCompleted: "job completed.", batchAccepted: "Batch job accepted." },
+  ru: { jobNeedsAttention: "задача требует внимания.", jobCompleted: "задача завершена.", batchAccepted: "Пакетная задача принята." },
+}
 
 const copy = {
   en: {

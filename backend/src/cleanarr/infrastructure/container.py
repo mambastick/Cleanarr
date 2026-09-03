@@ -10,11 +10,13 @@ from cleanarr.application.authentication import AuthenticationService
 from cleanarr.application.configuration import RuntimeConfigurationService
 from cleanarr.application.service import CascadeDeletionService
 from cleanarr.application.strategies import DeletionStrategyFactory
+from cleanarr.application.users import UserAdministrationService
 from cleanarr.domain.config import (
     JellyfinServiceConfig,
     RuntimeConfig,
     SeerrServiceConfig,
 )
+from cleanarr.domain.users import UserAuthSource, UserRole
 from cleanarr.infrastructure.auth import InMemorySessionStore, PasswordHasher
 from cleanarr.infrastructure.clients import (
     JellyfinServerClient,
@@ -36,6 +38,7 @@ from cleanarr.infrastructure.downloaders import (
 from cleanarr.infrastructure.logging import configure_logging
 from cleanarr.infrastructure.routers import MultiRadarrClient, MultiSonarrClient, RadarrTarget, SonarrTarget
 from cleanarr.infrastructure.settings import Settings
+from cleanarr.infrastructure.users import SqliteUserAccountStore
 
 
 @dataclass
@@ -70,11 +73,13 @@ class ServiceContainer:
         settings: Settings,
         config_service: RuntimeConfigurationService,
         auth_service: AuthenticationService,
+        users_service: UserAdministrationService,
         runtime: ServiceRuntime,
     ) -> None:
         self.settings = settings
         self.config_service = config_service
         self.auth_service = auth_service
+        self.users_service = users_service
         self._runtime = runtime
         self._runtime_lock = asyncio.Lock()
 
@@ -88,16 +93,23 @@ class ServiceContainer:
             settings=settings,
             connection_tester=ServiceConnectionTester(),
         )
+        user_store = SqliteUserAccountStore(settings.db_path)
+        existing_admin = config_service.get_config().admin
+        if existing_admin.configured and existing_admin.username:
+            user_store.ensure_user(existing_admin.username, UserAuthSource.LOCAL, UserRole.ADMIN)
         auth_service = AuthenticationService(
             config_service=config_service,
             password_hasher=PasswordHasher(),
             session_store=InMemorySessionStore(),
+            user_store=user_store,
         )
+        users_service = UserAdministrationService(user_store)
         runtime = cls._build_runtime(settings=settings, config=config_service.get_config())
         return cls(
             settings=settings,
             config_service=config_service,
             auth_service=auth_service,
+            users_service=users_service,
             runtime=runtime,
         )
 

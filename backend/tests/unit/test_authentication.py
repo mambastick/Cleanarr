@@ -5,9 +5,47 @@ import pytest
 from cleanarr.application.authentication import AuthenticationService, LoginThrottledError
 from cleanarr.application.configuration import RuntimeConfigurationService
 from cleanarr.domain.config import GeneralConfig, RuntimeConfig, SSOAuthMode
+from cleanarr.domain.users import UserAccount, UserAuthSource, UserRole
 from cleanarr.infrastructure.auth import InMemorySessionStore, PasswordHasher
 from cleanarr.infrastructure.config_store import FileConfigStore
 from cleanarr.infrastructure.settings import Settings
+
+
+class MemoryUserStore:
+    def __init__(self) -> None:
+        self.accounts: dict[str, UserAccount] = {}
+
+    def ensure_user(self, username: str, auth_source: UserAuthSource, default_role: UserRole) -> UserAccount:
+        account = self.accounts.get(username.casefold()) or UserAccount(
+            username, default_role, auth_source, "now", "now", "now"
+        )
+        self.accounts[username.casefold()] = account
+        return account
+
+    def touch_user(self, username: str) -> UserAccount | None:
+        return self.accounts.get(username.casefold())
+
+    def ensure_sso_user(self, username: str) -> UserAccount:
+        default_role = UserRole.VIEWER if self.has_administrator() else UserRole.ADMIN
+        return self.ensure_user(username, UserAuthSource.SSO, default_role)
+
+    def get_role(self, username: str) -> UserRole | None:
+        account = self.accounts.get(username.casefold())
+        return account.role if account else None
+
+    def has_administrator(self) -> bool:
+        return any(account.role is UserRole.ADMIN for account in self.accounts.values())
+
+    def list_users(self) -> tuple[UserAccount, ...]:
+        return tuple(self.accounts.values())
+
+    def update_role(self, username: str, role: UserRole) -> UserAccount:
+        account = self.accounts[username.casefold()]
+        updated = UserAccount(
+            account.username, role, account.auth_source, account.created_at, account.last_seen_at, "now"
+        )
+        self.accounts[username.casefold()] = updated
+        return updated
 
 
 def build_auth_service(tmp_path: Path, *, sso_mode: SSOAuthMode) -> AuthenticationService:
@@ -31,6 +69,7 @@ def build_auth_service(tmp_path: Path, *, sso_mode: SSOAuthMode) -> Authenticati
         config_service=config_service,
         password_hasher=PasswordHasher(),
         session_store=InMemorySessionStore(),
+        user_store=MemoryUserStore(),
     )
 
 
@@ -57,6 +96,16 @@ def test_auth_status_reports_enabled_login_methods(
     assert status.sso_enabled is sso_enabled
     assert status.sso_configured is sso_configured
     assert status.requires_registration is requires_registration
+
+
+def test_sso_sessions_bootstrap_one_admin_then_default_new_identities_to_viewer(tmp_path: Path) -> None:
+    auth_service = build_auth_service(tmp_path, sso_mode=SSOAuthMode.SSO_ONLY)
+
+    first = auth_service.create_session_for_user("first@example.com")
+    second = auth_service.create_session_for_user("second@example.com")
+
+    assert first.role is UserRole.ADMIN
+    assert second.role is UserRole.VIEWER
 
 
 def test_sso_only_rejects_local_login(tmp_path: Path) -> None:

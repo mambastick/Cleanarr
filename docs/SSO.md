@@ -40,6 +40,13 @@ also present. A required claim/value pair by itself is a complete policy.
 Comparisons are case-insensitive and exact; partial or substring matches are
 not accepted.
 
+Admission and authorization are separate. In an SSO-only bootstrap, the first
+admitted identity becomes the administrator. Once any administrator exists,
+new SSO identities default to viewer and can use only the bounded read-only
+workspace until an administrator changes their persisted role. Repeated login
+does not overwrite an assigned role, and CleanArr refuses to demote the final
+administrator.
+
 Start with `SSO_MODE=both`, test local and OIDC login in separate browser
 sessions, and only then switch to `sso_only`. Use `both` permanently if a local
 break-glass account is required.

@@ -1,19 +1,198 @@
 import { expect, test, type Page } from "@playwright/test"
 import AxeBuilder from "@axe-core/playwright"
-import { boot } from "./fixtures"
+import { boot, fixtureMovie, navButton } from "./fixtures"
 
 const WCAG_AA_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]
+const mobileJob = { id: "mobile-job", item_type: "Movie", item_name: "Mobile fixture", display_name: "Mobile fixture", status: "queued", phase: "queued", progress_percent: 0, message: "Queued", created_at: "2026-01-01T00:00:00Z", started_at: null, completed_at: null, next_retry_at: null, attempt_count: 0, max_attempts: 3, preflight: null, result: null, error: null }
 async function expectNoWcagViolations(page: Page) { const result = await new AxeBuilder({ page }).withTags(WCAG_AA_TAGS).analyze(); expect(result.violations).toEqual([]) }
 async function expectViewportWidth(page: Page) { expect(await page.evaluate(() => ({ html: document.documentElement.scrollWidth <= document.documentElement.clientWidth, body: document.body.scrollWidth <= document.documentElement.clientWidth }))).toEqual({ html: true, body: true }) }
 
-test("uses isolated startup mocks, keyboard tabs, theme modes, and accessible desktop/mobile shells", async ({ page }) => {
-  const api = await boot(page)
-  await page.getByRole("tab", { name: "Settings" }).focus(); await page.keyboard.press("ArrowRight")
-  await expect(page.getByRole("tab", { name: "Activity" })).toBeFocused()
+test("uses isolated startup mocks, keyboard tabs, theme modes, and accessible desktop/mobile shells", async ({ page }, testInfo) => {
+  const api = await boot(page, { jobs: [mobileJob] })
+  const overview = navButton(page, "Overview")
+  await overview.focus(); await page.keyboard.press("Tab")
+  await expect(navButton(page, "Library")).toBeFocused()
   expect(api.count("/api/auth/status")).toBeGreaterThan(0); expect(api.count("/api/config")).toBeGreaterThan(0)
-  const theme = page.getByRole("button", { name: /Theme: (light|dark|system)/ }); await theme.click(); await expect(page.getByRole("button", { name: "Theme: light" })).toBeVisible(); await expect(page.locator("html")).not.toHaveClass(/dark/); await page.waitForTimeout(250); await expectNoWcagViolations(page)
-  await theme.click(); await expect(page.getByRole("button", { name: "Theme: dark" })).toBeVisible(); await expect(page.locator("html")).toHaveClass(/dark/); await page.waitForTimeout(250); await expectNoWcagViolations(page)
-  await theme.click(); await expect(page.getByRole("button", { name: "Theme: system" })).toBeVisible()
-  await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "dark" }); await expect(page.locator("[data-reduced-motion=true]")).toHaveCount(1); await expect(page.locator("html")).toHaveClass(/dark/); await expectNoWcagViolations(page)
-  await page.setViewportSize({ width: 375, height: 812 }); await expect(page.getByRole("tablist", { name: "Main navigation" })).toBeVisible(); await expectViewportWidth(page); await expectNoWcagViolations(page)
+  const account = page.getByRole("button", { name: "Account: fixture-admin" }); await expect(account).toBeVisible(); await expect(account).toHaveText("FAfixture-admin"); await account.click()
+  const accountPopover = page.getByRole("dialog", { name: "fixture-admin" }); await expect(accountPopover).toBeVisible()
+  const theme = accountPopover.getByRole("button", { name: /Theme.*System/i }); await theme.click(); await expect(accountPopover.getByRole("button", { name: /Theme.*Light/i })).toBeVisible(); await expect(page.locator("html")).not.toHaveClass(/dark/); await page.waitForTimeout(250); await expectNoWcagViolations(page)
+  await accountPopover.getByRole("button", { name: /Theme.*Light/i }).click(); await expect(accountPopover.getByRole("button", { name: /Theme.*Dark/i })).toBeVisible(); await expect(page.locator("html")).toHaveClass(/dark/); await page.waitForTimeout(250); await expectNoWcagViolations(page); await testInfo.attach("desktop-account-popover-dark-followup", { body: await page.screenshot(), contentType: "image/png" })
+  await accountPopover.getByRole("button", { name: /Theme.*Dark/i }).click(); await expect(accountPopover.getByRole("button", { name: /Theme.*System/i })).toBeVisible(); await expect(accountPopover.getByRole("button", { name: /Theme.*System/i })).toBeFocused(); await page.keyboard.press("Escape"); await expect(accountPopover).toBeHidden(); await expect(account).toBeFocused()
+  await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "dark" }); await navButton(page, "Library").click(); await expect(page.locator('[data-reduced-motion="true"]:visible')).toHaveCount(1); await expect(page.locator("html")).toHaveClass(/dark/); await expectNoWcagViolations(page)
+  await page.setViewportSize({ width: 375, height: 812 }); await expect(page.getByRole("navigation", { name: "Main navigation" })).toBeVisible(); const more = navButton(page, "More"); await expect(more).toBeVisible(); await more.click(); const moreDialog = page.getByRole("dialog", { name: "More" }); await expect(moreDialog.getByRole("button", { name: "Settings" })).toBeVisible(); await expect(moreDialog.getByRole("region", { name: "Storage" })).toBeVisible(); await expect(moreDialog.getByText("fixture-admin")).toBeVisible(); await expect(moreDialog.getByRole("button", { name: /Theme/ })).toBeVisible(); await expect(moreDialog.getByRole("button", { name: /Language/ })).toBeVisible(); await expect(moreDialog.getByRole("button", { name: "Log out" })).toBeVisible(); await moreDialog.getByRole("button", { name: "Close" }).click(); await expect(more).toBeFocused()
+  const jobs = page.getByRole("button", { name: "Background tasks" }); await expect(jobs).toBeVisible(); await jobs.click(); const jobsDialog = page.getByRole("dialog", { name: "Background tasks" }); await expect(jobsDialog.getByText("Mobile fixture")).toBeVisible(); const bounds = await jobsDialog.boundingBox(); expect(bounds?.width).toBe(375); await jobsDialog.getByRole("button", { name: "Close" }).click(); await expect(jobs).toBeFocused(); await expectViewportWidth(page); await expectNoWcagViolations(page)
+})
+
+test("matches the annotated sidebar and library-card interactions", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await boot(page, { movies: [fixtureMovie] })
+
+  const stars = page.getByRole("link", { name: "GitHub: 15 stars" }).filter({ visible: true })
+  await expect(stars).toBeVisible()
+
+  await navButton(page, "Settings").click()
+  const navigation = page.locator(".app-shell__navigation-scroll")
+  await expect(navigation).toBeVisible()
+  await expect(page.getByRole("group", { name: "Settings" })).toHaveAttribute("data-motion-tree", "true")
+  expect(await navigation.evaluate((element) => ({
+    overflows: element.scrollHeight > element.clientHeight,
+    firefox: getComputedStyle(element).scrollbarWidth,
+    webkit: getComputedStyle(element, "::-webkit-scrollbar").display,
+  }))).toEqual({ overflows: true, firefox: "none", webkit: "none" })
+  await expect(page.locator('[data-slot="motion-highlight-item-container"][data-value="settings"]')).toHaveAttribute("data-active", "true")
+  const settingsIndicator = page.locator(".app-shell__settings-highlight > .app-shell__settings-active-indicator")
+  const settingsStart = await settingsIndicator.evaluate((element) => Number.parseFloat((element as HTMLElement).style.top))
+  await page.getByRole("button", { name: "Media library" }).click()
+  await page.waitForTimeout(300)
+  const settingsEnd = await settingsIndicator.evaluate((element) => Number.parseFloat((element as HTMLElement).style.top))
+  expect(Number.isFinite(settingsStart)).toBe(true)
+  expect(Number.isFinite(settingsEnd)).toBe(true)
+  expect(settingsEnd).toBeGreaterThan(settingsStart)
+  const settingsHighlight = page.locator(".app-shell__settings-highlight")
+  const securitySection = page.getByRole("button", { name: "Security" })
+  const [settingsHighlightBounds, securitySectionBounds] = await Promise.all([settingsHighlight.boundingBox(), securitySection.boundingBox()])
+  expect(settingsHighlightBounds).not.toBeNull()
+  expect(securitySectionBounds).not.toBeNull()
+  expect(Math.abs(securitySectionBounds!.width - settingsHighlightBounds!.width)).toBeLessThan(1)
+  await testInfo.attach("desktop-settings-tree-followup", { body: await page.screenshot(), contentType: "image/png" })
+
+  const sidebar = page.locator(".app-shell__sidebar")
+  const collapse = page.getByRole("button", { name: "Collapse sidebar" })
+  const [sidebarBounds, collapseBounds] = await Promise.all([sidebar.boundingBox(), collapse.boundingBox()])
+  expect(sidebarBounds).not.toBeNull()
+  expect(collapseBounds).not.toBeNull()
+  expect(collapseBounds!.x + collapseBounds!.width).toBeLessThanOrEqual(sidebarBounds!.x + sidebarBounds!.width)
+  await expect(sidebar.locator(".app-shell__brand")).toHaveCSS("border-bottom-style", "solid")
+  await page.getByRole("button", { name: "Collapse sidebar" }).click()
+  await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible()
+  await expect(page.getByRole("status", { name: /Runtime status/ }).first()).toBeVisible()
+  await expect(page.locator(".app-shell__sidebar .app-shell__storage")).toHaveCount(0)
+  const [collapsedSidebarBounds, brandMarkSlotBounds, expandBounds, runtimeBounds] = await Promise.all([
+    sidebar.boundingBox(),
+    page.locator(".app-shell__sidebar .app-shell__brand-mark-slot").boundingBox(),
+    page.getByRole("button", { name: "Expand sidebar" }).boundingBox(),
+    page.locator(".app-shell__sidebar .app-shell__runtime-status").boundingBox(),
+  ])
+  expect(collapsedSidebarBounds).not.toBeNull()
+  expect(brandMarkSlotBounds).not.toBeNull()
+  expect(expandBounds).not.toBeNull()
+  expect(runtimeBounds).not.toBeNull()
+  await expect.poll(async () => {
+    const [settledSidebar, settledMark, settledToggle, settledRuntime] = await Promise.all([sidebar.boundingBox(), page.locator(".app-shell__sidebar .app-shell__brand-mark-slot").boundingBox(), page.getByRole("button", { name: "Expand sidebar" }).boundingBox(), page.locator(".app-shell__sidebar .app-shell__runtime-status").boundingBox()])
+    if (!settledSidebar || !settledMark || !settledToggle || !settledRuntime) return Number.POSITIVE_INFINITY
+    const settledCenter = settledSidebar.x + settledSidebar.width / 2
+    return Math.max(Math.abs((settledMark.x + settledMark.width / 2) - settledCenter), Math.abs((settledToggle.x + settledToggle.width / 2) - settledCenter), Math.abs((settledRuntime.x + settledRuntime.width / 2) - settledCenter))
+  }, { timeout: 2_000 }).toBeLessThan(1)
+  const desktopFocusLocator = page.locator(".app-shell__navigation-highlight > .app-shell__nav-active-indicator")
+  const activeDesktopIconLocator = page.locator('[data-slot="motion-highlight-item-container"][data-value="settings"] [data-slot="animated-icon"]')
+  await expect.poll(async () => {
+    const focus = await desktopFocusLocator.boundingBox()
+    const icon = await activeDesktopIconLocator.boundingBox()
+    if (!focus || !icon) return Number.POSITIVE_INFINITY
+    return Math.max(
+      Math.abs((focus.x + focus.width / 2) - (icon.x + icon.width / 2)),
+      Math.abs((focus.y + focus.height / 2) - (icon.y + icon.height / 2)),
+    )
+  }, { timeout: 2_000 }).toBeLessThan(1)
+  const desktopFocus = await desktopFocusLocator.boundingBox()
+  const activeDesktopIcon = await activeDesktopIconLocator.boundingBox()
+  expect(desktopFocus).not.toBeNull()
+  expect(activeDesktopIcon).not.toBeNull()
+  expect(Math.abs(desktopFocus!.width - desktopFocus!.height)).toBeLessThan(1)
+  expect(desktopFocus!.width).toBe(44)
+  expect(Math.abs((desktopFocus!.x + desktopFocus!.width / 2) - (activeDesktopIcon!.x + activeDesktopIcon!.width / 2))).toBeLessThan(1)
+  expect(Math.abs((desktopFocus!.y + desktopFocus!.height / 2) - (activeDesktopIcon!.y + activeDesktopIcon!.height / 2))).toBeLessThan(1)
+  await testInfo.attach("desktop-collapsed-focus-followup", { body: await page.screenshot(), contentType: "image/png" })
+
+  const tooltip = page.locator('[data-slot="tooltip-content"][data-open]')
+  for (const name of ["Overview", "Library", "Downloads", "Activity", "Users", "Settings"]) {
+    await navButton(page, name).hover()
+    await expect(tooltip).toHaveText(name)
+    await expect(tooltip).toHaveCSS("background-color", "rgb(109, 92, 231)")
+  }
+
+  const library = navButton(page, "Library")
+  await library.click()
+  await library.hover()
+  await expect(library).toHaveCSS("background-color", "rgba(0, 0, 0, 0)")
+  const libraryIcon = page.locator('.app-shell__sidebar [data-slot="motion-highlight-item-container"][data-value="library"] [data-slot="animated-icon"]')
+  await expect.poll(async () => {
+    const focus = await desktopFocusLocator.boundingBox()
+    const icon = await libraryIcon.boundingBox()
+    if (!focus || !icon) return Number.POSITIVE_INFINITY
+    return Math.max(Math.abs((focus.x + focus.width / 2) - (icon.x + icon.width / 2)), Math.abs((focus.y + focus.height / 2) - (icon.y + icon.height / 2)))
+  }, { timeout: 2_000 }).toBeLessThan(1)
+  await testInfo.attach("desktop-collapsed-library-followup", { body: await page.screenshot(), contentType: "image/png" })
+
+  const activity = navButton(page, "Activity")
+  await activity.click()
+  await activity.hover()
+  await expect(activity).toHaveCSS("background-color", "rgba(0, 0, 0, 0)")
+  await page.getByRole("button", { name: "Expand sidebar" }).click()
+  const account = page.getByRole("button", { name: "Account: fixture-admin" })
+  await expect(account).toHaveText("FAfixture-admin")
+  await expect(account.locator("[data-initials=FA]")).toBeVisible()
+  await account.click()
+  const accountPopover = page.getByRole("dialog", { name: "fixture-admin" })
+  await expect(accountPopover.getByRole("button", { name: "Language: EN" })).toBeVisible()
+  await page.waitForTimeout(250)
+  await testInfo.attach("desktop-account-popover-followup", { body: await page.screenshot(), contentType: "image/png" })
+  await page.keyboard.press("Escape")
+  await expect(account).toBeFocused()
+  await navButton(page, "Library").click()
+  const card = page.getByRole("listitem").filter({ hasText: "Fixture Movie" })
+  const deleteButton = card.getByRole("button", { name: "Review deletion plan: Fixture Movie" })
+  await expect(deleteButton).toHaveCSS("opacity", "0")
+  await card.hover()
+  await expect(deleteButton).toHaveCSS("opacity", "1")
+
+  const poster = await card.locator("div").first().boundingBox()
+  const button = await deleteButton.boundingBox()
+  expect(poster).not.toBeNull()
+  expect(button).not.toBeNull()
+  expect(Math.abs((button!.x + button!.width / 2) - (poster!.x + poster!.width / 2))).toBeLessThan(2)
+  expect(Math.abs((button!.y + button!.height / 2) - (poster!.y + poster!.height / 2))).toBeLessThan(2)
+})
+
+test("places user identity and the administrator safeguard in the Users header", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await boot(page)
+
+  await navButton(page, "Users").click()
+  await expect(page.getByLabel("Users: 1")).toHaveText("1")
+  await expect(page.getByText("Signed in as")).toContainText("fixture-admin")
+  await expect(page.getByText("At least one administrator must remain.")).toBeVisible()
+  await expect(page.locator("[data-initials=FA]").last()).toBeVisible()
+  await expect(page.getByText("You", { exact: true })).toHaveCount(0)
+  const usersIndicator = page.locator(".app-shell__navigation-highlight > .app-shell__nav-active-indicator")
+  const usersItem = page.locator('.app-shell__sidebar [data-slot="motion-highlight-item-container"][data-value="users"]')
+  await expect.poll(async () => {
+    const [indicatorBounds, itemBounds] = await Promise.all([usersIndicator.boundingBox(), usersItem.boundingBox()])
+    if (!indicatorBounds || !itemBounds) return Number.POSITIVE_INFINITY
+    return Math.max(Math.abs(indicatorBounds.x - itemBounds.x), Math.abs(indicatorBounds.y - itemBounds.y), Math.abs(indicatorBounds.width - itemBounds.width), Math.abs(indicatorBounds.height - itemBounds.height))
+  }, { timeout: 2_000 }).toBeLessThan(1)
+  const usersCard = page.locator('[data-slot="card"]').filter({ has: page.getByLabel("Users: 1") })
+  const cardPadding = await usersCard.evaluate((node) => {
+    const style = getComputedStyle(node)
+    return [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft]
+  })
+  expect(new Set(cardPadding).size).toBe(1)
+  await testInfo.attach("desktop-users-followup", { body: await page.screenshot(), contentType: "image/png" })
+})
+
+test("animates one active surface across the mobile bottom bar", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 375, height: 812 })
+  await boot(page)
+
+  const indicator = page.locator(".app-shell__bottom-highlight > .app-shell__nav-active-indicator--mobile")
+  const start = await indicator.boundingBox()
+  await navButton(page, "Library").click()
+  await page.waitForTimeout(350)
+  const end = await indicator.boundingBox()
+
+  expect(start).not.toBeNull()
+  expect(end).not.toBeNull()
+  expect(end!.x).toBeGreaterThan(start!.x)
+  expect(await page.locator(".app-shell__bottom-highlight [data-slot=motion-highlight]").count()).toBe(1)
+  await testInfo.attach("mobile-bottom-navigation-followup", { body: await page.screenshot(), contentType: "image/png" })
 })

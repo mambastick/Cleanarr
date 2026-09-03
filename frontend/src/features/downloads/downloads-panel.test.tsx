@@ -45,9 +45,19 @@ it("shows unknown values rather than zero and keeps an incomplete candidate out 
 })
 
 it("renders Russian downloads navigation copy", async () => {
-  renderPanel(undefined, "ru")
+  const cleanup = { items: [], next_cursor: null, source_status: "complete", failure_codes: [], truncated: false }
+  const fetchJson: FetchJson = async <T,>(url: string) => (url.includes("cleanup-candidates") ? cleanup : downloads) as T
+  const user = userEvent.setup()
+  renderPanel(fetchJson, "ru")
   expect(await screen.findByRole("tab", { name: "Торренты" })).toBeInTheDocument()
   expect(screen.getByRole("button", { name: "Обновить сейчас" })).toBeInTheDocument()
+  await user.click(screen.getByRole("tab", { name: "Кандидаты очистки" }))
+  expect(await screen.findByRole("combobox", { name: "Статус источника" })).toHaveTextContent("Все")
+  expect(screen.getByRole("combobox", { name: "Медиа" })).toHaveTextContent("Все")
+  expect(screen.getByRole("combobox", { name: "Состояние безопасности" })).toHaveTextContent("Все")
+  expect(screen.getByRole("combobox", { name: "Сортировка" })).toHaveTextContent("Недавно добавленные")
+  expect(screen.getByRole("combobox", { name: "Порядок" })).toHaveTextContent("По убыванию")
+  expect(screen.queryByText("library_added")).not.toBeInTheDocument()
 })
 
 it("retries an uncertain reversible action with its exact original body", async () => {

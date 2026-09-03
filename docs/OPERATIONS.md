@@ -2,10 +2,13 @@
 
 [English](OPERATIONS.md) · [Русский](OPERATIONS_RU.md)
 
-All operational endpoints require an administrator session or an explicitly
-configured `ADMIN_SHARED_TOKEN`. Health probes remain public. Do not expose the
-administrator token to Prometheus, backup jobs, or support tooling that you do
-not control.
+Product endpoints require an authenticated session or an explicitly configured
+`ADMIN_SHARED_TOKEN`; health probes remain public. Viewer sessions are limited
+to bounded read projections for dashboard, storage, Library, Downloads, and
+deletion-job status. Configuration, support/metrics exports, the user directory,
+manual refreshes, controls, and every mutation require an administrator. The
+static token always has administrator authority. Do not expose it to Prometheus,
+backup jobs, or support tooling that you do not control.
 
 ## UI-v2 library and storage operations
 
@@ -13,7 +16,7 @@ The authenticated Library workspace uses these read-only endpoints:
 
 - `GET /api/library/items?media_type=movie|series&q=&sort=added|title|size&direction=asc|desc&limit=1..50&cursor=` returns a bounded, revision-bound page. `refresh=true` bypasses the in-process read cache but does not mutate Arr or Jellyfin.
 - `GET /api/library/items/{resource_id}` returns one opaque-resource detail projection. Series episode/file detail is bounded and raw paths are omitted.
-- `GET /api/library/artwork/{resource_id}` resolves the item first and proxies validated Jellyfin artwork. It is administrator-authenticated and private; the response permits client caching for up to one hour.
+- `GET /api/library/artwork/{resource_id}` resolves the item first and proxies validated Jellyfin artwork. It is authenticated and private; the response permits client caching for up to one hour.
 - `GET /api/storage/volumes` returns Radarr/Sonarr volume observations without raw paths. `POST /api/storage/refresh` requests one coalesced refresh and returns `429` with code `refresh_throttled` when called again inside the 10-second manual throttle.
 
 Library collection results are cached for 30 seconds per runtime configuration,
@@ -28,6 +31,27 @@ ownership.
 The shell is responsive (240px desktop sidebar, 80px tablet rail, mobile top bar
 and bottom navigation) and reserves mobile safe-area space. These presentation
 details do not change authentication, preflight, or fail-closed deletion rules.
+
+## User roles and database schema 6
+
+CleanArr records an account after a successful local or admitted OIDC login. The
+projection contains a case-insensitive username key, display username, auth
+source, role, creation time, and last-seen time; provider claims and credentials
+are not copied into it. An existing local administrator is backfilled during
+startup. In an SSO-only bootstrap, the first admitted identity becomes an
+administrator; once an administrator exists, new SSO identities default to
+viewer. A later login preserves the role already assigned to that identity.
+
+Only administrators can call `GET /api/users` or
+`PATCH /api/users/{username}/role`. The final administrator cannot be demoted.
+Viewer sessions can read the bounded workspace listed above but cannot retrieve
+runtime configuration or trigger refresh, pause/resume, preflight, deletion, or
+history-dismiss mutations.
+
+Database migration 6 adds `user_accounts` transactionally. Before upgrade,
+create and verify the SQLite backup required by the installation guide. Rollback
+requires stopping CleanArr and restoring that pre-upgrade database; never start
+an older binary against schema 6.
 
 ## Upgrade and rollback
 
