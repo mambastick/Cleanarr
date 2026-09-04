@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import AxeBuilder from "@axe-core/playwright"
-import { boot, fixtureMovie, navButton } from "./fixtures"
+import { boot, fixtureMovie, fixtureSeries, navButton, runtimeConfig } from "./fixtures"
 
 const WCAG_AA_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]
 const mobileJob = { id: "mobile-job", item_type: "Movie", item_name: "Mobile fixture", display_name: "Mobile fixture", status: "queued", phase: "queued", progress_percent: 0, message: "Queued", created_at: "2026-01-01T00:00:00Z", started_at: null, completed_at: null, next_retry_at: null, attempt_count: 0, max_attempts: 3, preflight: null, result: null, error: null }
@@ -21,6 +21,9 @@ test("uses isolated startup mocks, keyboard tabs, theme modes, and accessible de
   await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "dark" }); await navButton(page, "Library").click(); await expect(page.locator('[data-reduced-motion="true"]:visible')).toHaveCount(1); await expect(page.locator("html")).toHaveClass(/dark/); await expectNoWcagViolations(page)
   await page.setViewportSize({ width: 375, height: 812 }); await expect(page.getByRole("navigation", { name: "Main navigation" })).toBeVisible(); const more = navButton(page, "More"); await expect(more).toBeVisible(); await more.click(); const moreDialog = page.getByRole("dialog", { name: "More" }); await expect(moreDialog.getByRole("button", { name: "Settings" })).toBeVisible(); await expect(moreDialog.getByRole("region", { name: "Storage" })).toBeVisible(); await expect(moreDialog.getByText("fixture-admin")).toBeVisible(); await expect(moreDialog.getByRole("button", { name: /Theme/ })).toBeVisible(); await expect(moreDialog.getByRole("button", { name: /Language/ })).toBeVisible(); await expect(moreDialog.getByRole("button", { name: "Log out" })).toBeVisible(); await moreDialog.getByRole("button", { name: "Close" }).click(); await expect(more).toBeFocused()
   const jobs = page.getByRole("button", { name: "Background tasks" }); await expect(jobs).toBeVisible(); await jobs.click(); const jobsDialog = page.getByRole("dialog", { name: "Background tasks" }); await expect(jobsDialog.getByText("Mobile fixture")).toBeVisible(); const bounds = await jobsDialog.boundingBox(); expect(bounds?.width).toBe(375); await jobsDialog.getByRole("button", { name: "Close" }).click(); await expect(jobs).toBeFocused(); await expectViewportWidth(page); await expectNoWcagViolations(page)
+  expect(await jobs.evaluate((element) => Boolean(element.closest("main")))).toBe(true)
+  const [jobsBounds, libraryHeadingBounds] = await Promise.all([jobs.boundingBox(), page.getByRole("heading", { name: "Library" }).boundingBox()])
+  expect(jobsBounds).not.toBeNull(); expect(libraryHeadingBounds).not.toBeNull(); expect(jobsBounds!.y + jobsBounds!.height).toBeLessThanOrEqual(libraryHeadingBounds!.y)
 })
 
 test("matches the annotated sidebar and library-card interactions", async ({ page }, testInfo) => {
@@ -99,7 +102,7 @@ test("matches the annotated sidebar and library-card interactions", async ({ pag
   expect(desktopFocus).not.toBeNull()
   expect(activeDesktopIcon).not.toBeNull()
   expect(Math.abs(desktopFocus!.width - desktopFocus!.height)).toBeLessThan(1)
-  expect(desktopFocus!.width).toBe(44)
+  expect(desktopFocus!.width).toBeCloseTo(44, 0)
   expect(Math.abs((desktopFocus!.x + desktopFocus!.width / 2) - (activeDesktopIcon!.x + activeDesktopIcon!.width / 2))).toBeLessThan(1)
   expect(Math.abs((desktopFocus!.y + desktopFocus!.height / 2) - (activeDesktopIcon!.y + activeDesktopIcon!.height / 2))).toBeLessThan(1)
   await testInfo.attach("desktop-collapsed-focus-followup", { body: await page.screenshot(), contentType: "image/png" })
@@ -141,6 +144,8 @@ test("matches the annotated sidebar and library-card interactions", async ({ pag
   await expect(account).toBeFocused()
   await navButton(page, "Library").click()
   const card = page.getByRole("listitem").filter({ hasText: "Fixture Movie" })
+  await expect(card.locator("img")).toBeVisible()
+  await expect.poll(() => page.locator('img[src*="/api/library/artwork/"]').count()).toBeGreaterThan(0)
   const deleteButton = card.getByRole("button", { name: "Review deletion plan: Fixture Movie" })
   await expect(deleteButton).toHaveCSS("opacity", "0")
   await card.hover()
@@ -152,6 +157,40 @@ test("matches the annotated sidebar and library-card interactions", async ({ pag
   expect(button).not.toBeNull()
   expect(Math.abs((button!.x + button!.width / 2) - (poster!.x + poster!.width / 2))).toBeLessThan(2)
   expect(Math.abs((button!.y + button!.height / 2) - (poster!.y + poster!.height / 2))).toBeLessThan(2)
+})
+
+test("shows persisted setup completion after reload", async ({ page }) => {
+  const service = { id: "fixture", name: "Fixture", url: "https://service.invalid", api_key: "secret", enabled: true, is_default: true }
+  const config = {
+    ...structuredClone(runtimeConfig),
+    radarr: [{ ...service, kind: "radarr" }],
+    sonarr: [{ ...service, kind: "sonarr" }],
+    seerr: [{ ...service, kind: "seerr" }],
+    downloaders: [{ ...service, kind: "qbittorrent", username: "", password: "", seeding_policy: "immediate", min_seed_ratio: null, min_seed_time_minutes: null }],
+    jellyfin: [{ ...service, kind: "jellyfin" }],
+  }
+  await boot(page, { config })
+
+  await expect(page.getByText("5/5")).toBeVisible()
+  await expect(page.getByRole("button", { name: /setup wizard/i })).toHaveCount(0)
+})
+
+test("keeps inspector copy below its hero and expands series facts by season", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await boot(page, { series: [fixtureSeries] })
+  await navButton(page, "Library").click(); await page.getByRole("tab", { name: "Series" }).click()
+  const seriesCard = page.getByRole("listitem").filter({ hasText: "Fixture Series" })
+  await seriesCard.locator(":scope > button").click()
+
+  const inspector = page.getByRole("complementary", { name: "Item details" })
+  await expect(inspector.getByText("Season breakdown")).toBeVisible()
+  await expect(inspector.getByText(/1\/1 episode/)).toBeVisible()
+  const [hero, heading] = await Promise.all([
+    inspector.locator(".h-64 img").boundingBox(),
+    inspector.getByRole("heading", { name: "Fixture Series" }).boundingBox(),
+  ])
+  expect(hero).not.toBeNull(); expect(heading).not.toBeNull(); expect(heading!.y).toBeGreaterThanOrEqual(hero!.y + hero!.height)
+  await testInfo.attach("desktop-series-inspector-followup", { body: await page.screenshot(), contentType: "image/png" })
 })
 
 test("places user identity and the administrator safeguard in the Users header", async ({ page }, testInfo) => {

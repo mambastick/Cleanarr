@@ -480,6 +480,20 @@ export function isSetupStepReady(
   )
 }
 
+/** Persisted setup progress shown outside the wizard.
+ *
+ * Connection-test fingerprints intentionally live only for the current wizard
+ * session. They must not make a healthy saved downloader look unfinished after
+ * a page reload; the wizard still uses `hasCurrentConnectionEvidence` before
+ * saving or advancing a changed draft.
+ */
+export function isSetupStepConfigured(step: SetupStepId, config: RuntimeConfigPayload | null): boolean {
+  if (!config) return false
+  if (step === "general") return Boolean(config.general.webhook_shared_token)
+  if (!isServiceFamily(step)) return false
+  return getServices(config, step).some((service) => service.enabled)
+}
+
 
 export function toDraft(service: ServiceRecord): ServiceDraft {
   return {

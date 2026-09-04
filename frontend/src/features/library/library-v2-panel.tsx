@@ -33,7 +33,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
-  fetchLibraryArtwork,
   fetchLibraryItem,
   type LibraryDirection,
   type LibraryFetchJson,
@@ -43,7 +42,7 @@ import {
   type LibrarySort,
 } from "@/lib/library"
 import { cn } from "@/lib/utils"
-import { LIBRARY_COPY, type LibraryLanguage, type LibraryV2Copy } from "./library-copy"
+import { LIBRARY_COPY, libraryEvidenceReason, librarySourceLabel, type LibraryLanguage, type LibraryV2Copy } from "./library-copy"
 import { libraryDeleteTargetFromItem } from "./library-selection"
 import { useLibrary, type LibraryFilters } from "./use-library"
 
@@ -249,7 +248,7 @@ export function LibraryPanelV2({
 
   const listColumn = (
     <div className="min-w-0 space-y-5">
-      <LibraryStatus text={text} status={list.sourceStatus} failures={list.sourceFailures} error={list.error} onRetry={list.retry} />
+      <LibraryStatus text={text} language={language} status={list.sourceStatus} failures={list.sourceFailures} error={list.error} onRetry={list.retry} />
       {list.loading && !list.items.length ? (
         <div className={cn("grid gap-4", cardGridClass(cardSize))} aria-label={text.title} aria-busy="true">
           {Array.from({ length: 8 }, (_, index) => <Skeleton key={index} className="aspect-[2/3] w-full rounded-xl" />)}
@@ -345,11 +344,11 @@ function LibraryControls({ text, query, setQuery, sort, setSort, direction, setD
   )
 }
 
-function LibraryStatus({ text, status, failures, error, onRetry }: { text: LibraryV2Copy; status: "complete" | "partial" | "unavailable" | null; failures: Array<{ source: string; code: string; message?: string | null }>; error: string | null; onRetry: () => void }) {
-  const failureSummary = failures.length ? `${text.sourceFailure}: ${failures.map((failure) => `${failure.source} (${failure.code})`).join(", ")}` : null
-  if (error && error !== "catalog_changed") return <Alert variant="destructive"><AlertCircle /><AlertTitle>{text.unavailable}</AlertTitle><AlertDescription className="flex flex-wrap items-center gap-2"><span>{failureSummary}</span><Button variant="outline" size="sm" onClick={onRetry}>{text.retry}</Button></AlertDescription></Alert>
+function LibraryStatus({ text, language, status, failures, error, onRetry }: { text: LibraryV2Copy; language: LibraryLanguage; status: "complete" | "partial" | "unavailable" | null; failures: Array<{ source: string; code: string; message?: string | null }>; error: string | null; onRetry: () => void }) {
+  const failureSummary = failures.length ? <div className="space-y-1"><p>{text.sourceFailure}:</p><ul className="list-disc space-y-1 pl-4">{failures.map((failure, index) => <li key={`${failure.source}-${failure.code}-${index}`}><strong>{librarySourceLabel(language, failure.source)}:</strong> {libraryEvidenceReason(language, failure.code)}</li>)}</ul></div> : null
+  if (error && error !== "catalog_changed") return <Alert variant="destructive"><AlertCircle /><AlertTitle>{text.unavailable}</AlertTitle><AlertDescription className="flex flex-wrap items-center gap-2">{failureSummary}<Button variant="outline" size="sm" onClick={onRetry}>{text.retry}</Button></AlertDescription></Alert>
   if (error === "catalog_changed") return <Alert><Info /><AlertTitle>{text.catalogChanged}</AlertTitle><AlertDescription><Button variant="outline" size="sm" onClick={onRetry}>{text.retry}</Button></AlertDescription></Alert>
-  if (status === "unavailable") return <Alert variant="destructive"><AlertCircle /><AlertTitle>{text.unavailable}</AlertTitle><AlertDescription className="flex flex-wrap items-center gap-2"><span>{failureSummary}</span><Button variant="outline" size="sm" onClick={onRetry}>{text.retry}</Button></AlertDescription></Alert>
+  if (status === "unavailable") return <Alert variant="destructive"><AlertCircle /><AlertTitle>{text.unavailable}</AlertTitle><AlertDescription className="flex flex-wrap items-center gap-2">{failureSummary}<Button variant="outline" size="sm" onClick={onRetry}>{text.retry}</Button></AlertDescription></Alert>
   if (status === "partial") return <Alert><Info /><AlertTitle>{text.partial}</AlertTitle><AlertDescription>{failureSummary}</AlertDescription></Alert>
   return null
 }
@@ -376,49 +375,13 @@ function LibraryCard({ item, text, selectMode, selected, onToggle, onOpen, onDel
   )
 }
 
-const artworkCache = new Map<string, Promise<Blob>>()
-
-function cachedArtwork(resourceId: string) {
-  let cached = artworkCache.get(resourceId)
-  if (!cached) {
-    cached = fetchLibraryArtwork(resourceId).catch((error) => { artworkCache.delete(resourceId); throw error })
-    artworkCache.set(resourceId, cached)
-    if (artworkCache.size > 96) artworkCache.delete(artworkCache.keys().next().value as string)
-  }
-  return cached
-}
-
 function Artwork({ resourceId, artwork, fallback }: { resourceId: string; artwork: LibraryItem["artwork"]; fallback: ReactNode }) {
-  const [url, setUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(artwork.status !== "available")
-  const host = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     setFailed(artwork.status !== "available")
-    setUrl((current) => { if (current) URL.revokeObjectURL(current); return null })
-    if (artwork.status !== "available") return
-    const controller = new AbortController()
-    let objectUrl: string | null = null
-    let started = false
-    const start = () => {
-      if (started) return
-      started = true
-      void cachedArtwork(resourceId).then((blob) => {
-        if (controller.signal.aborted) return
-        objectUrl = URL.createObjectURL(blob)
-        setUrl(objectUrl)
-      }).catch(() => { if (!controller.signal.aborted) setFailed(true) })
-    }
-    let observer: IntersectionObserver | null = null
-    if (typeof IntersectionObserver === "undefined" || !host.current) start()
-    else {
-      observer = new IntersectionObserver((entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) { start(); observer?.disconnect() }
-      }, { rootMargin: "80px" })
-      observer.observe(host.current)
-    }
-    return () => { observer?.disconnect(); controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl) }
-  }, [artwork.status, resourceId])
-  return <div ref={host} className="size-full">{url && !failed ? <img src={url} alt="" className="size-full object-cover" onError={() => { URL.revokeObjectURL(url); setUrl(null); setFailed(true) }} /> : <div className="grid size-full place-items-center" aria-hidden="true">{fallback}</div>}</div>
+  }, [artwork.status, artwork.url, resourceId])
+  const url = artwork.status === "available" ? artwork.url : null
+  return <div className="size-full">{url && !failed ? <img src={url} alt="" loading="lazy" decoding="async" className="size-full object-cover" onError={() => setFailed(true)} /> : <div className="grid size-full place-items-center" aria-hidden="true">{fallback}</div>}</div>
 }
 
 function Inspector({ detail, loading, error, text, language, onDeletePreview, onSelect, onRetry, desktop = false }: { detail: LibraryItemDetail; loading: boolean; error: boolean; text: LibraryV2Copy; language: LibraryLanguage; onDeletePreview?: (item: LibraryItem, trigger: HTMLElement) => void; onSelect: () => void; onRetry: () => void; desktop?: boolean }) {
@@ -440,7 +403,7 @@ function Inspector({ detail, loading, error, text, language, onDeletePreview, on
 
   return (
     <div className="space-y-5 py-4">
-      <div className={cn("flex gap-3", desktop && "-mt-20 items-center pr-10")}><div className="h-32 w-[85px] shrink-0 overflow-hidden rounded-lg bg-muted shadow-sm"><Artwork resourceId={detail.resource_id} artwork={detail.artwork} fallback={detail.media_type === "movie" ? <Film className="size-8 text-muted-foreground" /> : <Tv className="size-8 text-muted-foreground" />} /></div><div className="min-w-0"><h2 className="text-lg font-semibold leading-tight">{detail.display_name}</h2><p className="mt-1 text-sm text-muted-foreground">{detail.media_type === "movie" ? text.movie : text.seriesType}{detail.year != null ? ` · ${detail.year}` : ""}</p>{detail.torrent_client ? <p className="mt-2 text-xs text-muted-foreground">{text.torrentClient}: {detail.torrent_client}</p> : null}</div></div>
+      <div className={cn("flex gap-3", desktop && "items-end pr-10")}><div className="h-32 w-[85px] shrink-0 overflow-hidden rounded-lg bg-muted shadow-sm"><Artwork resourceId={detail.resource_id} artwork={detail.artwork} fallback={detail.media_type === "movie" ? <Film className="size-8 text-muted-foreground" /> : <Tv className="size-8 text-muted-foreground" />} /></div><div className="min-w-0 pb-1"><h2 className="text-lg font-semibold leading-tight">{detail.display_name}</h2><p className="mt-1 text-sm text-muted-foreground">{detail.media_type === "movie" ? text.movie : text.seriesType}{detail.year != null ? ` · ${detail.year}` : ""}</p>{detail.torrent_client ? <p className="mt-2 text-xs text-muted-foreground">{text.torrentClient}: {detail.torrent_client}</p> : null}</div></div>
       {loading ? <p role="status" className="text-xs text-muted-foreground">{text.loadingDetails}</p> : null}
       {error ? <Alert><Info /><AlertTitle>{text.unknown}</AlertTitle><AlertDescription className="flex flex-wrap items-center gap-2"><span>{text.deleteUnavailable}</span><Button variant="outline" size="sm" onClick={onRetry}>{text.retry}</Button></AlertDescription></Alert> : null}
       <dl className="grid grid-cols-2 gap-3 rounded-xl border border-border p-3 text-sm">
@@ -454,14 +417,30 @@ function Inspector({ detail, loading, error, text, language, onDeletePreview, on
         <Metric label={text.seededTime} value={seededTime == null ? text.unknown : formatDuration(seededTime, language)} />
         <Metric label={text.readiness} value={readiness === "ready" ? text.ready : readiness === "not_ready" ? text.notReady : text.unknown} />
       </dl>
-      {seedReason ? <p className="text-xs text-muted-foreground">{text.signalUnavailable}</p> : null}
-      {detail.unknown_reasons?.length ? <div className="rounded-xl border border-status-unknown-border bg-status-unknown-bg p-3 text-xs"><p className="font-medium">{text.unknownReasons}</p><p className="mt-1">{text.signalUnavailable}</p></div> : null}
-      {detail.media_type === "series" && seasonCount != null ? <div className="rounded-xl border border-border p-3 text-sm"><p className="font-medium">{text.seasons}</p><p className="text-muted-foreground">{seasonCount} · {episodeCount ?? text.unknown} {text.episodes}</p></div> : null}
+      {detail.unknown_reasons?.length || seedReason ? <div className="rounded-xl border border-status-unknown-border bg-status-unknown-bg p-3 text-xs"><p className="font-medium">{text.unknownReasons}</p><p className="mt-1 text-muted-foreground">{text.evidenceSummary}</p><ul className="mt-2 list-disc space-y-1 pl-4">{[...new Set([...(detail.unknown_reasons ?? []), seedReason].filter((reason): reason is string => Boolean(reason)))].map((reason) => <li key={reason}>{libraryEvidenceReason(language, reason)}</li>)}</ul></div> : null}
+      {detail.media_type === "series" && seasonCount != null ? <div className="rounded-xl border border-border p-3 text-sm"><p className="font-medium">{text.seasonBreakdown}</p><p className="mt-1 text-muted-foreground">{formatMediaCount(seasonCount, "season", language)} · {episodeCount == null ? `${text.unknown} ${text.episodes.toLowerCase()}` : formatMediaCount(episodeCount, "episode", language)}</p>{detail.seasons?.length ? <ul className="mt-3 divide-y rounded-lg border">{detail.seasons.map((season) => <li key={season.season_number} className="grid gap-1 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"><span className="font-medium">{season.title || `${text.season} ${season.season_number}`}</span><span className="text-xs text-muted-foreground">{season.episode_file_count ?? text.unknown}/{season.episode_count ?? text.unknown} {mediaUnitLabel(season.episode_count, "episode", language)}{season.size != null ? ` · ${formatSize(season.size)}` : ""}</span></li>)}</ul> : null}</div> : null}
       <div className={cn("rounded-xl border p-3 text-sm", safetyClass)}><p className="font-medium">{text.safety}</p><p className="mt-1 text-current/80">{safetyStatus === "safe" ? text.safe : safetyStatus === "blocked" ? text.blocked : text.signalUnavailable}</p></div>
       <div className="grid gap-2"><Button variant="destructive" className="w-full" disabled={!deleteAvailable} onClick={(event) => onDeletePreview?.(detail, event.currentTarget)}><Trash2 aria-hidden="true" />{text.reviewPlan}</Button>{!deleteAvailable ? <p className="text-xs text-muted-foreground">{text.deleteUnavailable}</p> : null}<Button variant="outline" className="w-full" disabled={!hasDeleteTarget || loading || error} onClick={onSelect}>{text.selectForGroup}</Button></div>
-      <details><summary className="cursor-pointer text-sm font-medium">{text.additional}</summary><pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-muted p-2 text-xs">{JSON.stringify({ resource_id: detail.resource_id, catalog_revision: detail.catalog_revision, fetched_at: detail.fetched_at, seeding_reason: seedReason, safety_reason: detail.safety?.reason, unknown_reasons: detail.unknown_reasons }, null, 2)}</pre></details>
+      <details><summary className="cursor-pointer text-sm font-medium">{text.additional}</summary><dl className="mt-2 grid gap-2 rounded-lg bg-muted p-3 text-xs"><Metric label={text.checkedAt} value={formatDate(detail.fetched_at, language, text.unknown)} /><Metric label={text.safety} value={detail.safety?.reason ? libraryEvidenceReason(language, detail.safety.reason) : text.evidenceComplete} /></dl></details>
     </div>
   )
+}
+
+function formatMediaCount(value: number, unit: "season" | "episode", language: LibraryLanguage) {
+  return `${value} ${mediaUnitLabel(value, unit, language)}`
+}
+
+function mediaUnitLabel(value: number | null | undefined, unit: "season" | "episode", language: LibraryLanguage) {
+  if (language === "en") {
+    const singular = unit === "season" ? "season" : "episode"
+    return value === 1 ? singular : `${singular}s`
+  }
+  const forms = unit === "season" ? ["сезон", "сезона", "сезонов"] : ["эпизод", "эпизода", "эпизодов"]
+  if (value == null) return forms[2]
+  const lastTwo = value % 100
+  if (lastTwo >= 11 && lastTwo <= 14) return forms[2]
+  const last = value % 10
+  return last === 1 ? forms[0] : last >= 2 && last <= 4 ? forms[1] : forms[2]
 }
 
 function Metric({ label, value }: { label: string; value: string }) { return <div><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 break-words font-medium">{value}</dd></div> }

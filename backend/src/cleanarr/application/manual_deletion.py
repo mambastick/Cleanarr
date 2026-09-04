@@ -12,6 +12,7 @@ from cleanarr.application.deletion_jobs import DeletionProgressReporter
 from cleanarr.application.deletion_models import ManualDeleteJobPhase, ManualDeleteRequest, ProcessingResultResponse
 from cleanarr.application.library_identity import matching_jellyfin_items
 from cleanarr.application.ports import RadarrClientPort, SonarrClientPort
+from cleanarr.application.resolver import StrictMovieResolver
 from cleanarr.application.results import observe_actions
 from cleanarr.application.strategies import DeletionStrategyFactory
 from cleanarr.domain import (
@@ -98,6 +99,9 @@ class ManualDeletionService:
     async def resolve(self, payload: ManualDeleteRequest) -> MediaDeletionEvent:
         """Resolve an explicit library selection into one stable deletion event."""
 
+        if payload.jellyfin_only:
+            return await self._resolve_jellyfin_only_movie(payload)
+
         if payload.item_type is ItemType.MOVIE:
             if payload.radarr_movie_id is None:
                 if payload.library_resource_id is not None:
@@ -147,6 +151,61 @@ class ManualDeletionService:
             ),
             series_name=series.title,
             season_number=payload.season_number,
+        )
+
+    async def _resolve_jellyfin_only_movie(self, payload: ManualDeleteRequest) -> MediaDeletionEvent:
+        """Bind a direct removal to one current Jellyfin movie and no Arr record."""
+
+        assert payload.jellyfin_item_id is not None
+        try:
+            value = await self._jellyfin().list_items(include_types=["Movie"])
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - an incomplete catalogue cannot authorize deletion
+            raise LibraryItemChangedError("The Jellyfin movie could not be verified; preview it again.") from exc
+        if (
+            not isinstance(value, Sequence)
+            or isinstance(value, (str, bytes, bytearray))
+            or any(not isinstance(item, JellyfinItem) for item in value)
+        ):
+            raise LibraryItemChangedError("The Jellyfin movie could not be verified; preview it again.")
+        requested_id = payload.jellyfin_item_id.strip().casefold()
+        matches = [item for item in value if item.id.strip().casefold() == requested_id and item.type == "Movie"]
+        if len(matches) != 1:
+            raise LibraryItemChangedError("The Jellyfin movie changed or no longer exists; preview it again.")
+        item = matches[0]
+        fingerprint = MediaFingerprint(tmdb_id=item.tmdb_id, imdb_id=item.imdb_id)
+        configured_radarr = self._configured_profiles("radarr")
+        arr_movies: list[RadarrMovie] = []
+        if self._config is None or configured_radarr:
+            if fingerprint.tmdb_id is None and not fingerprint.imdb_id:
+                raise LibraryItemChangedError(
+                    "The movie has no stable provider identifier for checking its Radarr relationship."
+                )
+            try:
+                radarr_value = await self._radarr().list_movies()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - inability to disprove an Arr link must fail closed
+                raise LibraryItemChangedError(
+                    "The Radarr relationship could not be verified; preview it again."
+                ) from exc
+            if (
+                not isinstance(radarr_value, Sequence)
+                or isinstance(radarr_value, (str, bytes, bytearray))
+                or any(not isinstance(movie, RadarrMovie) for movie in radarr_value)
+            ):
+                raise LibraryItemChangedError("The Radarr relationship could not be verified; preview it again.")
+            arr_movies = list(radarr_value)
+        decision = StrictMovieResolver().resolve(fingerprint, arr_movies)
+        if decision.candidate is not None or decision.reason is FailureReason.AMBIGUOUS_MATCH:
+            raise LibraryItemChangedError("This movie is now linked to Radarr; use the full cleanup plan instead.")
+        return MediaDeletionEvent(
+            notification_type="ItemDeleted",
+            item_type=ItemType.MOVIE,
+            item_id=f"manual:jellyfin:{item.id}",
+            name=item.name.strip() or "Jellyfin movie",
+            fingerprint=fingerprint,
         )
 
     def _resolve_movie_resource(
@@ -229,6 +288,26 @@ class ManualDeletionService:
     async def preview(self, payload: ManualDeleteRequest, event: MediaDeletionEvent) -> ProcessingResultResponse:
         """Build a mutation-free plan containing every intended target."""
 
+        if payload.jellyfin_only:
+            return ProcessingResultResponse.from_domain(
+                ProcessingResult(
+                    event=event,
+                    status=OverallStatus.SUCCESS,
+                    actions=(
+                        ActionResult(
+                            system="jellyfin",
+                            action="delete_item",
+                            status=ActionStatus.DRY_RUN,
+                            message=(
+                                "Would remove only the selected movie from Jellyfin. "
+                                "No Arr or torrent records will change."
+                            ),
+                            details={"jellyfin_item_id": payload.jellyfin_item_id, "scope": "jellyfin_only"},
+                        ),
+                    ),
+                )
+            )
+
         strategy = self._strategy_factory().for_item_type(event.item_type, dry_run=True)
         result = await strategy.handle(event)
         if payload.jellyfin_item_id:
@@ -251,6 +330,9 @@ class ManualDeletionService:
         report_progress: DeletionProgressReporter | None = None,
     ) -> ProcessingResultResponse:
         """Execute a previously resolved manual deletion and record its outcome."""
+
+        if payload.jellyfin_only:
+            return await self._execute_jellyfin_only(payload, event, report_progress)
 
         report = report_progress or ignore_deletion_progress
         item_name = event.name
@@ -332,6 +414,55 @@ class ManualDeletionService:
 
         report(ManualDeleteJobPhase.RECORDING, 97, "Saving the cleanup result to activity history.", item_name)
         value = payload.display_name or event.name or payload.item_type.value
+        await self._activity_recorder.record(result, display_name=value)
+        return ProcessingResultResponse.from_domain(result).model_copy(update={"display_name": value})
+
+    async def _execute_jellyfin_only(
+        self,
+        payload: ManualDeleteRequest,
+        event: MediaDeletionEvent,
+        report_progress: DeletionProgressReporter | None,
+    ) -> ProcessingResultResponse:
+        report = report_progress or ignore_deletion_progress
+        report(ManualDeleteJobPhase.JELLYFIN, 80, "Removing the selected movie from Jellyfin only.", event.name)
+        if self._is_dry_run():
+            action = ActionResult(
+                system="jellyfin",
+                action="delete_item",
+                status=ActionStatus.DRY_RUN,
+                message="Would remove only the selected movie from Jellyfin. No Arr or torrent records will change.",
+                details={"jellyfin_item_id": payload.jellyfin_item_id, "scope": "jellyfin_only"},
+            )
+            status = OverallStatus.SUCCESS
+        else:
+            try:
+                assert payload.jellyfin_item_id is not None
+                await self._jellyfin().delete_item(payload.jellyfin_item_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - downstream failure is persisted for review
+                _logger.warning("Failed to delete a verified Jellyfin-only movie: %s", type(exc).__name__)
+                action = ActionResult(
+                    system="jellyfin",
+                    action="delete_item",
+                    status=ActionStatus.FAILED,
+                    message="Could not remove the selected movie from Jellyfin.",
+                    reason=FailureReason.DOWNSTREAM_ERROR,
+                    details={"jellyfin_item_id": payload.jellyfin_item_id, "scope": "jellyfin_only"},
+                )
+                status = OverallStatus.PARTIAL_FAILURE
+            else:
+                action = ActionResult(
+                    system="jellyfin",
+                    action="delete_item",
+                    status=ActionStatus.DELETED,
+                    message="Removed the selected movie from Jellyfin. No Arr or torrent records were changed.",
+                    details={"jellyfin_item_id": payload.jellyfin_item_id, "scope": "jellyfin_only"},
+                )
+                status = OverallStatus.SUCCESS
+        result = ProcessingResult(event=event, status=status, actions=(action,))
+        value = payload.display_name or event.name or payload.item_type.value
+        report(ManualDeleteJobPhase.RECORDING, 97, "Saving the Jellyfin-only result to activity history.", event.name)
         await self._activity_recorder.record(result, display_name=value)
         return ProcessingResultResponse.from_domain(result).model_copy(update={"display_name": value})
 

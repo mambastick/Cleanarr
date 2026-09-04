@@ -392,6 +392,7 @@ export interface ManualDeleteRequest {
   radarr_movie_id?: number | null
   season_number?: number | null
   jellyfin_item_id?: string | null
+  jellyfin_only?: boolean
   confirmed_plan_hash?: string | null
   idempotency_key?: string | null
   display_name?: string | null

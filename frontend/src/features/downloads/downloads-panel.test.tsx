@@ -40,7 +40,7 @@ it("shows unknown values rather than zero and keeps an incomplete candidate out 
   expect(screen.getByRole("progressbar", { name: "Progress" }).querySelector("[data-slot=progress-indicator]")).toHaveClass("hidden")
   await user.click(screen.getByRole("tab", { name: "Cleanup candidates" }))
   await screen.findByText("No link")
-  expect(screen.getByText(/no safe library link/i)).toBeInTheDocument()
+  expect(screen.getByText(/could not verify one safe deletion target/i)).toBeInTheDocument()
   expect(screen.queryByRole("button", { name: "Review deletion plan" })).not.toBeInTheDocument()
 })
 
@@ -87,11 +87,34 @@ it("uses the safe deletion-link display name and reports localized partial prove
   render(<DownloadsPanel active authenticated language="en" isLive={false} fetchJson={fetchJson} onActiveCountChange={() => {}} onDelete={onDelete} onBatchPreview={() => {}} />)
   await user.click(screen.getByRole("tab", { name: "Cleanup candidates" }))
   await screen.findByText("Safe linked title")
-  expect(screen.getByText(/Failure evidence: Jellyfin catalogue unavailable/)).toBeInTheDocument()
+  expect(screen.getByText(/What is unavailable: Jellyfin did not return its media catalogue/)).toBeInTheDocument()
   expect(screen.getByText(/Data source: Standard Jellyfin API/)).toBeInTheDocument()
   expect(screen.getByText(/Torrent state: Not present/)).toBeInTheDocument()
   await user.click(screen.getByRole("button", { name: "Review deletion plan" }))
   expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ movie_title: "Safe linked title" }), expect.any(HTMLElement))
+})
+
+it("offers a separate single-item plan for a verified Jellyfin-only movie", async () => {
+  const directCandidate = {
+    jellyfin_item_id: "jf-direct", display_name: "Direct movie", media_type: "movie", created_at: null, added_at: null, size_bytes: 123, playback_status: "never_watched", play_count: 0, watched_user_count: 0, last_played_at: null, playback_unavailable_reason: null, data_source: "jellyfin_standard", fetched_at: "2026-01-01T00:00:00Z", unavailable_reason: null,
+    seeding: { torrent_state: "unknown", readiness: "unknown", readiness_reason: "arr_mapping_unknown", torrent_count: null, ratio: null, seeding_time_seconds: null, unavailable_reason: "arr_mapping_unknown" },
+    deletion_link: { item_type: "Movie", radarr_movie_id: null, sonarr_series_id: null, jellyfin_item_id: "jf-direct", display_name: "Direct movie", jellyfin_only: true },
+  }
+  const fetchJson: FetchJson = vi.fn(async (url: string) => (url.includes("cleanup-candidates") ? { items: [directCandidate], next_cursor: null, source_status: "complete", failure_codes: [], truncated: false } : downloads) as never)
+  const onDelete = vi.fn()
+  const user = userEvent.setup()
+  render(<DownloadsPanel active authenticated language="en" isLive={false} fetchJson={fetchJson} onActiveCountChange={() => {}} onDelete={onDelete} onBatchPreview={() => {}} />)
+
+  await user.click(screen.getByRole("tab", { name: "Cleanup candidates" }))
+  await screen.findByText("Direct movie")
+  expect(await screen.findByText(/Only in Jellyfin/)).toBeInTheDocument()
+  expect(screen.queryByRole("checkbox", { name: /Direct movie/ })).not.toBeInTheDocument()
+  await user.click(screen.getByRole("button", { name: /Review deletion plan/ }))
+
+  expect(onDelete).toHaveBeenCalledWith(
+    { kind: "jellyfin_movie", jellyfin_item_id: "jf-direct", movie_title: "Direct movie" },
+    expect.any(HTMLElement),
+  )
 })
 
 it("renders latest action evidence and a visible reason when controls are unavailable", async () => {

@@ -23,6 +23,7 @@ from cleanarr.domain import (
     ActionStatus,
     FailureReason,
     ItemType,
+    JellyfinItem,
     LibraryMediaType,
     MediaDeletionEvent,
     MediaFingerprint,
@@ -141,6 +142,18 @@ class FakeContainer:
 
     async def close(self) -> None:
         return None
+
+
+class FakeJellyfinDeletionClient:
+    def __init__(self, items: list[JellyfinItem]) -> None:
+        self.items = items
+        self.deleted_item_ids: list[str] = []
+
+    async def list_items(self, *, include_types: list[str]) -> list[JellyfinItem]:
+        return [item for item in self.items if item.type in include_types]
+
+    async def delete_item(self, item_id: str) -> None:
+        self.deleted_item_ids.append(item_id)
 
 
 @pytest.mark.asyncio
@@ -399,6 +412,37 @@ async def test_manual_delete_requires_and_persists_exact_preflight(tmp_path: Pat
     assert dashboard.json()["recent_activity"][0]["result"]["display_name"] == "Selected Jellyfin title"
     assert radarr.deleted_movie_ids == []
     assert downloader.deleted_hashes == []
+
+
+@pytest.mark.asyncio
+async def test_jellyfin_only_movie_preview_is_narrow_and_mutation_free(tmp_path: Path) -> None:
+    container = FakeContainer(FakeService(results=[]), db_path=tmp_path / "cleanarr.db")
+    container.radarr = FakeRadarrClient(movies=[], history_by_movie={})  # type: ignore[attr-defined]
+    jellyfin = FakeJellyfinDeletionClient(
+        [JellyfinItem(id="jf-direct", name="Direct movie", type="Movie", tmdb_id=700)]
+    )
+    container.jellyfin_server = jellyfin  # type: ignore[attr-defined]
+    app = create_app(container=container)
+
+    async with app_client(app) as client:
+        preview = await client.post(
+            "/api/actions/delete/preview",
+            headers={"X-Admin-Token": "admin-token"},
+            json={"item_type": "Movie", "jellyfin_item_id": "jf-direct", "jellyfin_only": True},
+        )
+
+    assert preview.status_code == 200
+    assert preview.json()["plan"]["actions"] == [
+        {
+            "system": "jellyfin",
+            "action": "delete_item",
+            "status": "dry_run",
+            "message": "Would remove only the selected movie from Jellyfin. No Arr or torrent records will change.",
+            "reason": None,
+            "details": {"jellyfin_item_id": "jf-direct", "scope": "jellyfin_only"},
+        }
+    ]
+    assert jellyfin.deleted_item_ids == []
 
 
 @pytest.mark.asyncio

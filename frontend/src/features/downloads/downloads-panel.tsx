@@ -84,7 +84,7 @@ export function DownloadsPanel({ active, authenticated, language, isLive, canMut
 
   const toggleCandidate = (candidate: CleanupCandidate) => {
     const target = cleanupTarget(candidate)
-    if (!target) return
+    if (!target || target.kind === "jellyfin_movie") return
     const displayName = candidate.deletion_link?.display_name ?? candidate.display_name
     const result = toggleSelection(selection, selectionItem(target, displayName, candidate.size_bytes))
     setSelection(result.selection)

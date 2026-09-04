@@ -75,7 +75,27 @@ test("Cleanup candidates preserve unknown evidence and hand safe links into sing
   await page.getByRole("tab", { name: "Cleanup candidates" }).click()
   await expect(page.getByRole("combobox", { name: "Sort" })).toContainText("Recently added")
   await expect(page.getByRole("combobox", { name: "Order" })).toContainText("Descending")
-  await expect(page.getByText("Safe linked title")).toBeVisible(); await expect(page.getByText("Missing link fixture")).toBeVisible(); await expect(page.getByText("Playback unknown").first()).toBeVisible(); await expect(page.getByText(/no safe library link/i)).toBeVisible(); await expect(page.getByRole("checkbox", { name: /missing link fixture/i })).toHaveCount(0)
+  await expect(page.getByText("Safe linked title")).toBeVisible(); await expect(page.getByText("Missing link fixture")).toBeVisible(); await expect(page.getByText("Playback unknown").first()).toBeVisible(); await expect(page.getByText(/could not verify one safe deletion target/i)).toBeVisible(); await expect(page.getByRole("checkbox", { name: /missing link fixture/i })).toHaveCount(0)
   const review = page.getByRole("button", { name: "Review deletion plan: Safe linked title" }); await review.click(); const single = page.getByRole("dialog", { name: /safe linked title/i }); await expect(single).toBeVisible(); await expect(single.getByText("Safe linked title").first()).toBeVisible(); await single.getByRole("button", { name: "Cancel" }).click(); await expect(review).toBeFocused()
   await page.getByRole("checkbox", { name: "Select: Safe linked title" }).check(); const batchTrigger = page.getByRole("button", { name: "Review selected cleanup" }); await batchTrigger.click(); await expect(page.getByRole("alertdialog", { name: /review batch deletion/i })).toBeVisible(); const batchRequest = api.last("/api/actions/delete/batches/preview", "POST"); expect(batchRequest?.body).toContain("Safe linked title")
+})
+
+test("a Jellyfin-only movie stays out of batches and sends a narrow single-item preview", async ({ page }) => {
+  const directCandidate = { jellyfin_item_id: "jf-direct", display_name: "Direct movie", media_type: "movie", created_at: null, added_at: null, size_bytes: 1_000_000, playback_status: "never_watched", play_count: 0, watched_user_count: 0, last_played_at: null, playback_unavailable_reason: null, data_source: "jellyfin_standard", fetched_at: "2026-01-01T00:00:00Z", unavailable_reason: null, seeding: { torrent_state: "unknown", readiness: "unknown", readiness_reason: "arr_mapping_unknown", torrent_count: null, ratio: null, seeding_time_seconds: null, unavailable_reason: "arr_mapping_unknown" }, deletion_link: { item_type: "Movie", radarr_movie_id: null, sonarr_series_id: null, jellyfin_item_id: "jf-direct", display_name: "Direct movie", jellyfin_only: true } }
+  const api = await boot(page, { cleanup: [directCandidate], handlers: [
+    (request) => request.pathname === "/api/actions/delete/preview" ? {
+      body: {
+        generated_at: "2026-01-01T00:00:00Z",
+        plan_hash: "direct-plan",
+        plan: { ...safePlan, display_name: "Direct movie", actions: [{ system: "jellyfin", action: "delete_item", status: "dry_run", message: "Fixture", reason: null, details: {} }] },
+      },
+    } : undefined,
+  ] })
+  await navButton(page, /downloads/i).click(); await page.getByRole("tab", { name: "Cleanup candidates" }).click()
+  await expect(page.getByText("Only in Jellyfin").first()).toBeVisible(); await expect(page.getByRole("checkbox", { name: /Direct movie/ })).toHaveCount(0)
+  await page.getByRole("button", { name: "Review deletion plan: Direct movie" }).click()
+
+  const body = JSON.parse(api.last("/api/actions/delete/preview", "POST")?.body ?? "{}")
+  expect(body).toMatchObject({ item_type: "Movie", jellyfin_item_id: "jf-direct", jellyfin_only: true })
+  expect(body).not.toHaveProperty("radarr_movie_id")
 })

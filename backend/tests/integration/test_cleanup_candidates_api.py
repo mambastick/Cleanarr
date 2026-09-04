@@ -127,6 +127,7 @@ async def test_cleanup_candidates_refreshes_sources_after_runtime_configuration_
     assert response.status_code == 200
     assert overridden.status_code == 200
     assert response.json()["items"][0]["jellyfin_item_id"] == "intentional-item-id"
+    assert response.json()["items"][0]["deletion_link"]["jellyfin_only"] is True
     assert dynamic.languages == ["en", "ru"]
 
 

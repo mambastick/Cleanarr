@@ -21,7 +21,7 @@ describe("LibraryPanelV2", () => {
     await user.click(trash)
     expect(onDeletePreview).toHaveBeenCalledTimes(1)
     await user.click(screen.getByText("Dune: Part Two").closest("button")!)
-    await waitFor(() => expect(screen.getByText("Technical details")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText("Data details")).toBeInTheDocument())
     expect(fetchJson).toHaveBeenCalledWith(expect.stringContaining("/api/library/items/movie-1"), expect.anything())
   })
 
@@ -35,12 +35,12 @@ describe("LibraryPanelV2", () => {
     await user.click(screen.getByRole("button", { name: "Select" }))
     await user.click(screen.getByText("Dune: Part Two").closest("button")!)
     expect(screen.getByText(/1 selected/)).toBeInTheDocument()
-    expect(screen.queryByText("Technical details")).not.toBeInTheDocument()
+    expect(screen.queryByText("Data details")).not.toBeInTheDocument()
 
     const poster = screen.getAllByRole("button", { name: "Select: Dune: Part Two" })[0]
     await user.click(poster!)
     expect(screen.queryByText(/1 selected/)).not.toBeInTheDocument()
-    expect(screen.queryByText("Technical details")).not.toBeInTheDocument()
+    expect(screen.queryByText("Data details")).not.toBeInTheDocument()
 
     expect(screen.getByText(LIBRARY_COPY.en.selectionUnavailable)).toBeInTheDocument()
     expect(screen.getByRole("checkbox", { name: "Select: Unlinked movie" })).toHaveAttribute("aria-disabled", "true")
@@ -191,7 +191,7 @@ describe("LibraryPanelV2", () => {
     resolveDetail?.(detail)
     await Promise.resolve()
     expect(screen.queryByText("Loading current safety evidence…")).not.toBeInTheDocument()
-    expect(screen.queryByText("Technical details")).not.toBeInTheDocument()
+    expect(screen.queryByText("Data details")).not.toBeInTheDocument()
   })
 
   it("renders Russian copy without English technical labels", async () => {
@@ -200,5 +200,44 @@ describe("LibraryPanelV2", () => {
     await waitFor(() => expect(screen.getByText("Библиотека")).toBeInTheDocument())
     expect(screen.getByPlaceholderText("Поиск по библиотеке")).toBeInTheDocument()
     expect(screen.queryByText("Search library")).not.toBeInTheDocument()
+  })
+
+  it("loads proxied artwork directly and shows an accessible season breakdown", async () => {
+    const user = userEvent.setup()
+    const seriesItem: LibraryItem = {
+      ...item,
+      resource_id: "series-7",
+      media_type: "series",
+      display_name: "Example series",
+      title: "Example series",
+      artwork: { status: "available", url: "/api/library/artwork/series-7" },
+      delete_target: { sonarr_series_id: 7 },
+    }
+    const seriesDetail: LibraryItemDetail = {
+      ...detail,
+      ...seriesItem,
+      seasons: [
+        { season_number: 1, title: "Season 1", episode_count: 10, episode_file_count: 9, size: 10_000 },
+        { season_number: 2, title: "Season 2", episode_count: 8, episode_file_count: 8, size: 20_000 },
+      ],
+    }
+    const fetchJson = vi.fn((url: string) => Promise.resolve(url.includes("/items/series-7")
+      ? seriesDetail
+      : { items: [seriesItem], next_cursor: null, source_status: "complete", source_failures: [], catalog_revision: "rev-1" })) as unknown as Parameters<typeof LibraryPanelV2>[0]["fetchJson"]
+    const { container } = render(<LibraryPanelV2 active authenticated fetchJson={fetchJson} copy={LIBRARY_COPY.en} />)
+
+    await waitFor(() => expect(screen.getByText("Example series")).toBeInTheDocument())
+    expect(container.querySelector('img[src="/api/library/artwork/series-7"]')).toHaveAttribute("loading", "lazy")
+    await user.click(screen.getByText("Example series").closest("button")!)
+    await waitFor(() => expect(screen.getAllByText("Season breakdown")).not.toHaveLength(0))
+    expect(screen.getByText(/^9\/10 episodes/)).toBeInTheDocument()
+    expect(screen.getByText(/^8\/8 episodes/)).toBeInTheDocument()
+  })
+
+  it("explains partial library evidence without exposing machine codes", async () => {
+    render(<LibraryPanelV2 active authenticated language="ru" fetchJson={api({ items: [item], next_cursor: null, source_status: "partial", source_failures: [{ source: "radarr", code: "arr_history_truncated" }], catalog_revision: "rev-1" })} />)
+    await waitFor(() => expect(screen.getByText(/Часть данных сейчас недоступна/)).toBeInTheDocument())
+    expect(screen.getByText(/Часть истории Arr не загружена/)).toBeInTheDocument()
+    expect(screen.queryByText("arr_history_truncated")).not.toBeInTheDocument()
   })
 })

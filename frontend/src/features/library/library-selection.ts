@@ -4,6 +4,7 @@ import type { LibraryItem, ManualDeleteRequest } from "@/lib/library"
 export type LibraryDeleteTarget =
   | { kind: "movie"; radarr_movie_id: number; movie_title: string; jellyfin_movie_id?: string | null; library_resource_id?: string | null }
   | { kind: "series"; sonarr_series_id: number; series_title: string; item_type: "Series" | "Season"; season_number?: number; jellyfin_item_id?: string | null; library_resource_id?: string | null }
+  | { kind: "jellyfin_movie"; jellyfin_item_id: string; movie_title: string }
 
 export interface BatchSelectionItem {
   key: string
@@ -21,6 +22,7 @@ export interface BatchSelection {
 export const emptyBatchSelection = (): BatchSelection => ({ order: [], items: {} })
 
 export function buildManualDeleteRequest(target: LibraryDeleteTarget, displayName: string): ManualDeleteRequest {
+  if (target.kind === "jellyfin_movie") return { item_type: "Movie", jellyfin_item_id: target.jellyfin_item_id, jellyfin_only: true, display_name: displayName }
   if (target.kind === "movie") return { item_type: "Movie", radarr_movie_id: target.radarr_movie_id, jellyfin_item_id: target.jellyfin_movie_id ?? null, ...(target.library_resource_id ? { library_resource_id: target.library_resource_id } : {}), display_name: displayName }
   return { item_type: target.item_type, sonarr_series_id: target.sonarr_series_id, season_number: target.season_number ?? null, jellyfin_item_id: target.jellyfin_item_id ?? null, ...(target.library_resource_id ? { library_resource_id: target.library_resource_id } : {}), display_name: displayName }
 }

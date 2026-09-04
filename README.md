@@ -108,6 +108,7 @@ Pack torrents, shared files, and anything that can't be safely attributed are al
 - **Guided setup wizard** — first-run wizard walks you through connecting each service step by step
 - **Multi-profile downloaders** — save qBittorrent, Transmission, Deluge, and rTorrent profiles together; enabled profiles participate while one preferred profile is retained for setup and display
 - **Downloads and cleanup recommendations** — inspect bounded, normalized torrent observations and Jellyfin-based cleanup candidates without turning unknown data into deletion permission
+- **Jellyfin-only movie cleanup** — an explicit single-item plan can remove a movie added directly to Jellyfin when no enabled Radarr exists or a complete current Radarr catalogue proves there is no exact match; the target is revalidated before execution and Arr/torrent records are never changed
 - **Responsive authenticated workspace** — UI-v2 adapts from a full sidebar to an accessible rail and mobile bottom navigation; Library combines poster browsing, a selected-item inspector, and a storage-health headline
 - **Local and SSO authentication** — local password login plus strict OpenID Connect validation, PKCE, nonce, and explicit user/group/claim access policies
 - **Persisted user roles** — administrators can search known local/SSO identities and assign administrator or bounded read-only viewer access without exposing configuration or destructive controls
@@ -292,6 +293,15 @@ The easiest way is to use **Auto-configure** in the Jellyfin service editor (cli
 4. Delete the Radarr entry
 5. Delete matching Seerr requests, issues, and media records
 
+### Jellyfin-only movie deletion
+
+For a movie that was added directly to Jellyfin, CleanArr offers a separate
+single-item plan only when no enabled Radarr exists or the current complete
+Radarr catalogue contains no exact provider-ID match. The confirmed plan removes
+only that exact Jellyfin item, is revalidated before execution, and does not
+change Arr, Seerr, or torrent-client records. This flow is intentionally not
+available for series or batch selection.
+
 ### Series deletion
 
 1. Resolve in Sonarr by `tvdb_id → tmdb_id → imdb_id → path`
@@ -369,6 +379,10 @@ requests a new read but does not mutate downstream services. Artwork is proxied 
 resource is resolved, is private, and is cached by clients for at most one hour.
 Raw paths, credentials, downstream URLs, and unvalidated artwork metadata are
 never returned.
+
+Series detail includes a bounded per-season summary of episode, file, and size
+counts. Missing playback, history, ownership, or storage values are accompanied
+by localized explanations instead of raw backend codes.
 
 Storage reads collect Radarr/Sonarr root and disk-space observations. Collection
 results are cached for 60 seconds and are fresh for 120 seconds; concurrent

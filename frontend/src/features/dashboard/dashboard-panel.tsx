@@ -15,6 +15,7 @@ import { getWebhookStatusLabel } from "@/lib/status-format"
 import { cn } from "@/lib/utils"
 import { useStorage, type StorageFetchJson, type StorageResponse, type StorageVolume } from "@/lib/storage"
 import { STORAGE_COPY, type StorageCopy } from "./storage-copy"
+import { actionSummaryLabel } from "@/features/activity/action-presentation"
 
 const DOWNSTREAM_META: Partial<Record<string, { icon: LucideIcon; color: string }>> = {
   Radarr: { icon: Film, color: "text-primary" },
@@ -255,7 +256,7 @@ export function DashboardPanel({
         )}
       </div>
 
-      <RecentActivitySummary text={text} latestActivity={latestActivity} webhookStatus={webhookStatus} />
+      <RecentActivitySummary text={text} language={storageLanguage} latestActivity={latestActivity} webhookStatus={webhookStatus} />
     </section>
   )
 }
@@ -267,14 +268,16 @@ function StorageVolumeRow({ volume, text }: { volume: StorageVolume; text: Stora
 function storageStatusLabel(status: StorageResponse["status"] | StorageVolume["status"], text: StorageCopy) { return status === "critical" ? text.critical : status === "warning" ? text.warning : status === "healthy" ? text.healthy : text.unknown }
 function formatBytes(bytes: number) { if (!bytes) return "0 B"; const index = Math.min(4, Math.floor(Math.log(bytes) / Math.log(1024))); return `${(bytes / 1024 ** index).toFixed(1)} ${["B", "KB", "MB", "GB", "TB"][index]}` }
 
-function RecentActivitySummary({ text, latestActivity, webhookStatus }: { text: UiTextMap; latestActivity: DashboardActivity | null; webhookStatus: DashboardPayload["webhook_status"] | undefined }) {
+function RecentActivitySummary({ text, language, latestActivity, webhookStatus }: { text: UiTextMap; language: "en" | "ru"; latestActivity: DashboardActivity | null; webhookStatus: DashboardPayload["webhook_status"] | undefined }) {
   const latestIsProcessed = latestActivity && (!webhookStatus?.attempted_at || Date.parse(latestActivity.processed_at) >= Date.parse(webhookStatus.attempted_at))
   if (!latestActivity && !webhookStatus?.attempted_at) return <Card><CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><Activity className="size-4 text-status-success" />{text.recentActivitySummary}</CardTitle><CardDescription>{text.recentActivitySummaryDescription}</CardDescription></CardHeader><CardContent><EmptyState title={text.noActivity} description={text.noWebhookActivity} /></CardContent></Card>
   const item = latestIsProcessed && latestActivity ? latestActivity.result.name : webhookStatus?.item_name ?? text.item
   const status = latestIsProcessed && latestActivity ? latestActivity.result.status : webhookStatus?.result_status ?? webhookStatus?.outcome ?? "unknown"
   const statusLabel = latestIsProcessed && latestActivity ? friendlyOutcome(status, text) : webhookStatus?.result_status ? friendlyOutcome(webhookStatus.result_status, text) : getWebhookStatusLabel(webhookStatus?.outcome ?? "", text)
   const occurredAt = latestIsProcessed && latestActivity ? latestActivity.processed_at : webhookStatus?.attempted_at
-  return <Card><CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><Activity className="size-4 text-status-success" />{text.recentActivitySummary}</CardTitle><CardDescription>{text.recentActivitySummaryDescription}</CardDescription></CardHeader><CardContent className="space-y-3"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="text-sm font-medium">{latestIsProcessed ? text.recentActivityProcessed.replace("{{item}}", item) : text.recentActivityWebhook.replace("{{item}}", item)}</p>{occurredAt ? <p className="mt-1 text-xs text-muted-foreground">{new Date(occurredAt).toLocaleString()}</p> : null}</div><StatusPill tone={status === "partial_failure" || status === "failed" ? "red" : "green"} label={statusLabel} /></div><details className="text-xs text-muted-foreground"><summary className="cursor-pointer select-none hover:text-foreground">{text.technicalDetails}</summary><div className="mt-2 space-y-1 rounded-md bg-muted/60 p-2">{latestIsProcessed && latestActivity ? Object.entries(latestActivity.action_summary).map(([code, count]) => <p key={code}><code>{code}</code>: {count}</p>) : <p>{webhookStatus?.message}</p>}</div></details></CardContent></Card>
+  const detailsLabel = language === "ru" ? "Что произошло" : "What happened"
+  const webhookMessage = language === "ru" ? "CleanArr получил событие от Jellyfin и сохранил результат обработки." : "CleanArr received a Jellyfin event and saved its processing result."
+  return <Card><CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><Activity className="size-4 text-status-success" />{text.recentActivitySummary}</CardTitle><CardDescription>{text.recentActivitySummaryDescription}</CardDescription></CardHeader><CardContent className="space-y-3"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="text-sm font-medium">{latestIsProcessed ? text.recentActivityProcessed.replace("{{item}}", item) : text.recentActivityWebhook.replace("{{item}}", item)}</p>{occurredAt ? <p className="mt-1 text-xs text-muted-foreground">{new Date(occurredAt).toLocaleString()}</p> : null}</div><StatusPill tone={status === "partial_failure" || status === "failed" ? "red" : "green"} label={statusLabel} /></div><details className="text-xs text-muted-foreground"><summary className="cursor-pointer select-none hover:text-foreground">{detailsLabel}</summary><div className="mt-2 space-y-1 rounded-md bg-muted/60 p-2">{latestIsProcessed && latestActivity ? Object.entries(latestActivity.action_summary).map(([code, count]) => <p key={code}>{actionSummaryLabel(code, count, language)}</p>) : <p>{webhookMessage}</p>}</div></details></CardContent></Card>
 }
 
 function friendlyOutcome(status: string, text: UiTextMap) {

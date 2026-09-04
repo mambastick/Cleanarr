@@ -217,3 +217,13 @@ it("renders semantic runtime and storage status with an accessible meter", () =>
   expect(screen.getAllByRole("status", { name: "Runtime status: Live" })[0]).toHaveAttribute("data-base-ui-tooltip-trigger")
   expect(screen.getAllByRole("region", { name: "Storage" })[0]).toHaveAttribute("data-base-ui-tooltip-trigger")
 })
+
+it("keeps background-task controls in the document flow ahead of page content", () => {
+  const { container } = renderShell({ jobsSlot: <button type="button">Background tasks</button> })
+  const main = container.querySelector<HTMLElement>(".app-shell__main")
+  const jobs = container.querySelector<HTMLElement>(".app-shell__desktop-status")
+
+  expect(main).toContainElement(jobs)
+  expect(jobs).toContainElement(screen.getByRole("button", { name: "Background tasks" }))
+  expect(jobs?.nextElementSibling).toHaveTextContent("Library content")
+})

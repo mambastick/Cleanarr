@@ -454,6 +454,21 @@ contracts.
   release commit. Until those gates pass and a release tag is explicitly
   authorized, v2.0.0 remains an unpublished candidate.
 
+### Accepted v2 production-feedback follow-up — 2026-09-04
+
+- Correct the production UI regressions tracked in
+  [Issue #16](https://github.com/mambastick/Cleanarr/issues/16): artwork delivery,
+  inspector spacing, per-season detail, localized evidence/activity summaries,
+  persisted setup completion, flat service-family presentation, and placement
+  of the background-jobs control.
+- Add a narrow direct-Jellyfin deletion plan for single movies that have no
+  enabled Radarr or no exact match in a complete current Radarr catalogue. The
+  plan removes only the exact Jellyfin item, remains hash-bound and idempotent,
+  and revalidates both the Jellyfin identity and Radarr absence immediately
+  before execution. An unavailable or ambiguous catalogue fails closed.
+- Direct-Jellyfin series deletion and batch selection remain out of scope until
+  they have an equally explicit physical-scope and ownership contract.
+
 ## Required 1.0 scope
 
 ### 1. Download clients and routing

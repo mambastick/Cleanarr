@@ -1,7 +1,7 @@
 import { test, type Page } from "@playwright/test"
 
 export type ApiRequest = { method: string; pathname: string; query: URLSearchParams; body: string | null }
-export type ApiResponse = { body: unknown; status?: number }
+export type ApiResponse = { body: unknown; status?: number; contentType?: string }
 export type ApiHandler = (request: ApiRequest) => ApiResponse | Promise<ApiResponse | undefined> | undefined
 
 const general = {
@@ -14,7 +14,7 @@ const general = {
   seeding_stop_policy: { enabled: false, mode: "all", min_ratio: null, min_seeding_minutes: null, include_categories: [], exclude_categories: [], include_tags: [], exclude_tags: [], interval_seconds: 300, max_attempts: 3 },
 }
 
-export const runtimeConfig = { general, radarr: [], sonarr: [], seerr: [], downloaders: [], jellyfin: [], admin_token_configured: true }
+export const runtimeConfig = { general, radarr: [] as unknown[], sonarr: [] as unknown[], seerr: [] as unknown[], downloaders: [] as unknown[], jellyfin: [] as unknown[], admin_token_configured: true }
 export const dashboard = {
   service: { name: "CleanArr", version: "fixture", dry_run: true, log_level: "INFO", downloader_kind: "qbittorrent", webhook_token_configured: true, activity_retention_days: 30 },
   endpoints: [], downstream: [{ name: "Jellyfin", role: "Media server", url: "", configured: false, health_status: "unconfigured" }],
@@ -55,6 +55,10 @@ export class ApiController {
       if (request.pathname === "/api/storage/volumes") return { body: storage }
       if (request.pathname === "/api/storage/refresh" && request.method === "POST") return { body: storage }
       if (request.pathname === "/api/users") return { body: { users } }
+      if (request.pathname.startsWith("/api/library/artwork/")) return {
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="360"><rect width="240" height="360" fill="#6d5ce7"/></svg>',
+        contentType: "image/svg+xml",
+      }
       if (request.pathname === "/api/library/items") {
         const items = request.query.get("media_type") === "series" ? librarySeries : libraryMovies
         return { body: { items, state: "complete", failures: [], next_cursor: null, revision: "fixture-catalog", catalog_revision: "fixture-catalog" } }
@@ -104,7 +108,8 @@ export class ApiController {
         if (response) {
           const status = response.status ?? 200
           if (status >= 400) this.intentionalFailureUrls.add(url.href)
-          return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(response.body) })
+          const body = typeof response.body === "string" ? response.body : JSON.stringify(response.body)
+          return route.fulfill({ status, contentType: response.contentType ?? "application/json", body })
         }
       }
       this.unmatchedRequests.push(request)
@@ -141,8 +146,9 @@ export function navButton(page: Page, name: string | RegExp) {
 
 function toLibraryMovie(value: unknown, index: number) {
   const movie = value as typeof fixtureMovie
+  const resourceId = `library-v1:radarr:fixture:${movie.radarr_id ?? index + 1}`
   return {
-    resource_id: `library-v1:radarr:fixture:${movie.radarr_id ?? index + 1}`,
+    resource_id: resourceId,
     media_type: "movie",
     title: movie.title,
     display_title: movie.jellyfin_movie_title ?? movie.title,
@@ -150,8 +156,8 @@ function toLibraryMovie(value: unknown, index: number) {
     size_bytes: movie.size_bytes,
     has_file: movie.has_file,
     added_at: "2026-01-01T00:00:00Z",
-    artwork_status: "missing",
-    artwork_url: null,
+    artwork_status: "available",
+    artwork_url: `/api/library/artwork/${encodeURIComponent(resourceId)}`,
     delete_target: { item_type: "Movie", radarr_movie_id: movie.radarr_id, jellyfin_item_id: movie.jellyfin_movie_id },
     catalog_revision: "fixture-catalog",
   }
@@ -159,8 +165,9 @@ function toLibraryMovie(value: unknown, index: number) {
 
 function toLibrarySeries(value: unknown, index: number) {
   const seriesItem = value as typeof fixtureSeries
+  const resourceId = `library-v1:sonarr:fixture:${seriesItem.sonarr_id ?? index + 1}`
   return {
-    resource_id: `library-v1:sonarr:fixture:${seriesItem.sonarr_id ?? index + 1}`,
+    resource_id: resourceId,
     media_type: "series",
     title: seriesItem.title,
     display_title: seriesItem.jellyfin_series_title ?? seriesItem.title,
@@ -169,8 +176,15 @@ function toLibrarySeries(value: unknown, index: number) {
     episode_count: seriesItem.seasons.reduce((sum, season) => sum + season.episode_count, 0),
     episode_file_count: seriesItem.seasons.reduce((sum, season) => sum + season.episode_file_count, 0),
     added_at: "2026-01-01T00:00:00Z",
-    artwork_status: "missing",
-    artwork_url: null,
+    artwork_status: "available",
+    artwork_url: `/api/library/artwork/${encodeURIComponent(resourceId)}`,
+    seasons: seriesItem.seasons.map((season) => ({
+      season_number: season.season_number,
+      title: `Season ${season.season_number}`,
+      episode_count: season.episode_count,
+      episode_file_count: season.episode_file_count,
+      size_bytes: season.size_bytes,
+    })),
     delete_target: { item_type: "Series", sonarr_series_id: seriesItem.sonarr_id, jellyfin_item_id: seriesItem.jellyfin_series_id },
     catalog_revision: "fixture-catalog",
   }

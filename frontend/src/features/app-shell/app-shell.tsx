@@ -489,8 +489,10 @@ export function AppShell({ activePage, onPageChange, onNavigate, settingsSection
         <Brand labels={labels} />
         <RuntimeStatus dryRun={dryRun} labels={labels} />
       </header>
-      <div className="app-shell__desktop-status">{jobsCount != null ? <span className="app-shell__jobs-count">{jobsCount}</span> : null}{resolvedJobs}</div>
-      <main className="app-shell__main">{children}</main>
+      <main className="app-shell__main">
+        {resolvedJobs || jobsCount != null ? <div className="app-shell__desktop-status">{jobsCount != null ? <span className="app-shell__jobs-count">{jobsCount}</span> : null}{resolvedJobs}</div> : null}
+        {children}
+      </main>
       <nav className="app-shell__bottom-nav" aria-label={labels.navigation}>
         <Highlight mode="parent" controlledItems value={mobileHighlightValue} hover={false} click={false} transition={{ type: "spring", stiffness: 350, damping: 35 }} className="app-shell__nav-active-indicator app-shell__nav-active-indicator--mobile" containerClassName="app-shell__bottom-highlight">
           <NavigationItems items={MOBILE_ITEMS} activePage={activePage} labels={labels} onNavigate={navigate} mobile highlight />
