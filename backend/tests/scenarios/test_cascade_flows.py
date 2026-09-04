@@ -98,6 +98,178 @@ async def test_movie_delete_cleans_radarr_seerr_and_downloader() -> None:
 
 
 @pytest.mark.asyncio
+async def test_movie_delete_without_arr_history_hash_fails_closed() -> None:
+    radarr = FakeRadarrClient(
+        movies=[
+            RadarrMovie(
+                id=1,
+                title="Disposable movie",
+                path="/test/movie",
+                tmdb_id=100,
+                imdb_id=None,
+                size_on_disk=1024,
+                has_file=True,
+            )
+        ],
+        history_by_movie={1: []},
+    )
+    seerr = FakeSeerrClient(
+        media=[
+            SeerrMedia(
+                id=2,
+                media_type="movie",
+                tmdb_id=100,
+                tvdb_id=None,
+                imdb_id=None,
+                jellyfin_media_id=None,
+            )
+        ],
+        requests=[],
+        issues=[],
+    )
+    service = build_service(radarr=radarr, seerr=seerr)
+
+    result = await service.process(
+        MediaDeletionEvent(
+            notification_type="ItemDeleted",
+            item_type=ItemType.MOVIE,
+            item_id="disposable-movie",
+            name="Disposable movie",
+            fingerprint=MediaFingerprint(tmdb_id=100),
+        )
+    )
+
+    assert result.status.value == "ignored"
+    assert radarr.deleted_movie_ids == []
+    assert seerr.deleted_media_ids == []
+    assert any(
+        action.system == "downloader"
+        and action.status is ActionStatus.SKIPPED
+        and action.reason is not None
+        and action.reason.value == "no_match"
+        for action in result.actions
+    )
+
+
+@pytest.mark.asyncio
+async def test_series_delete_without_arr_history_hash_fails_closed() -> None:
+    sonarr = FakeSonarrClient(
+        series=[
+            SonarrSeries(
+                id=5,
+                title="Disposable series",
+                path="/test/series",
+                tvdb_id=200,
+                tmdb_id=300,
+                imdb_id=None,
+                size_on_disk=2048,
+                has_file=True,
+            )
+        ],
+        history_by_series={5: []},
+        episodes_by_series={
+            5: [
+                SonarrEpisode(
+                    id=10,
+                    series_id=5,
+                    season_number=1,
+                    episode_number=1,
+                    episode_file_id=20,
+                    has_file=True,
+                    monitored=True,
+                )
+            ]
+        },
+        episode_files_by_series={5: []},
+    )
+    seerr = FakeSeerrClient(
+        media=[
+            SeerrMedia(
+                id=3,
+                media_type="tv",
+                tmdb_id=300,
+                tvdb_id=200,
+                imdb_id=None,
+                jellyfin_media_id=None,
+            )
+        ],
+        requests=[],
+        issues=[],
+    )
+    service = build_service(sonarr=sonarr, seerr=seerr)
+
+    result = await service.process(
+        MediaDeletionEvent(
+            notification_type="ItemDeleted",
+            item_type=ItemType.SERIES,
+            item_id="disposable-series",
+            name="Disposable series",
+            fingerprint=MediaFingerprint(tvdb_id=200, tmdb_id=300),
+        )
+    )
+
+    assert result.status.value == "ignored"
+    assert sonarr.deleted_series_ids == []
+    assert seerr.deleted_media_ids == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("item_type", [ItemType.SEASON, ItemType.EPISODE])
+async def test_partial_series_delete_without_arr_history_hash_fails_closed(item_type: ItemType) -> None:
+    sonarr = FakeSonarrClient(
+        series=[SonarrSeries(id=8, title="Show", path="/test/show", tvdb_id=800, tmdb_id=801, imdb_id=None)],
+        history_by_series={8: []},
+        episodes_by_series={
+            8: [
+                SonarrEpisode(
+                    id=201,
+                    series_id=8,
+                    season_number=2,
+                    episode_number=1,
+                    episode_file_id=402,
+                    has_file=True,
+                    monitored=True,
+                )
+            ]
+        },
+        episode_files_by_series={8: []},
+    )
+    seerr = FakeSeerrClient(
+        media=[
+            SeerrMedia(
+                id=70,
+                media_type="tv",
+                tmdb_id=801,
+                tvdb_id=800,
+                imdb_id=None,
+                jellyfin_media_id=None,
+            )
+        ],
+        requests=[],
+        issues=[SeerrIssue(id=72, media_id=70, problem_season=2, problem_episode=1)],
+    )
+    service = build_service(sonarr=sonarr, seerr=seerr)
+
+    result = await service.process(
+        MediaDeletionEvent(
+            notification_type="ItemDeleted",
+            item_type=item_type,
+            item_id=f"disposable-{item_type.value.lower()}",
+            name=f"Disposable {item_type.value}",
+            fingerprint=MediaFingerprint(tvdb_id=800, tmdb_id=801),
+            season_number=2,
+            episode_number=1 if item_type is ItemType.EPISODE else None,
+        )
+    )
+
+    assert result.status.value == "ignored"
+    assert sonarr.unmonitored_episode_ids == []
+    assert sonarr.unmonitored_seasons == []
+    assert sonarr.deleted_episode_file_ids == []
+    assert seerr.deleted_issue_ids == []
+
+
+@pytest.mark.asyncio
 async def test_downloader_failure_keeps_ownership_records_for_safe_retry() -> None:
     class FlakyDownloader:
         attempts = 0
