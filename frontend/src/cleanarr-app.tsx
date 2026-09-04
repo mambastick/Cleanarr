@@ -699,7 +699,6 @@ function CleanArrApp() {
 
           <div hidden={activeTab !== "library"}>
             <LibraryPanelV2
-              key={libraryResetKey}
               active={activeTab === "library"}
               authenticated={Boolean(authStatus.authenticated)}
               language={shellLanguage}
