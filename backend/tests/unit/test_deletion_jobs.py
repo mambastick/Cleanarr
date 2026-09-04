@@ -54,6 +54,39 @@ def _result(event: MediaDeletionEvent, status: OverallStatus = OverallStatus.SUC
     )
 
 
+def _downloader_plan(
+    event: MediaDeletionEvent,
+    *,
+    ratio: float = 1.5,
+    seeding_time_seconds: int = 100,
+    message: str = "DRY_RUN: would delete torrent hash AA.",
+    status: ActionStatus = ActionStatus.DRY_RUN,
+    reason: FailureReason | None = None,
+    hash_value: str = "AA",
+    seeding_policy: str = "immediate",
+) -> ProcessingResultResponse:
+    return _result(event).model_copy(
+        update={
+            "actions": [
+                ActionResultResponse(
+                    system="qbittorrent",
+                    action="delete_hash",
+                    status=status,
+                    message=message,
+                    reason=reason,
+                    details={
+                        "hash": hash_value,
+                        "downloader_id": "qbt-primary",
+                        "seeding_policy": seeding_policy,
+                        "ratio": ratio,
+                        "seeding_time_seconds": seeding_time_seconds,
+                    },
+                )
+            ]
+        }
+    )
+
+
 async def _resolver(payload: ManualDeleteRequest) -> MediaDeletionEvent:
     return _event(payload.item_type)
 
@@ -174,6 +207,38 @@ async def test_submit_rejects_missing_or_changed_preflight(tmp_path: Path) -> No
         with pytest.raises(DeletionPreflightError, match="changed"):
             await store.submit(request.model_copy(update={"confirmed_plan_hash": "stale"}))
         assert store.list_jobs() == []
+    finally:
+        await store.stop()
+
+
+@pytest.mark.asyncio
+async def test_submit_accepts_confirmed_plan_when_only_downloader_telemetry_advances(tmp_path: Path) -> None:
+    preview_calls = 0
+    runner_calls = 0
+
+    async def advancing_previewer(payload, event):  # type: ignore[no-untyped-def]
+        nonlocal preview_calls
+        preview_calls += 1
+        return _downloader_plan(
+            event,
+            ratio=1.5 + preview_calls / 100,
+            seeding_time_seconds=100 + preview_calls,
+            message=f"Current downloader observation {preview_calls}.",
+        )
+
+    async def runner(payload, event, report):  # type: ignore[no-untyped-def]
+        nonlocal runner_calls
+        runner_calls += 1
+        return _result(event)
+
+    store = _job_service(_resolver, advancing_previewer, runner, db_path=tmp_path / "cleanarr.db")
+    request = ManualDeleteRequest(item_type=ItemType.MOVIE, radarr_movie_id=1, idempotency_key=uuid4())
+    preview = await store.preview(request)
+    try:
+        queued = await store.submit(request.model_copy(update={"confirmed_plan_hash": preview.plan_hash}))
+        await _wait_for_status(store, queued.id, ManualDeleteJobStatus.COMPLETED)
+        assert preview_calls == 3
+        assert runner_calls == 1
     finally:
         await store.stop()
 
@@ -654,7 +719,7 @@ async def test_restart_before_mutation_rechecks_and_resumes_the_persisted_event(
         await resumed_store.stop()
 
 
-def test_plan_hash_excludes_presentation_display_name() -> None:
+def test_plan_hash_excludes_presentation_and_volatile_downloader_diagnostics() -> None:
     event = _event()
     plan = _result(event)
 
@@ -662,6 +727,24 @@ def test_plan_hash_excludes_presentation_display_name() -> None:
         plan.model_copy(update={"display_name": "Localized title"})
     )
     assert _plan_hash(plan.model_copy(update={"item_id": "different-owned-item"})) != _plan_hash(plan)
+
+    first = _downloader_plan(event)
+    telemetry_only = _downloader_plan(
+        event,
+        ratio=1.75,
+        seeding_time_seconds=101,
+        message="The latest diagnostic observation changed.",
+    )
+    assert _plan_hash(first) == _plan_hash(telemetry_only)
+    assert _plan_hash(first) != _plan_hash(_downloader_plan(event, hash_value="BB"))
+    assert _plan_hash(first) != _plan_hash(_downloader_plan(event, seeding_policy="keep"))
+    assert _plan_hash(first) != _plan_hash(
+        _downloader_plan(
+            event,
+            status=ActionStatus.SKIPPED,
+            reason=FailureReason.SEEDING_POLICY,
+        )
+    )
 
 
 def test_display_name_is_trimmed_bounded_and_rejects_control_characters() -> None:
