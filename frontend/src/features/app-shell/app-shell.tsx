@@ -1,6 +1,7 @@
 import {
   Activity,
   BookOpen,
+  CircleHelp,
   Download,
   FlaskConical,
   HardDrive,
@@ -50,9 +51,11 @@ import {
 } from "@/components/ui/sheet"
 import { useReducedMotionPreference } from "@/hooks/use-reduced-motion-preference"
 import { cn } from "@/lib/utils"
+import type { RuntimeMode } from "@/lib/runtime-mode"
 
 export type AppShellPage = "overview" | "library" | "downloads" | "activity" | "users" | "settings"
 export type ShellLanguage = "en" | "ru"
+export type { RuntimeMode } from "@/lib/runtime-mode"
 export type SettingsSection = "cleanarr" | "library" | "security" | "cleanup" | "services"
 export type StorageHealth = "healthy" | "warning" | "critical" | "unknown"
 
@@ -73,6 +76,7 @@ export type AppShellLabels = {
   status: string
   live: string
   dryRun: string
+  runtimeUnknown: string
   storage: string
   storageUsed: string
   storagePartial: string
@@ -105,6 +109,7 @@ const DEFAULT_LABELS: AppShellLabels = {
   status: "Runtime status",
   live: "Live",
   dryRun: "Dry-run",
+  runtimeUnknown: "Checking mode…",
   storage: "Storage",
   storageUsed: "Used",
   storagePartial: "Partial data",
@@ -154,7 +159,9 @@ type AppShellProps = {
   language?: ShellLanguage
   onLanguageChange?: (language: ShellLanguage) => void
   onLogout?: () => void
-  dryRun: boolean
+  /** @deprecated Prefer runtimeMode so the shell can represent an unknown mode safely. */
+  dryRun?: boolean
+  runtimeMode?: RuntimeMode
   storageHeadline?: StorageHeadline
   /** Alias kept intentionally concise for shell consumers. */
   storage?: StorageHeadline
@@ -218,13 +225,14 @@ function Brand({ labels, collapsed, onToggle }: { labels: AppShellLabels; collap
   )
 }
 
-function RuntimeStatus({ dryRun, labels }: { dryRun: boolean; labels: AppShellLabels }) {
-  const statusLabel = `${labels.status}: ${dryRun ? labels.dryRun : labels.live}`
+function RuntimeStatus({ runtimeMode, labels }: { runtimeMode: RuntimeMode; labels: AppShellLabels }) {
+  const label = runtimeMode === "unknown" ? labels.runtimeUnknown : runtimeMode === "dry_run" ? labels.dryRun : labels.live
+  const statusLabel = `${labels.status}: ${label}`
   return (
     <Tooltip>
-      <TooltipTrigger render={<div className={cn("app-shell__runtime-status", dryRun ? "app-shell__runtime-status--dry" : "app-shell__runtime-status--live")} role="status" tabIndex={0} aria-label={statusLabel} />}>
-        {dryRun ? <FlaskConical className="app-shell__status-icon" aria-hidden="true" /> : <RadioTower className="app-shell__status-icon" aria-hidden="true" />}
-        <span>{dryRun ? labels.dryRun : labels.live}</span>
+      <TooltipTrigger render={<div className={cn("app-shell__runtime-status", runtimeMode === "unknown" ? "app-shell__runtime-status--unknown" : runtimeMode === "dry_run" ? "app-shell__runtime-status--dry" : "app-shell__runtime-status--live")} role="status" tabIndex={0} aria-label={statusLabel} />}>
+        {runtimeMode === "unknown" ? <CircleHelp className="app-shell__status-icon" aria-hidden="true" /> : runtimeMode === "dry_run" ? <FlaskConical className="app-shell__status-icon" aria-hidden="true" /> : <RadioTower className="app-shell__status-icon" aria-hidden="true" />}
+        <span>{label}</span>
       </TooltipTrigger>
       <TooltipContent side="right">{statusLabel}</TooltipContent>
     </Tooltip>
@@ -445,8 +453,9 @@ function DesktopAccountPopover({ labels, username, theme = "system", language = 
   )
 }
 
-export function AppShell({ activePage, onPageChange, onNavigate, settingsSection, onSettingsSectionChange, username, canAdmin = true, theme, onThemeChange, language, onLanguageChange, onLogout, dryRun, storageHeadline, storage, jobsSlot, jobs, jobsCount, labels: labelOverrides, children }: AppShellProps) {
+export function AppShell({ activePage, onPageChange, onNavigate, settingsSection, onSettingsSectionChange, username, canAdmin = true, theme, onThemeChange, language, onLanguageChange, onLogout, dryRun, runtimeMode, storageHeadline, storage, jobsSlot, jobs, jobsCount, labels: labelOverrides, children }: AppShellProps) {
   const labels = mergeLabels(labelOverrides)
+  const resolvedRuntimeMode = runtimeMode ?? (dryRun == null ? "unknown" : dryRun ? "dry_run" : "live")
   const [collapsed, setCollapsed] = useState(() => typeof window !== "undefined" && window.localStorage.getItem("cleanarr.sidebar.collapsed") === "true")
   const resolvedStorage = storageHeadline ?? storage ?? { status: "unknown" as const, headline: labels.storageUnavailable }
   const resolvedJobs = jobsSlot ?? jobs
@@ -480,14 +489,14 @@ export function AppShell({ activePage, onPageChange, onNavigate, settingsSection
           </Highlight>
         </div>
         <div className="app-shell__sidebar-bottom">
-          <RuntimeStatus dryRun={dryRun} labels={labels} />
+          <RuntimeStatus runtimeMode={resolvedRuntimeMode} labels={labels} />
           {!collapsed ? <StorageCard storage={resolvedStorage} labels={labels} /> : null}
           <DesktopAccountPopover labels={labels} username={username} theme={theme} language={language} onThemeChange={onThemeChange} onLanguageChange={onLanguageChange} onLogout={onLogout} collapsed={collapsed} />
         </div>
       </aside>
       <header className="app-shell__mobile-topbar">
         <Brand labels={labels} />
-        <RuntimeStatus dryRun={dryRun} labels={labels} />
+        <RuntimeStatus runtimeMode={resolvedRuntimeMode} labels={labels} />
       </header>
       <main className="app-shell__main">
         {resolvedJobs || jobsCount != null ? <div className="app-shell__desktop-status">{jobsCount != null ? <span className="app-shell__jobs-count">{jobsCount}</span> : null}{resolvedJobs}</div> : null}

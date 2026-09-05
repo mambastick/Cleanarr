@@ -12,13 +12,13 @@ import { bytes, date, duration, knownNumber, rate } from "./downloads-format"
 export type DownloadActionPhase = "pending" | "completed" | "retry" | "conflict" | "failed"
 export type DownloadActionState = { phase: DownloadActionPhase; action: DownloadAction; code: string | null; status: string | null }
 
-export function TorrentCard({ item, language, text, actionStates, onControl, canMutate = true }: { item: DownloadItem; language: DownloadsLanguage; text: DownloadsCopy; actionStates: Record<string, DownloadActionState>; onControl: (item: DownloadItem, action: DownloadAction) => void; canMutate?: boolean }) {
+export function TorrentCard({ item, language, text, actionStates, onControl, canMutate = true, mutationUnavailableReason }: { item: DownloadItem; language: DownloadsLanguage; text: DownloadsCopy; actionStates: Record<string, DownloadActionState>; onControl: (item: DownloadItem, action: DownloadAction) => void; canMutate?: boolean; mutationUnavailableReason?: string }) {
   const action = actionForItem(item)
   const actionKey = action ? `${item.client_id}:${item.info_hash}:${action}` : null
   const controlReasonId = `${item.client_id}-${item.info_hash}-control-reason`
   const status = actionKey ? actionStates[actionKey] : undefined
   const canControl = canMutate && action != null && item.freshness === "fresh" && item.ownership === "managed" && item.unavailable_reason == null
-  const disabledReason = !canMutate ? text.adminOnly : !canControl ? item.unavailable_reason ? reasonLabel(language, item.unavailable_reason) : text.actionUnavailable : null
+  const disabledReason = !canMutate ? mutationUnavailableReason ?? text.adminOnly : !canControl ? item.unavailable_reason ? reasonLabel(language, item.unavailable_reason) : text.actionUnavailable : null
   const statusText = status?.phase === "pending" ? text.pending : status?.phase === "completed" ? actionResultCopy(text, status.status as never) : status?.phase === "retry" ? status.status === "reconcile_required" ? text.reconcile : status.status === "queued" || status.status === "running" ? text.inProgress : text.ambiguous : status?.phase === "conflict" ? text.conflict : status?.phase === "failed" ? text.actionFailed : null
   const locale = language === "ru" ? "ru-RU" : "en-US"
 

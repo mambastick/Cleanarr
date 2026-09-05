@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { EmptyState, StatusDot, StatusPill } from "@/features/settings/service-presentation"
+import type { RuntimeMode } from "@/lib/runtime-mode"
 import type { DashboardActivity, DashboardPayload, HealthStatus } from "@/lib/dashboard"
 import type { UiTextMap } from "@/lib/i18n"
 import { getStatusLabel, SETUP_STEPS } from "@/lib/service-config"
@@ -103,6 +104,7 @@ export function DashboardPanel({
   latestActivity,
   allServicesConfigured,
   isLive,
+  runtimeMode,
   onToggleDryRun,
   onOpenWizard,
   onEditService,
@@ -122,6 +124,7 @@ export function DashboardPanel({
   latestActivity: DashboardActivity | null
   allServicesConfigured: boolean
   isLive: boolean
+  runtimeMode?: RuntimeMode
   onToggleDryRun: () => Promise<void>
   onOpenWizard: (trigger: HTMLButtonElement) => void
   onEditService: (name: string, trigger: HTMLButtonElement) => void
@@ -145,7 +148,9 @@ export function DashboardPanel({
   const [isChangingRuntime, setIsChangingRuntime] = useState(false)
   const [requestedRuntime, setRequestedRuntime] = useState<string | null>(null)
   const runtimeRequestRef = useRef<string | null>(null)
-  const runtimeValue = isLive ? "live" : "dry-run"
+  const effectiveRuntimeMode = runtimeMode ?? (isLive ? "live" : "dry_run")
+  const runtimeKnown = effectiveRuntimeMode !== "unknown"
+  const runtimeValue = effectiveRuntimeMode === "live" ? "live" : "dry-run"
 
   useEffect(() => {
     if (requestedRuntime === runtimeValue) {
@@ -177,23 +182,27 @@ export function DashboardPanel({
       <div
         className={cn(
           "flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border-2 px-5 py-4",
-          isLive
+          effectiveRuntimeMode === "live"
             ? "border-status-success-border bg-status-success-bg"
-            : "border-status-warning-border bg-status-warning-bg",
+            : effectiveRuntimeMode === "dry_run"
+              ? "border-status-warning-border bg-status-warning-bg"
+              : "border-status-unknown-border bg-status-unknown-bg",
         )}
       >
         <div className="flex items-center gap-3">
-          {isLive ? (
+          {effectiveRuntimeMode === "live" ? (
             <Zap className="size-5 text-status-success" />
-          ) : (
+          ) : effectiveRuntimeMode === "dry_run" ? (
             <ShieldAlert className="size-5 text-status-warning" />
+          ) : (
+            <ShieldAlert className="size-5 text-status-unknown" />
           )}
           <div>
             <p className="text-sm font-semibold leading-tight">
-              {isLive ? text.liveMode : text.dryRun}
+              {effectiveRuntimeMode === "live" ? text.liveMode : effectiveRuntimeMode === "dry_run" ? text.dryRun : text.runtimeModeLoading}
             </p>
             <p className="text-xs text-muted-foreground">
-              {isLive ? text.liveModeDescription : text.dryRunDescription}
+              {effectiveRuntimeMode === "live" ? text.liveModeDescription : effectiveRuntimeMode === "dry_run" ? text.dryRunDescription : text.runtimeModeLoadingDescription}
             </p>
           </div>
         </div>
@@ -214,13 +223,13 @@ export function DashboardPanel({
               {text.setupWizard}
             </Button></AnimateIcon>
           )}
-          <Tabs value={runtimeValue} onValueChange={changeRuntime} aria-label={text.runtimeSettings}>
+          <Tabs value={runtimeKnown ? runtimeValue : "unknown"} onValueChange={changeRuntime} aria-label={text.runtimeSettings}>
             <TabsList>
-              <AnimateIcon><TabsTrigger value="dry-run" disabled={readOnly || isChangingRuntime}>
+              <AnimateIcon><TabsTrigger value="dry-run" disabled={readOnly || isChangingRuntime || !runtimeKnown}>
                 <AnimatedIcon animation="pulse"><ShieldAlert className="size-3.5" /></AnimatedIcon>
                 {text.dryRun}
               </TabsTrigger></AnimateIcon>
-              <AnimateIcon><TabsTrigger value="live" disabled={readOnly || isChangingRuntime}>
+              <AnimateIcon><TabsTrigger value="live" disabled={readOnly || isChangingRuntime || !runtimeKnown}>
                 <AnimatedIcon animation="pulse"><Zap className="size-3.5" /></AnimatedIcon>
                 {text.live}
               </TabsTrigger></AnimateIcon>
