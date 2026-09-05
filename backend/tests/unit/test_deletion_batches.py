@@ -65,6 +65,30 @@ async def _previewer(payload: ManualDeleteRequest, event: MediaDeletionEvent) ->
     )
 
 
+def _downloader_plan(event: MediaDeletionEvent, observation: int) -> ProcessingResultResponse:
+    return ProcessingResultResponse(
+        item_type=event.item_type,
+        item_id=event.item_id,
+        name=event.name,
+        status=OverallStatus.SUCCESS,
+        actions=[
+            ActionResultResponse(
+                system="qbittorrent",
+                action="delete_hash",
+                status=ActionStatus.DRY_RUN,
+                message=f"Current downloader observation {observation}.",
+                details={
+                    "hash": f"HASH-{event.item_id}",
+                    "downloader_id": "qbt-primary",
+                    "seeding_policy": "immediate",
+                    "ratio": 1.5 + observation / 100,
+                    "seeding_time_seconds": 100 + observation,
+                },
+            )
+        ],
+    )
+
+
 def _batch_service(
     resolver: object,
     previewer: object,
@@ -149,6 +173,46 @@ async def test_batch_preview_is_canonical_and_rejects_duplicate_identities(tmp_p
             ]
         )
         assert seasons.ready_count == 2
+    finally:
+        await store.stop()
+
+
+@pytest.mark.asyncio
+async def test_batch_accepts_confirmed_plans_when_only_downloader_telemetry_advances(tmp_path: Path) -> None:
+    preview_calls = 0
+    runner_calls: list[int] = []
+
+    async def advancing_previewer(payload, event):  # type: ignore[no-untyped-def]
+        nonlocal preview_calls
+        preview_calls += 1
+        return _downloader_plan(event, preview_calls)
+
+    async def runner(payload, event, report):  # type: ignore[no-untyped-def]
+        runner_calls.append(payload.radarr_movie_id or 0)
+        return await _previewer(payload, event)
+
+    store = _batch_service(
+        _resolver,
+        advancing_previewer,
+        runner,
+        db_path=tmp_path / "cleanarr.db",
+        execution_lock=asyncio.Lock(),
+    )
+    children = [_request(1)]
+    preview = await store.preview(children)
+    try:
+        queued = await store.submit(
+            ManualDeleteBatchSubmitRequest(
+                children=children,
+                idempotency_key=uuid4(),
+                confirmed_batch_hash=preview.batch_hash,
+                confirmed_item_count=1,
+            )
+        )
+        await _wait_for_terminal(store, queued.id)
+        result = store.get(queued.id)
+        assert result.status is ManualDeleteBatchStatus.COMPLETED
+        assert runner_calls == [1]
     finally:
         await store.stop()
 

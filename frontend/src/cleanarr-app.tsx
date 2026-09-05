@@ -17,6 +17,7 @@ import { batchChildRequests, batchDeleteSessionReducer, buildBatchRequest, initi
 import { DELETION_NOTICES, localizedDeletionError, submissionRecovery } from "@/features/deletion/deletion-copy"
 import { JobsSheet } from "@/features/jobs/jobs-sheet"
 import { batchTransitionAnnouncement, isTerminalBatchStatus } from "@/features/jobs/batch-status"
+import { simulationBatchCompletionNotice, simulationJobCompletionNotice } from "@/features/jobs/simulation-outcome"
 import { LibraryPanelV2 } from "@/features/library/library-v2-panel"
 import { LIBRARY_COPY } from "@/features/library/library-copy"
 import { buildManualDeleteRequest, libraryDeleteTargetFromItem, librarySelectionItemFromItem, type BatchSelectionItem, type LibraryDeleteTarget } from "@/features/library/library-selection"
@@ -176,7 +177,7 @@ function CleanArrApp() {
             setDeleteJobAnnouncement(message)
             setDeleteJobAnnouncementTone("assertive")
           } else {
-            const completedMessage = DELETION_NOTICES[uiLanguage === "ru" ? "ru" : "en"].jobCompleted
+            const completedMessage = simulationJobCompletionNotice(job, uiLanguage === "ru" ? "ru" : "en") ?? DELETION_NOTICES[uiLanguage === "ru" ? "ru" : "en"].jobCompleted
             toast.success(`${name}: ${completedMessage}`)
             setDeleteJobAnnouncement(`${name}: ${completedMessage}`)
             setDeleteJobAnnouncementTone("polite")
@@ -208,7 +209,10 @@ function CleanArrApp() {
       payload.batches.forEach((batch) => {
         const previousStatus = knownDeleteBatchStates.current.get(batch.id)
         if (previousStatus != null && previousStatus !== batch.status && isTerminalBatchStatus(batch.status)) {
-          const announcement = batchTransitionAnnouncement(batch, uiLanguage === "ru" ? "ru" : "en")
+          const simulationMessage = simulationBatchCompletionNotice(batch, uiLanguage === "ru" ? "ru" : "en")
+          const announcement = simulationMessage
+            ? { message: simulationMessage, tone: "polite" as const }
+            : batchTransitionAnnouncement(batch, uiLanguage === "ru" ? "ru" : "en")
           setDeleteJobAnnouncement(announcement.message)
           setDeleteJobAnnouncementTone(announcement.tone)
           if (announcement.tone === "assertive") toast.error(announcement.message)

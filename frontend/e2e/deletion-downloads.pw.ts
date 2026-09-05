@@ -71,6 +71,32 @@ test("a completed dry-run batch refreshes from source and keeps the simulated it
   await expect(page.getByText("Fixture Movie", { exact: true }).first()).toBeVisible()
 })
 
+test("dry-run terminal jobs announce and display a completed simulation for single and batch work", async ({ page }) => {
+  const activeJobs: Record<string, unknown>[] = [{ ...job }]
+  const activeBatches: Record<string, unknown>[] = [{
+    id: "fixture-batch", status: "running", message: "Running", created_at: "2026-01-01T00:00:00Z", started_at: "2026-01-01T00:00:01Z", completed_at: null, error_code: null, error_message: null,
+    total_count: 1, queued_count: 0, running_count: 1, completed_count: 0, blocked_count: 0, failed_count: 0, cancelled_count: 0,
+    children: [{ id: "fixture-child", mutation_identity: "fixture-child", display_name: "Fixture batch item", status: "running", message: "Running", blocked_code: null, error_code: null, error_message: null, preflight: safePlan, result: null, started_at: "2026-01-01T00:00:01Z", completed_at: null }],
+  }]
+  const simulatedResult = { ...safePlan, actions: [{ system: "qbittorrent", action: "remove_torrent", status: "dry_run", message: "PRIVATE", reason: null, details: {} }] }
+  const api = await boot(page, { jobs: activeJobs, batches: activeBatches })
+  await expect.poll(() => api.count("/api/actions/delete/jobs", "GET")).toBeGreaterThan(0)
+
+  activeJobs.splice(0, 1, { ...job, status: "completed", phase: "completed", progress_percent: 100, completed_at: "2026-01-01T00:00:02Z", result: simulatedResult })
+  activeBatches.splice(0, 1, {
+    ...activeBatches[0], status: "completed", completed_at: "2026-01-01T00:00:02Z", running_count: 0, completed_count: 1,
+    children: [{ ...(activeBatches[0].children as Record<string, unknown>[])[0], status: "completed", result: simulatedResult, completed_at: "2026-01-01T00:00:02Z" }],
+  })
+
+  await expect(page.getByLabel("Notifications alt+T").getByText("Fixture Movie: Simulation completed — no changes were made.")).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole("button", { name: "Background tasks" }).click()
+  await expect(page.getByText("Simulation completed — no changes were made.").first()).toBeVisible()
+  await expect(page.getByText("Fixture batch item")).toBeVisible()
+  expect(await page.locator("body").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+  expect(api.count("/api/actions/delete/jobs", "GET")).toBeGreaterThan(1)
+})
+
 test("single deletion retries the exact serialized request and prevents rapid duplicate submission", async ({ page }) => {
   let submits = 0
   const api = await boot(page, { config: liveConfig, movies: [fixtureMovie], handlers: [
