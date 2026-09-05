@@ -14,6 +14,7 @@
 <p align="center">
   <a href="#быстрый-запуск"><strong>Быстрый запуск</strong></a> ·
   <a href="#нативные-пакеты-linux"><strong>Пакеты Linux</strong></a> ·
+  <a href="#демонстрация"><strong>Смотреть демо</strong></a> ·
   <a href="#скриншоты"><strong>Скриншоты</strong></a> ·
   <a href="#как-это-работает"><strong>Как это работает</strong></a> ·
   <a href="#настройка"><strong>Настройка</strong></a> ·
@@ -50,46 +51,75 @@
 
 ---
 
+## Демонстрация
+
+<p align="center">
+  <strong>Вся медиатека перед глазами. План перед каждой очисткой.</strong><br/>
+  <sub>Записано в CleanArr v2.0.3 · 33 секунды · Без выполнения удаления</sub>
+</p>
+
+https://github.com/user-attachments/assets/6b831064-6d5e-4d4b-8154-d315432779b8
+
+<details>
+  <summary>Анимированное превью, если плеер недоступен</summary>
+
+<p align="center">
+  <a href="media/showcase/cleanarr-demo.mp4">
+    <picture>
+      <source media="(prefers-reduced-motion: reduce)" srcset="media/showcase/demo-poster.jpg"/>
+      <img src="media/showcase/demo-preview.gif" alt="Обзор CleanArr: хранилище, медиатека, поиск фильма, просмотр плана очистки и отмена подтверждения." width="100%"/>
+    </picture>
+  </a>
+</p>
+
+</details>
+
+<p align="center">
+  <a href="https://github.com/user-attachments/assets/6b831064-6d5e-4d4b-8154-d315432779b8"><strong>▶ Смотреть полное демо</strong></a> ·
+  <a href="media/showcase/cleanarr-demo.mp4">Скачать MP4</a> ·
+  <a href="media/showcase/cleanarr-demo.ru.vtt">Русские субтитры</a> ·
+  <a href="media/showcase/cleanarr-demo.en.vtt">English captions</a>
+</p>
+
+Видео записано в работающем production-экземпляре и проходит путь **хранилище → медиатека → поиск → план очистки → отмена**.
+Запись заканчивается до подтверждения: медиатека и подключённые сервисы
+остаются без изменений. Новые установки запускаются в пробном режиме.
+
 ## Скриншоты
+
+<p align="center">
+  <a href="media/showcase/library-dark.jpg">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="media/showcase/library-dark.jpg"/>
+      <source media="(prefers-color-scheme: light)" srcset="media/showcase/library-light.jpg"/>
+      <img src="media/showcase/library-dark.jpg" alt="Медиатека CleanArr: постеры фильмов, поиск, сортировка по размеру и компактная навигация." width="100%"/>
+    </picture>
+  </a>
+  <br/>
+  <strong>Ваша коллекция — одним взглядом.</strong><br/>
+  <sub>Просматривайте постеры, находите фильмы и сортируйте их по занимаемому месту.</sub><br/>
+  <a href="media/showcase/library-light.jpg">Светлая тема</a> · <a href="media/showcase/library-dark.jpg">Тёмная тема</a>
+</p>
 
 <table>
   <tr>
-    <td width="50%">
-      <img src="docs/screenshots/login.png" alt="Вход" width="100%"/>
-      <p align="center"><sub>Форма входа</sub></p>
+    <td width="50%" valign="top">
+      <a href="media/showcase/dashboard-light.jpg"><img src="media/showcase/dashboard-light.jpg" alt="Светлая панель управления со свободным местом и состоянием подключённых сервисов." width="100%"/></a>
+      <p><strong>01 · Оцените состояние системы</strong><br/><sub>Свободное место и доступность сервисов на одном экране.</sub></p>
     </td>
-    <td width="50%">
-      <img src="docs/screenshots/register.png" alt="Создание администратора" width="100%"/>
-      <p align="center"><sub>Первый запуск — создание администратора</sub></p>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%">
-      <img src="docs/screenshots/setup_wizard_step1.png" alt="Мастер настройки" width="100%"/>
-      <p align="center"><sub>Мастер первичной настройки Jellyfin</sub></p>
-    </td>
-    <td width="50%">
-      <img src="docs/screenshots/dashboard.png" alt="Панель управления" width="100%"/>
-      <p align="center"><sub>Панель управления — сервисы доступны, рабочий режим</sub></p>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%">
-      <img src="docs/screenshots/dashboard_activity.png" alt="Журнал действий" width="100%"/>
-      <p align="center"><sub>Журнал истории удалений</sub></p>
-    </td>
-    <td width="50%">
-      <img src="docs/screenshots/jellyfin_modal.png" alt="Настройка Jellyfin" width="100%"/>
-      <p align="center"><sub>Редактор Jellyfin и автоматическая настройка webhook</sub></p>
-    </td>
-  </tr>
-  <tr>
-    <td colspan="2">
-      <img src="docs/screenshots/settings.png" alt="Настройки" width="100%"/>
-      <p align="center"><sub>Общие настройки CleanArr</sub></p>
+    <td width="50%" valign="top">
+      <a href="media/showcase/preflight-dark.jpg"><img src="media/showcase/preflight-dark.jpg" alt="Предварительный план удаления со списком затрагиваемых сервисов до подтверждения." width="100%"/></a>
+      <p><strong>02 · Проверьте перед удалением</strong><br/><sub>Изучите запланированные изменения перед принятием решения.</sub></p>
     </td>
   </tr>
 </table>
+
+<details>
+  <summary>Посмотреть панель управления в тёмной теме</summary>
+  <p><a href="media/showcase/dashboard-dark.jpg"><img src="media/showcase/dashboard-dark.jpg" alt="Обзор хранилища и сервисов CleanArr в тёмной теме." width="100%"/></a></p>
+</details>
+
+<sub>Снято в выпущенной production-версии интерфейса 5 сентября 2026 года. [Описание съёмки и содержание видео](media/showcase/README_RU.md).</sub>
 
 ---
 
