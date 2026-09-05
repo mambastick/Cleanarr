@@ -14,6 +14,7 @@
 <p align="center">
   <a href="#quick-start"><strong>Quick start</strong></a> ·
   <a href="#native-linux-packages"><strong>Linux packages</strong></a> ·
+  <a href="#demo"><strong>Watch demo</strong></a> ·
   <a href="#screenshots"><strong>Screenshots</strong></a> ·
   <a href="#how-it-works"><strong>How it works</strong></a> ·
   <a href="#configuration"><strong>Configuration</strong></a> ·
@@ -50,46 +51,75 @@ Pack torrents, shared files, and anything that can't be safely attributed are al
 
 ---
 
+## Demo
+
+<p align="center">
+  <strong>A clear view of your library. A plan before every cleanup.</strong><br/>
+  <sub>Recorded in CleanArr v2.0.3 · 33 seconds · No deletion executed</sub>
+</p>
+
+https://github.com/user-attachments/assets/6b831064-6d5e-4d4b-8154-d315432779b8
+
+<details>
+  <summary>Animated preview if the player is unavailable</summary>
+
+<p align="center">
+  <a href="media/showcase/cleanarr-demo.mp4">
+    <picture>
+      <source media="(prefers-reduced-motion: reduce)" srcset="media/showcase/demo-poster.jpg"/>
+      <img src="media/showcase/demo-preview.gif" alt="CleanArr walkthrough: check storage, browse the library, find a movie, review its cleanup plan, and cancel." width="100%"/>
+    </picture>
+  </a>
+</p>
+
+</details>
+
+<p align="center">
+  <a href="https://github.com/user-attachments/assets/6b831064-6d5e-4d4b-8154-d315432779b8"><strong>▶ Watch the full demo</strong></a> ·
+  <a href="media/showcase/cleanarr-demo.mp4">Download MP4</a> ·
+  <a href="media/showcase/cleanarr-demo.en.vtt">English captions</a> ·
+  <a href="media/showcase/cleanarr-demo.ru.vtt">Русские субтитры</a>
+</p>
+
+Recorded in a real production session, the video follows **storage → library → search → cleanup plan → cancel**. It stops before
+confirmation; the library and connected services are left unchanged. New
+installations start in dry-run mode.
+
 ## Screenshots
+
+<p align="center">
+  <a href="media/showcase/library-dark.jpg">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="media/showcase/library-dark.jpg"/>
+      <source media="(prefers-color-scheme: light)" srcset="media/showcase/library-light.jpg"/>
+      <img src="media/showcase/library-dark.jpg" alt="CleanArr Library with movie posters, search, size sorting, and compact navigation." width="100%"/>
+    </picture>
+  </a>
+  <br/>
+  <strong>Your collection, at a glance.</strong><br/>
+  <sub>Browse posters, search your library, and sort by the space each item uses.</sub><br/>
+  <a href="media/showcase/library-light.jpg">Light theme</a> · <a href="media/showcase/library-dark.jpg">Dark theme</a>
+</p>
 
 <table>
   <tr>
-    <td width="50%">
-      <img src="docs/screenshots/login.png" alt="Sign in" width="100%"/>
-      <p align="center"><sub>Sign in screen</sub></p>
+    <td width="50%" valign="top">
+      <a href="media/showcase/dashboard-light.jpg"><img src="media/showcase/dashboard-light.jpg" alt="Light dashboard showing free disk space and connected service health." width="100%"/></a>
+      <p><strong>01 · Know where you stand</strong><br/><sub>Free space and service health in one overview.</sub></p>
     </td>
-    <td width="50%">
-      <img src="docs/screenshots/register.png" alt="Create admin account" width="100%"/>
-      <p align="center"><sub>First-run — create admin account</sub></p>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%">
-      <img src="docs/screenshots/setup_wizard_step1.png" alt="Setup wizard" width="100%"/>
-      <p align="center"><sub>Guided setup wizard — Jellyfin step</sub></p>
-    </td>
-    <td width="50%">
-      <img src="docs/screenshots/dashboard.png" alt="Dashboard" width="100%"/>
-      <p align="center"><sub>Dashboard — all services healthy, Live mode</sub></p>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%">
-      <img src="docs/screenshots/dashboard_activity.png" alt="Activity log" width="100%"/>
-      <p align="center"><sub>Activity log with deletion history</sub></p>
-    </td>
-    <td width="50%">
-      <img src="docs/screenshots/jellyfin_modal.png" alt="Jellyfin service modal" width="100%"/>
-      <p align="center"><sub>Jellyfin service editor — webhook auto-configure</sub></p>
-    </td>
-  </tr>
-  <tr>
-    <td colspan="2">
-      <img src="docs/screenshots/settings.png" alt="Settings" width="100%"/>
-      <p align="center"><sub>Settings — General configuration</sub></p>
+    <td width="50%" valign="top">
+      <a href="media/showcase/preflight-dark.jpg"><img src="media/showcase/preflight-dark.jpg" alt="Deletion preview listing affected services before confirmation." width="100%"/></a>
+      <p><strong>02 · Review before you remove</strong><br/><sub>See the planned changes before making a decision.</sub></p>
     </td>
   </tr>
 </table>
+
+<details>
+  <summary>View the dashboard in dark mode</summary>
+  <p><a href="media/showcase/dashboard-dark.jpg"><img src="media/showcase/dashboard-dark.jpg" alt="CleanArr storage and service overview in dark mode." width="100%"/></a></p>
+</details>
+
+<sub>Captured from the released production UI on September 5, 2026. [Capture notes and video timeline](media/showcase/README.md).</sub>
 
 ---
 
