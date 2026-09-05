@@ -61,7 +61,13 @@ export class ApiController {
       }
       if (request.pathname === "/api/library/items") {
         const items = request.query.get("media_type") === "series" ? librarySeries : libraryMovies
-        return { body: { items, state: "complete", failures: [], next_cursor: null, revision: "fixture-catalog", catalog_revision: "fixture-catalog" } }
+        const requestedLimit = Number.parseInt(request.query.get("limit") ?? "50", 10)
+        const limit = Math.min(50, Math.max(1, Number.isFinite(requestedLimit) ? requestedLimit : 50))
+        const requestedOffset = Number.parseInt(request.query.get("cursor") ?? "0", 10)
+        const offset = Math.max(0, Number.isFinite(requestedOffset) ? requestedOffset : 0)
+        const pageItems = items.slice(offset, offset + limit)
+        const nextCursor = offset + pageItems.length < items.length ? String(offset + pageItems.length) : null
+        return { body: { items: pageItems, state: "complete", failures: [], next_cursor: nextCursor, revision: "fixture-catalog", catalog_revision: "fixture-catalog" } }
       }
       if (request.pathname.startsWith("/api/library/items/")) {
         const resourceId = decodeURIComponent(request.pathname.slice("/api/library/items/".length))

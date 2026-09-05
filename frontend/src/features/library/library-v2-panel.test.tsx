@@ -81,6 +81,39 @@ describe("LibraryPanelV2", () => {
     await waitFor(() => expect(screen.getAllByRole("listitem").map((card) => card.textContent)).toEqual([expect.stringContaining("Alpha"), expect.stringContaining("Zeta")]))
   })
 
+  it("keeps page-size choices aligned with the responsive poster columns", async () => {
+    const user = userEvent.setup()
+    let viewportWidth = 1600
+    const width = vi.spyOn(window, "innerWidth", "get").mockImplementation(() => viewportWidth)
+    const fetchJson = api()
+
+    try {
+      render(<LibraryPanelV2 active authenticated fetchJson={fetchJson} copy={LIBRARY_COPY.en} />)
+      const pageSize = screen.getByRole("combobox", { name: "Items per page" })
+      await waitFor(() => expect(pageSize).toHaveTextContent("15"))
+      await waitFor(() => expect(fetchJson).toHaveBeenCalledWith(expect.stringContaining("limit=15"), expect.anything()))
+
+      await user.click(pageSize)
+      await waitFor(() => expect(pageSize).toHaveAttribute("aria-expanded", "true"))
+      await user.click(await screen.findByRole("option", { name: "25" }))
+      await waitFor(() => expect(fetchJson).toHaveBeenCalledWith(expect.stringContaining("limit=25"), expect.anything()))
+
+      const cardSize = screen.getByRole("combobox", { name: "Card size" })
+      await user.click(cardSize)
+      await waitFor(() => expect(cardSize).toHaveAttribute("aria-expanded", "true"))
+      await user.click(await screen.findByRole("option", { name: "Small" }))
+      await waitFor(() => expect(pageSize).toHaveTextContent("28"))
+      await waitFor(() => expect(fetchJson).toHaveBeenCalledWith(expect.stringContaining("limit=28"), expect.anything()))
+
+      viewportWidth = 1280
+      fireEvent(window, new Event("resize"))
+      await waitFor(() => expect(pageSize).toHaveTextContent("24"))
+      await waitFor(() => expect(fetchJson).toHaveBeenCalledWith(expect.stringContaining("limit=24"), expect.anything()))
+    } finally {
+      width.mockRestore()
+    }
+  })
+
   it("persists selections across tabs, exposes hidden count, and caps at fifty", async () => {
     const user = userEvent.setup()
     const fetchJson = api()

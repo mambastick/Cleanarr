@@ -43,6 +43,7 @@ import {
 } from "@/lib/library"
 import { cn } from "@/lib/utils"
 import { LIBRARY_COPY, libraryEvidenceReason, librarySourceLabel, type LibraryLanguage, type LibraryV2Copy } from "./library-copy"
+import { cardGridClass, libraryGridBreakpoint, libraryPageSizeOptions, type LibraryCardSize } from "./library-grid"
 import { libraryDeleteTargetFromItem } from "./library-selection"
 import { useLibrary, type LibraryFilters } from "./use-library"
 
@@ -75,6 +76,17 @@ function useDesktopInspector() {
   return desktop
 }
 
+function useViewportWidth() {
+  const [viewportWidth, setViewportWidth] = useState(() => libraryGridBreakpoint(typeof window === "undefined" ? 0 : window.innerWidth))
+  useEffect(() => {
+    const update = () => setViewportWidth(libraryGridBreakpoint(window.innerWidth))
+    update()
+    window.addEventListener("resize", update)
+    return () => window.removeEventListener("resize", update)
+  }, [])
+  return viewportWidth
+}
+
 function unknownDetail(item: LibraryItem): LibraryItemDetail {
   return {
     ...item,
@@ -101,12 +113,13 @@ export function LibraryPanelV2({
 }: LibraryPanelV2Props) {
   const text = copy ?? LIBRARY_COPY[language]
   const desktopInspector = useDesktopInspector()
+  const viewportWidth = useViewportWidth()
   const [mediaType, setMediaType] = useState<LibraryMediaType>("movie")
   const [query, setQuery] = useState("")
   const [sort, setSort] = useState<LibrarySort>("added")
   const [direction, setDirection] = useState<LibraryDirection>("desc")
-  const [pageSize, setPageSize] = useState(12)
-  const [cardSize, setCardSize] = useState<"small" | "medium" | "large">("medium")
+  const [pageSizeTier, setPageSizeTier] = useState(0)
+  const [cardSize, setCardSize] = useState<LibraryCardSize>("medium")
   const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState<Record<string, LibraryItem>>({})
   const [catalogRevisions, setCatalogRevisions] = useState<Partial<Record<LibraryMediaType, string>>>({})
@@ -117,6 +130,14 @@ export function LibraryPanelV2({
   const detailTrigger = useRef<HTMLElement | null>(null)
   const detailRequest = useRef(0)
   const previousResetKey = useRef(resetKey)
+  const pageSizeOptions = useMemo(() => libraryPageSizeOptions(cardSize, viewportWidth), [cardSize, viewportWidth])
+  const pageSize = pageSizeOptions[pageSizeTier] ?? pageSizeOptions[0] ?? 12
+  const pageSizeItems = useMemo(() => Object.fromEntries(pageSizeOptions.map((value) => [String(value), String(value)])), [pageSizeOptions])
+  const changePageSize = (value: string | null) => {
+    if (value == null) return
+    const nextTier = pageSizeOptions.indexOf(Number(value))
+    if (nextTier >= 0) setPageSizeTier(nextTier)
+  }
   const filters: LibraryFilters = { mediaType, query, sort, direction, pageSize, refresh: false }
   const list = useLibrary({ active, authenticated, filters, fetchJson, onCatalogRevisionChange })
   const refreshLibrary = list.refresh
@@ -267,7 +288,7 @@ export function LibraryPanelV2({
     <div className="min-w-0 space-y-5">
       <LibraryStatus text={text} language={language} status={list.sourceStatus} failures={list.sourceFailures} error={list.error} onRetry={list.retry} />
       {list.loading && !list.items.length ? (
-        <div className={cn("grid gap-4", cardGridClass(cardSize))} aria-label={text.title} aria-busy="true">
+        <div className={cn("grid gap-4", cardGridClass(cardSize))} aria-hidden="true">
           {Array.from({ length: 8 }, (_, index) => <Skeleton key={index} className="aspect-[2/3] w-full rounded-xl" />)}
         </div>
       ) : null}
@@ -295,7 +316,7 @@ export function LibraryPanelV2({
   )
 
   return (
-    <section className={cn("relative space-y-5 pb-24", detail && desktopInspector && "pr-[384px]")} aria-label={text.title}>
+    <section className={cn("relative space-y-5 pb-24", detail && desktopInspector && "pr-[384px]")} aria-label={text.title} aria-busy={list.loading}>
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div><h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{text.title}</h1><p className="mt-1 text-sm text-muted-foreground">{text.description}</p></div>
         <div className="flex items-center gap-2">
@@ -314,7 +335,7 @@ export function LibraryPanelV2({
       </Tabs>
 
       <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-card p-3">
-        <label className="flex items-center gap-2 text-sm text-muted-foreground"><span>{text.itemsPerPage}</span><Select items={{ "12": "12", "24": "24", "48": "48" }} value={String(pageSize)} onValueChange={(value) => setPageSize(Number(value))}><SelectTrigger className="w-20" aria-label={text.itemsPerPage}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="12">12</SelectItem><SelectItem value="24">24</SelectItem><SelectItem value="48">48</SelectItem></SelectContent></Select></label>
+        <label className="flex items-center gap-2 text-sm text-muted-foreground"><span>{text.itemsPerPage}</span><Select items={pageSizeItems} value={String(pageSize)} onValueChange={changePageSize}><SelectTrigger className="w-20" aria-label={text.itemsPerPage}><SelectValue /></SelectTrigger><SelectContent>{pageSizeOptions.map((value) => <SelectItem key={value} value={String(value)}>{value}</SelectItem>)}</SelectContent></Select></label>
         <label className="flex items-center gap-2 text-sm text-muted-foreground"><span>{text.cardSize}</span><Select items={{ small: text.cardSmall, medium: text.cardMedium, large: text.cardLarge }} value={cardSize} onValueChange={(value) => setCardSize(value as typeof cardSize)}><SelectTrigger className="w-36" aria-label={text.cardSize}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="small">{text.cardSmall}</SelectItem><SelectItem value="medium">{text.cardMedium}</SelectItem><SelectItem value="large">{text.cardLarge}</SelectItem></SelectContent></Select></label>
       </div>
 
@@ -465,7 +486,6 @@ function mediaUnitLabel(value: number | null | undefined, unit: "season" | "epis
 }
 
 function Metric({ label, value }: { label: string; value: string }) { return <div><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 break-words font-medium">{value}</dd></div> }
-function cardGridClass(size: "small" | "medium" | "large") { if (size === "small") return "grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-7"; if (size === "large") return "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"; return "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" }
 function formatSize(size: number) { if (!size) return "0 B"; const index = Math.min(4, Math.floor(Math.log(size) / Math.log(1024))); return `${(size / 1024 ** index).toFixed(1)} ${["B", "KB", "MB", "GB", "TB"][index]}` }
 function formatDuration(seconds: number, language: LibraryLanguage) { const days = Math.floor(seconds / 86_400); const hours = Math.floor((seconds % 86_400) / 3_600); return days ? `${days}${language === "ru" ? "д" : "d"} ${hours}${language === "ru" ? "ч" : "h"}` : `${hours}${language === "ru" ? "ч" : "h"}` }
 function formatDate(value: string | null | undefined, language: LibraryLanguage, fallback: string) { if (!value) return fallback; const date = new Date(value); return Number.isNaN(date.getTime()) ? fallback : date.toLocaleDateString(language === "ru" ? "ru-RU" : "en-US") }
