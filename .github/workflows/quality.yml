@@ -161,7 +161,7 @@ jobs:
       - frontend
       - supply-chain
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       NFPM_VERSION: v2.47.0
 

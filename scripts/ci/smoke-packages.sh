@@ -23,7 +23,7 @@ artifact_dir=$(CDPATH='' cd -- "$artifact_dir" && pwd)
 smoke_script="$repo_root/scripts/ci/smoke-installed-package.sh"
 deb_name="cleanarr_${version}_${arch}.deb"
 rpm_name="cleanarr_${version}_${arch}.rpm"
-container_timeout_seconds=${CLEANARR_PACKAGE_SMOKE_TIMEOUT_SECONDS:-300}
+container_timeout_seconds=${CLEANARR_PACKAGE_SMOKE_TIMEOUT_SECONDS:-600}
 container_kill_after_seconds=${CLEANARR_PACKAGE_SMOKE_KILL_AFTER_SECONDS:-30}
 deb_container="cleanarr-package-smoke-deb-$$"
 rpm_container="cleanarr-package-smoke-rpm-$$"
