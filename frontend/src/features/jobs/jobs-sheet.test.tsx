@@ -25,3 +25,39 @@ it("uses coherent singular and Russian batch count copy", async () => {
   await user.click(screen.getByRole("button", { name: "Фоновые задачи" }))
   expect(screen.getByText("2 элемента в пакете")).toBeInTheDocument()
 })
+
+it("labels completed dry-run single jobs and batch children as simulations without changing real completions", async () => {
+  const user = userEvent.setup()
+  const simulatedResult = {
+    ...jobs[0].preflight,
+    actions: [{ system: "radarr", action: "delete_movie", status: "dry_run" as const, message: "PRIVATE", reason: null, details: {} }],
+  }
+  const simulatedJob = { ...jobs[0], status: "completed" as const, phase: "completed" as const, progress_percent: 100, result: simulatedResult }
+  const simulatedBatch = {
+    ...batches[0],
+    status: "completed" as const,
+    total_count: 1,
+    completed_count: 1,
+    blocked_count: 0,
+    cancelled_count: 0,
+    children: [{ ...batches[0].children[0], result: simulatedResult }],
+  }
+  const realCompletedJob = { ...simulatedJob, id: "job-2", display_name: "Real completed title", result: { ...simulatedResult, actions: [{ ...simulatedResult.actions[0], status: "deleted" as const }] } }
+  render(<JobsSheet jobs={[simulatedJob, realCompletedJob]} batches={[simulatedBatch]} title="Background tasks" activeLabel="active" recentLabel="recent" dismissLabel="Dismiss" closeLabel="Close jobs" progressLabel="Progress" language="en" announcement={null} announcementTone="polite" onDismiss={() => {}} />)
+  await user.click(screen.getByRole("button", { name: "Background tasks" }))
+  expect(screen.getAllByText("Simulation completed — no changes were made.")).toHaveLength(5)
+  expect(screen.getAllByText("Completed")).toHaveLength(2)
+  expect(screen.queryByText("PRIVATE")).not.toBeInTheDocument()
+})
+
+it("localizes the completed dry-run outcome in Russian", async () => {
+  const user = userEvent.setup()
+  const simulatedResult = {
+    ...jobs[0].preflight,
+    actions: [{ system: "radarr", action: "delete_movie", status: "dry_run" as const, message: "PRIVATE", reason: null, details: {} }],
+  }
+  const simulatedJob = { ...jobs[0], status: "completed" as const, phase: "completed" as const, progress_percent: 100, result: simulatedResult }
+  render(<JobsSheet jobs={[simulatedJob]} title="Фоновые задачи" activeLabel="активных" recentLabel="недавних" dismissLabel="Скрыть" closeLabel="Закрыть" progressLabel="Прогресс" language="ru" announcement={null} announcementTone="polite" onDismiss={() => {}} />)
+  await user.click(screen.getByRole("button", { name: "Фоновые задачи" }))
+  expect(screen.getAllByText("Симуляция завершена — изменения не внесены.")).toHaveLength(2)
+})
