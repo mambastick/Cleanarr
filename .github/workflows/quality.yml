@@ -161,6 +161,7 @@ jobs:
       - frontend
       - supply-chain
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     env:
       NFPM_VERSION: v2.47.0
 
@@ -189,6 +190,9 @@ jobs:
 
       - name: Install nFPM
         run: go install "github.com/goreleaser/nfpm/v2/cmd/nfpm@${NFPM_VERSION}"
+
+      - name: Test package smoke guardrails
+        run: sh scripts/ci/test-smoke-packages.sh
 
       - name: Build packages
         shell: bash
