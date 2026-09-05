@@ -13,6 +13,8 @@ export type UiTextKey =
   | "liveMode"
   | "liveModeDescription"
   | "dryRunDescription"
+  | "runtimeModeLoading"
+  | "runtimeModeLoadingDescription"
   | "logOut"
   | "navigation"
   | "status"
@@ -336,6 +338,8 @@ export const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     liveMode: "Real deletions",
     liveModeDescription: "Real deletions are active",
     dryRunDescription: "No deletions will be made",
+    runtimeModeLoading: "Checking deletion mode",
+    runtimeModeLoadingDescription: "CleanArr has not loaded the current deletion mode yet. Deletion controls stay unavailable until it does.",
     status: "Status",
     setup: "Setup",
     setupWizard: "Setup wizard",
@@ -643,6 +647,8 @@ export const UI_TEXTS: Record<UiLanguage, Partial<UiTextMap>> = {
     liveMode: "Реальные удаления",
     liveModeDescription: "Выполняются реальные удаления",
     dryRunDescription: "Реальные удаления отключены",
+    runtimeModeLoading: "Проверяем режим удаления",
+    runtimeModeLoadingDescription: "CleanArr ещё не загрузил текущий режим удаления. Элементы управления удалением недоступны, пока режим не определён.",
     status: "Статус",
     setup: "Настройка",
     setupWizard: "Мастер настройки",

@@ -17,13 +17,13 @@ function stateTone(item: DownloadItem) {
   return "border-status-success-border bg-status-success-bg text-status-success"
 }
 
-function TorrentControl({ item, text, language, actionStates, onControl, canMutate }: { item: DownloadItem; text: DownloadsCopy; language: DownloadsLanguage; actionStates: Record<string, DownloadActionState>; onControl: (item: DownloadItem, action: DownloadAction) => void; canMutate: boolean }) {
+function TorrentControl({ item, text, language, actionStates, onControl, canMutate, mutationUnavailableReason }: { item: DownloadItem; text: DownloadsCopy; language: DownloadsLanguage; actionStates: Record<string, DownloadActionState>; onControl: (item: DownloadItem, action: DownloadAction) => void; canMutate: boolean; mutationUnavailableReason?: string }) {
   const action = actionForItem(item)
   const actionKey = action ? `${item.client_id}:${item.info_hash}:${action}` : null
   const status = actionKey ? actionStates[actionKey] : undefined
   const canControl = canMutate && action != null && item.freshness === "fresh" && item.ownership === "managed" && item.unavailable_reason == null
   const disabledReason = !canMutate
-    ? text.adminOnly
+    ? mutationUnavailableReason ?? text.adminOnly
     : !canControl
     ? item.unavailable_reason ? reasonLabel(language, item.unavailable_reason) : text.actionUnavailable
     : null
@@ -52,7 +52,7 @@ function TorrentControl({ item, text, language, actionStates, onControl, canMuta
   )
 }
 
-export function TorrentTable({ items, language, text, actionStates, onControl, canMutate = true }: { items: DownloadItem[]; language: DownloadsLanguage; text: DownloadsCopy; actionStates: Record<string, DownloadActionState>; onControl: (item: DownloadItem, action: DownloadAction) => void; canMutate?: boolean }) {
+export function TorrentTable({ items, language, text, actionStates, onControl, canMutate = true, mutationUnavailableReason }: { items: DownloadItem[]; language: DownloadsLanguage; text: DownloadsCopy; actionStates: Record<string, DownloadActionState>; onControl: (item: DownloadItem, action: DownloadAction) => void; canMutate?: boolean; mutationUnavailableReason?: string }) {
   return (
     <div className="overflow-hidden rounded-xl border bg-card">
       <Table>
@@ -94,7 +94,7 @@ export function TorrentTable({ items, language, text, actionStates, onControl, c
                   <span className="text-[11px] text-muted-foreground">{enumLabel(language, "ownership", item.ownership)}</span>
                 </div>
               </TableCell>
-              <TableCell className="px-4"><TorrentControl item={item} text={text} language={language} actionStates={actionStates} onControl={onControl} canMutate={canMutate} /></TableCell>
+              <TableCell className="px-4"><TorrentControl item={item} text={text} language={language} actionStates={actionStates} onControl={onControl} canMutate={canMutate} mutationUnavailableReason={mutationUnavailableReason} /></TableCell>
             </TableRow>
           ))}
         </TableBody>

@@ -14,6 +14,7 @@ const BASE_DOWNLOADS_COPY = {
 const EXTRA_COPY = {
   en: {
     close: "Close",
+    runtimeModeLoading: "Checking the current deletion mode. Controls stay unavailable until it is known.",
     inProgress: "The server still reports this control in progress. Refresh or retry the same intent; do not assume success.",
     readinessReason: "Readiness reason",
     torrentState: "Torrent state",
@@ -31,6 +32,7 @@ const EXTRA_COPY = {
   },
   ru: {
     close: "Закрыть",
+    runtimeModeLoading: "Проверяем текущий режим удаления. Элементы управления недоступны, пока он не определён.",
     inProgress: "Сервер всё ещё считает команду выполняющейся. Обновите данные или повторите то же намерение; не считайте это успехом.",
     readinessReason: "Причина готовности",
     torrentState: "Состояние торрента",

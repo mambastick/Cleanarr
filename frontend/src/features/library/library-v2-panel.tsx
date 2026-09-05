@@ -55,6 +55,8 @@ export interface LibraryPanelV2Props {
   /** The application owns confirmation; this callback must only prepare a plan. */
   onDeletePreview?: (item: LibraryItem, trigger: HTMLElement) => void
   onBatchPreview?: (items: LibraryItem[], trigger: HTMLElement) => void
+  canPlanDeletion?: boolean
+  deletionPlanningUnavailableReason?: string
   onCatalogRevisionChange?: (revision: string) => void
   resetKey?: string | number
 }
@@ -92,6 +94,8 @@ export function LibraryPanelV2({
   fetchJson,
   onDeletePreview,
   onBatchPreview,
+  canPlanDeletion = true,
+  deletionPlanningUnavailableReason,
   onCatalogRevisionChange,
   resetKey,
 }: LibraryPanelV2Props) {
@@ -208,6 +212,10 @@ export function LibraryPanelV2({
   }, [detail, openDetail])
 
   const toggle = (item: LibraryItem) => {
+    if (!canPlanDeletion) {
+      setSelectionError(deletionPlanningUnavailableReason ?? text.deleteUnavailable)
+      return
+    }
     if (!libraryDeleteTargetFromItem(item)) {
       setSelectionError(text.deleteUnavailable)
       return
@@ -229,6 +237,10 @@ export function LibraryPanelV2({
   }
 
   const selectVisibleItems = () => {
+    if (!canPlanDeletion) {
+      setSelectionError(deletionPlanningUnavailableReason ?? text.deleteUnavailable)
+      return
+    }
     setSelected((current) => {
       const next = { ...current }
       let count = Object.keys(next).length
@@ -267,6 +279,8 @@ export function LibraryPanelV2({
               onToggle={() => toggle(item)}
               onOpen={openDetail}
               onDeletePreview={onDeletePreview}
+              canPlanDeletion={canPlanDeletion}
+              deletionPlanningUnavailableReason={deletionPlanningUnavailableReason}
             />
           ))}
         </div>
@@ -280,11 +294,13 @@ export function LibraryPanelV2({
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div><h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{text.title}</h1><p className="mt-1 text-sm text-muted-foreground">{text.description}</p></div>
         <div className="flex items-center gap-2">
-          {selectMode ? <Button variant="outline" onClick={selectVisibleItems} disabled={!list.items.length}>{text.selectVisible}</Button> : null}
-          <AnimateIcon><Button data-batch-focus-fallback variant={selectMode ? "secondary" : "outline"} onClick={() => { if (selectMode) resetSelection(); setSelectMode((value) => !value) }} aria-pressed={selectMode}>{selectMode ? <AnimatedIcon animation="wiggle"><X /></AnimatedIcon> : null}{selectMode ? text.exitSelectMode : text.selectMode}</Button></AnimateIcon>
+          {selectMode ? <Button variant="outline" onClick={selectVisibleItems} disabled={!list.items.length || !canPlanDeletion}>{text.selectVisible}</Button> : null}
+          <AnimateIcon><Button data-batch-focus-fallback variant={selectMode ? "secondary" : "outline"} onClick={() => { if (selectMode) resetSelection(); setSelectMode((value) => !value) }} aria-pressed={selectMode} disabled={!canPlanDeletion} aria-describedby={!canPlanDeletion ? "library-delete-planning-reason" : undefined}>{selectMode ? <AnimatedIcon animation="wiggle"><X /></AnimatedIcon> : null}{selectMode ? text.exitSelectMode : text.selectMode}</Button></AnimateIcon>
           <Tooltip><AnimateIcon><TooltipTrigger render={<Button variant="outline" size="icon" aria-label={text.refresh} onClick={list.refresh} disabled={list.loading}><AnimatedIcon animation="rotate"><RefreshCw className={cn(list.loading && "opacity-50")} /></AnimatedIcon></Button>} /></AnimateIcon><TooltipContent>{text.refresh}</TooltipContent></Tooltip>
         </div>
       </header>
+
+      {!canPlanDeletion && deletionPlanningUnavailableReason ? <Alert><Info /><AlertTitle>{text.unknown}</AlertTitle><AlertDescription id="library-delete-planning-reason">{deletionPlanningUnavailableReason}</AlertDescription></Alert> : null}
 
       <Tabs className="md:data-horizontal:grid md:data-horizontal:grid-cols-[auto_minmax(0,1fr)] md:data-horizontal:items-center md:data-horizontal:gap-4" value={mediaType} onValueChange={(value) => setMediaType(value as LibraryMediaType)}>
         <TabsList aria-label={text.title}><AnimateIcon><TabsTrigger value="movie"><AnimatedIcon animation="pulse"><Film /></AnimatedIcon>{text.movies}</TabsTrigger></AnimateIcon><AnimateIcon><TabsTrigger value="series"><AnimatedIcon animation="pulse"><Tv /></AnimatedIcon>{text.series}</TabsTrigger></AnimateIcon></TabsList>
@@ -305,7 +321,7 @@ export function LibraryPanelV2({
             <div className="h-64 bg-muted"><Artwork resourceId={detail.resource_id} artwork={detail.artwork} fallback={detail.media_type === "movie" ? <Film className="size-12 text-muted-foreground" /> : <Tv className="size-12 text-muted-foreground" />} /></div>
             <div className="relative -mt-8 min-h-[calc(100vh-14rem)] rounded-t-3xl bg-card p-5">
               <p className="sr-only">{text.technicalDetails}</p>
-              <Inspector desktop detail={detail} loading={detailLoading} error={detailError} text={text} language={language} onDeletePreview={onDeletePreview} onSelect={() => { toggle(detail); setSelectMode(true) }} onRetry={retryDetail} />
+              <Inspector desktop detail={detail} loading={detailLoading} error={detailError} text={text} language={language} onDeletePreview={onDeletePreview} canPlanDeletion={canPlanDeletion} deletionPlanningUnavailableReason={deletionPlanningUnavailableReason} onSelect={() => { toggle(detail); setSelectMode(true) }} onRetry={retryDetail} />
             </div>
           </aside>
         ) : null}
@@ -314,7 +330,7 @@ export function LibraryPanelV2({
       {selectedItems.length ? (
         <aside className="sticky bottom-[calc(5.25rem+env(safe-area-inset-bottom))] z-30 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/40 bg-card/95 p-3 shadow-lg backdrop-blur md:bottom-3" aria-label={`${selectedItems.length} ${text.selected}`}>
           <div><p className="text-sm font-medium">{selectedItems.length} {text.selected}{hidden ? <span className="ml-2 text-muted-foreground">· {hidden} {text.selectedHidden}</span> : null}</p>{selectionError || selectionNeedsReview ? <p role="alert" className="mt-1 text-xs text-status-warning">{selectionError ?? text.selectionNeedsReview}</p> : null}</div>
-          <div className="flex gap-2"><Button variant="outline" onClick={resetSelection}>{text.clearSelection}</Button><Button onClick={(event) => onBatchPreview?.(selectedItems, event.currentTarget)} disabled={!onBatchPreview || catalogChanging || selectionNeedsReview || list.loading}>{text.batchDelete}</Button></div>
+          <div className="flex gap-2"><Button variant="outline" onClick={resetSelection}>{text.clearSelection}</Button><Button onClick={(event) => onBatchPreview?.(selectedItems, event.currentTarget)} disabled={!onBatchPreview || !canPlanDeletion || catalogChanging || selectionNeedsReview || list.loading} aria-describedby={!canPlanDeletion ? "library-delete-planning-reason" : undefined}>{text.batchDelete}</Button></div>
         </aside>
       ) : null}
 
@@ -324,7 +340,7 @@ export function LibraryPanelV2({
             <SheetBackdrop className="fixed inset-0 z-50 bg-foreground/25 backdrop-blur-[1px]" />
             <SheetContent className="fixed inset-y-0 right-0 z-[51] w-full overflow-y-auto border-l bg-card p-5 shadow-2xl outline-none sm:w-[360px]">
               <div className="flex items-start justify-between gap-3"><div><SheetTitle>{detail?.display_name ?? text.title}</SheetTitle><SheetDescription>{text.technicalDetails}</SheetDescription></div><SheetClose render={<Button variant="ghost" size="icon" aria-label={text.close} title={text.close} />}><X aria-hidden="true" /></SheetClose></div>
-              {detail ? <Inspector detail={detail} loading={detailLoading} error={detailError} text={text} language={language} onDeletePreview={onDeletePreview} onSelect={() => { toggle(detail); setSelectMode(true) }} onRetry={retryDetail} /> : null}
+              {detail ? <Inspector detail={detail} loading={detailLoading} error={detailError} text={text} language={language} onDeletePreview={onDeletePreview} canPlanDeletion={canPlanDeletion} deletionPlanningUnavailableReason={deletionPlanningUnavailableReason} onSelect={() => { toggle(detail); setSelectMode(true) }} onRetry={retryDetail} /> : null}
             </SheetContent>
           </SheetPortal>
         </Sheet>
@@ -353,10 +369,10 @@ function LibraryStatus({ text, language, status, failures, error, onRetry }: { t
   return null
 }
 
-function LibraryCard({ item, text, selectMode, selected, onToggle, onOpen, onDeletePreview }: { item: LibraryItem; text: LibraryV2Copy; selectMode: boolean; selected: boolean; onToggle: () => void; onOpen: (item: LibraryItem, trigger: HTMLElement) => void; onDeletePreview?: (item: LibraryItem, trigger: HTMLElement) => void }) {
+function LibraryCard({ item, text, selectMode, selected, onToggle, onOpen, onDeletePreview, canPlanDeletion, deletionPlanningUnavailableReason }: { item: LibraryItem; text: LibraryV2Copy; selectMode: boolean; selected: boolean; onToggle: () => void; onOpen: (item: LibraryItem, trigger: HTMLElement) => void; onDeletePreview?: (item: LibraryItem, trigger: HTMLElement) => void; canPlanDeletion: boolean; deletionPlanningUnavailableReason?: string }) {
   const typeLabel = item.media_type === "movie" ? text.movie : text.seriesType
   const selectable = Boolean(libraryDeleteTargetFromItem(item))
-  const deleteAvailable = Boolean(onDeletePreview && libraryDeleteTargetFromItem(item))
+  const deleteAvailable = Boolean(canPlanDeletion && onDeletePreview && libraryDeleteTargetFromItem(item))
   const selectionUnavailableId = `selection-unavailable-${item.resource_id.replace(/[^a-zA-Z0-9_-]/g, "-")}`
   const handleCardAction = (event: ReactMouseEvent<HTMLButtonElement>) => {
     if (selectMode) onToggle()
@@ -367,7 +383,7 @@ function LibraryCard({ item, text, selectMode, selected, onToggle, onOpen, onDel
       <div className={cn("relative aspect-[2/3] overflow-hidden rounded-lg bg-muted shadow-sm", selected && "ring-3 ring-primary ring-offset-2 ring-offset-background")}>
         <button type="button" className="absolute inset-0 z-0 block size-full rounded-lg text-left focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed" aria-label={selectMode ? `${text.select}: ${item.display_name}` : `${item.display_name}, ${typeLabel}`} aria-describedby={selectMode && !selectable ? selectionUnavailableId : undefined} disabled={selectMode && !selectable} onClick={handleCardAction}><Artwork resourceId={item.resource_id} artwork={item.artwork} fallback={item.media_type === "movie" ? <Film className="size-10 text-muted-foreground" /> : <Tv className="size-10 text-muted-foreground" />} /></button>
         {selectMode ? <Checkbox className="absolute left-2 top-2 z-10 size-6 bg-card/90" checked={selected} disabled={!selectable} aria-label={`${text.select}: ${item.display_name}`} aria-describedby={!selectable ? selectionUnavailableId : undefined} onCheckedChange={onToggle} /> : null}
-        <Tooltip><AnimateIcon><TooltipTrigger render={<Button variant="destructive" size="icon" className="library-card__delete size-12 bg-destructive! text-white! shadow-xl hover:bg-destructive/90!" aria-label={`${text.reviewPlan}: ${item.display_name}`} onClick={(event) => onDeletePreview?.(item, event.currentTarget)} disabled={!deleteAvailable}><AnimatedIcon animation="wiggle"><Trash2 /></AnimatedIcon></Button>} /></AnimateIcon><TooltipContent>{deleteAvailable ? text.reviewPlan : text.deleteUnavailable}</TooltipContent></Tooltip>
+        <Tooltip><AnimateIcon><TooltipTrigger render={<Button variant="destructive" size="icon" className="library-card__delete size-12 bg-destructive! text-white! shadow-xl hover:bg-destructive/90!" aria-label={`${text.reviewPlan}: ${item.display_name}`} onClick={(event) => onDeletePreview?.(item, event.currentTarget)} disabled={!deleteAvailable}><AnimatedIcon animation="wiggle"><Trash2 /></AnimatedIcon></Button>} /></AnimateIcon><TooltipContent>{deleteAvailable ? text.reviewPlan : deletionPlanningUnavailableReason ?? text.deleteUnavailable}</TooltipContent></Tooltip>
       </div>
       <button type="button" className="mt-2 block min-h-11 w-full rounded text-left focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed" aria-describedby={selectMode && !selectable ? selectionUnavailableId : undefined} disabled={selectMode && !selectable} onClick={handleCardAction}><span className="block truncate text-sm font-medium">{item.display_name}</span><span className="block truncate text-xs text-muted-foreground">{item.year ?? text.unknown}{item.size != null ? ` · ${formatSize(item.size)}` : ""}</span></button>
       {selectMode && !selectable ? <p id={selectionUnavailableId} className="mt-1 text-xs text-muted-foreground">{text.selectionUnavailable}</p> : null}
@@ -384,7 +400,7 @@ function Artwork({ resourceId, artwork, fallback }: { resourceId: string; artwor
   return <div className="size-full">{url && !failed ? <img src={url} alt="" loading="lazy" decoding="async" className="size-full object-cover" onError={() => setFailed(true)} /> : <div className="grid size-full place-items-center" aria-hidden="true">{fallback}</div>}</div>
 }
 
-function Inspector({ detail, loading, error, text, language, onDeletePreview, onSelect, onRetry, desktop = false }: { detail: LibraryItemDetail; loading: boolean; error: boolean; text: LibraryV2Copy; language: LibraryLanguage; onDeletePreview?: (item: LibraryItem, trigger: HTMLElement) => void; onSelect: () => void; onRetry: () => void; desktop?: boolean }) {
+function Inspector({ detail, loading, error, text, language, onDeletePreview, canPlanDeletion, deletionPlanningUnavailableReason, onSelect, onRetry, desktop = false }: { detail: LibraryItemDetail; loading: boolean; error: boolean; text: LibraryV2Copy; language: LibraryLanguage; onDeletePreview?: (item: LibraryItem, trigger: HTMLElement) => void; canPlanDeletion: boolean; deletionPlanningUnavailableReason?: string; onSelect: () => void; onRetry: () => void; desktop?: boolean }) {
   const playback = detail.playback
   const seeding = detail.seeding
   const watched = playback?.watched ?? detail.playback_status
@@ -398,7 +414,7 @@ function Inspector({ detail, loading, error, text, language, onDeletePreview, on
   const seasonCount = detail.seasons?.length ?? detail.series_counts?.seasons ?? detail.counts?.seasons
   const episodeCount = detail.seasons?.reduce((sum, season) => sum + (season.episode_count ?? 0), 0) ?? detail.series_counts?.episodes ?? detail.counts?.episodes
   const hasDeleteTarget = Boolean(libraryDeleteTargetFromItem(detail))
-  const deleteAvailable = Boolean(onDeletePreview && hasDeleteTarget && !loading && !error)
+  const deleteAvailable = Boolean(canPlanDeletion && onDeletePreview && hasDeleteTarget && !loading && !error)
   const safetyClass = safetyStatus === "safe" ? "border-status-success-border bg-status-success-bg text-status-success" : safetyStatus === "blocked" ? "border-status-danger-border bg-status-danger-bg text-status-danger" : "border-status-unknown-border bg-status-unknown-bg text-status-unknown"
 
   return (
@@ -420,7 +436,7 @@ function Inspector({ detail, loading, error, text, language, onDeletePreview, on
       {detail.unknown_reasons?.length || seedReason ? <div className="rounded-xl border border-status-unknown-border bg-status-unknown-bg p-3 text-xs"><p className="font-medium">{text.unknownReasons}</p><p className="mt-1 text-muted-foreground">{text.evidenceSummary}</p><ul className="mt-2 list-disc space-y-1 pl-4">{[...new Set([...(detail.unknown_reasons ?? []), seedReason].filter((reason): reason is string => Boolean(reason)))].map((reason) => <li key={reason}>{libraryEvidenceReason(language, reason)}</li>)}</ul></div> : null}
       {detail.media_type === "series" && seasonCount != null ? <div className="rounded-xl border border-border p-3 text-sm"><p className="font-medium">{text.seasonBreakdown}</p><p className="mt-1 text-muted-foreground">{formatMediaCount(seasonCount, "season", language)} · {episodeCount == null ? `${text.unknown} ${text.episodes.toLowerCase()}` : formatMediaCount(episodeCount, "episode", language)}</p>{detail.seasons?.length ? <ul className="mt-3 divide-y rounded-lg border">{detail.seasons.map((season) => <li key={season.season_number} className="grid gap-1 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"><span className="font-medium">{season.title || `${text.season} ${season.season_number}`}</span><span className="text-xs text-muted-foreground">{season.episode_file_count ?? text.unknown}/{season.episode_count ?? text.unknown} {mediaUnitLabel(season.episode_count, "episode", language)}{season.size != null ? ` · ${formatSize(season.size)}` : ""}</span></li>)}</ul> : null}</div> : null}
       <div className={cn("rounded-xl border p-3 text-sm", safetyClass)}><p className="font-medium">{text.safety}</p><p className="mt-1 text-current/80">{safetyStatus === "safe" ? text.safe : safetyStatus === "blocked" ? text.blocked : text.signalUnavailable}</p></div>
-      <div className="grid gap-2"><Button variant="destructive" className="w-full" disabled={!deleteAvailable} onClick={(event) => onDeletePreview?.(detail, event.currentTarget)}><Trash2 aria-hidden="true" />{text.reviewPlan}</Button>{!deleteAvailable ? <p className="text-xs text-muted-foreground">{text.deleteUnavailable}</p> : null}<Button variant="outline" className="w-full" disabled={!hasDeleteTarget || loading || error} onClick={onSelect}>{text.selectForGroup}</Button></div>
+      <div className="grid gap-2"><Button variant="destructive" className="w-full" disabled={!deleteAvailable} onClick={(event) => onDeletePreview?.(detail, event.currentTarget)}><Trash2 aria-hidden="true" />{text.reviewPlan}</Button>{!deleteAvailable ? <p className="text-xs text-muted-foreground">{deletionPlanningUnavailableReason ?? text.deleteUnavailable}</p> : null}<Button variant="outline" className="w-full" disabled={!canPlanDeletion || !hasDeleteTarget || loading || error} onClick={onSelect}>{text.selectForGroup}</Button></div>
       <details><summary className="cursor-pointer text-sm font-medium">{text.additional}</summary><dl className="mt-2 grid gap-2 rounded-lg bg-muted p-3 text-xs"><Metric label={text.checkedAt} value={formatDate(detail.fetched_at, language, text.unknown)} /><Metric label={text.safety} value={detail.safety?.reason ? libraryEvidenceReason(language, detail.safety.reason) : text.evidenceComplete} /></dl></details>
     </div>
   )

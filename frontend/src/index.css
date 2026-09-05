@@ -396,6 +396,7 @@
 .app-shell__runtime-status { display: inline-flex; min-height: 2.25rem; align-items: center; gap: 0.45rem; border: 1px solid; border-radius: 0.625rem; padding: 0.35rem 0.7rem; font-size: 0.75rem; font-weight: 650; outline: none; }
 .app-shell__runtime-status--live { border-color: var(--status-success-border); background: var(--status-success-bg); color: var(--status-success); }
 .app-shell__runtime-status--dry { border-color: var(--status-warning-border); background: var(--status-warning-bg); color: var(--status-warning); }
+.app-shell__runtime-status--unknown { border-color: var(--status-unknown-border); background: var(--status-unknown-bg); color: var(--status-unknown); }
 .app-shell__status-icon { width: 1rem; height: 1rem; flex: 0 0 auto; }
 .app-shell__runtime-status:focus-visible,
 .app-shell__storage:focus-visible { outline: 3px solid color-mix(in srgb, var(--ring) 50%, transparent); outline-offset: 2px; }

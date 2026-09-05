@@ -35,6 +35,7 @@ import { normalizeError } from "@/lib/status-format"
 import { connectionFingerprint } from "@/lib/downloader-profile"
 import { useStorage, type StorageResponse } from "@/lib/storage"
 import { useApiClient } from "@/lib/use-api-client"
+import type { RuntimeMode } from "@/lib/runtime-mode"
 
 type AuthMode = "register" | "login"
 
@@ -94,6 +95,13 @@ function CleanArrApp() {
     [authStatus?.ui_language, config?.general.ui_language],
   )
   const uiText = useMemo(() => getUiText(uiLanguage), [uiLanguage])
+  const runtimeMode: RuntimeMode = config != null
+    ? config.general.dry_run ? "dry_run" : "live"
+    : dashboard != null
+      ? dashboard.service.dry_run ? "dry_run" : "live"
+      : "unknown"
+  const isLive = runtimeMode === "live"
+  const isRuntimeKnown = runtimeMode !== "unknown"
 
   const fetchJson = useApiClient(csrfToken, setCsrfToken)
   const storage = useStorage({
@@ -377,6 +385,12 @@ function CleanArrApp() {
     }
   }, [authStatus, loadConfig])
 
+  useEffect(() => {
+    if (runtimeMode !== "unknown") return
+    if (deleteSession.phase !== "closed") dispatchDeleteSession({ type: "close" })
+    if (batchDeleteSession.phase !== "closed") dispatchBatchDeleteSession({ type: "close" })
+  }, [batchDeleteSession.phase, deleteSession.phase, runtimeMode])
+
   const setupCompletionCount = useMemo(
     () => SETUP_STEPS.reduce((n, step) => n + (isSetupStepConfigured(step.id, config) ? 1 : 0), 0),
     [config],
@@ -590,8 +604,6 @@ function CleanArrApp() {
     )
   }
 
-  // Derive from config first (updated immediately after save), fall back to dashboard (polled)
-  const isLive = config != null ? !config.general.dry_run : dashboard ? !dashboard.service.dry_run : false
   const isAdmin = authStatus.role === "admin"
 
   // ─── Main app ──────────────────────────────────────────────────────────────
@@ -642,7 +654,7 @@ function CleanArrApp() {
           }
         }}
         onLogout={() => void logout()}
-        dryRun={!isLive}
+        runtimeMode={runtimeMode}
         storageHeadline={shellStorage}
         labels={SHELL_COPY[shellLanguage]}
         canAdmin={isAdmin}
@@ -673,6 +685,7 @@ function CleanArrApp() {
               latestActivity={latestActivity}
               allServicesConfigured={allServicesConfigured}
               isLive={isLive}
+              runtimeMode={runtimeMode}
               storage={storage.data}
               storageLoading={storage.loading || storage.refreshing}
               storageError={storage.error}
@@ -707,6 +720,8 @@ function CleanArrApp() {
               resetKey={libraryResetKey}
               onDeletePreview={isAdmin ? openLibraryDeletePreview : undefined}
               onBatchPreview={isAdmin ? openLibraryBatchPreview : undefined}
+              canPlanDeletion={isAdmin && isRuntimeKnown}
+              deletionPlanningUnavailableReason={isRuntimeKnown ? undefined : uiText.runtimeModeLoadingDescription}
             />
           </div>
 
@@ -717,7 +732,9 @@ function CleanArrApp() {
                 authenticated={Boolean(authStatus.authenticated)}
                 language={shellLanguage}
                 isLive={isLive}
-                canMutate={isAdmin}
+                runtimeMode={runtimeMode}
+                canMutate={isAdmin && isRuntimeKnown}
+                mutationUnavailableReason={isAdmin && !isRuntimeKnown ? uiText.runtimeModeLoadingDescription : undefined}
                 fetchJson={fetchJson}
                 onActiveCountChange={setDownloadsActiveCount}
                 onDelete={openDeletePreview}

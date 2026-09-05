@@ -37,6 +37,12 @@ function renderShell(overrides: Partial<React.ComponentProps<typeof AppShell>> =
   )
 }
 
+it("does not assume live mode when no runtime evidence is supplied", () => {
+  renderShell({ dryRun: undefined, runtimeMode: undefined })
+
+  expect(screen.getAllByRole("status", { name: "Runtime status: Checking mode…" })).toHaveLength(2)
+})
+
 it("marks the active page and exposes every desktop destination as a keyboard target", async () => {
   const user = userEvent.setup()
   const onPageChange = vi.fn()
