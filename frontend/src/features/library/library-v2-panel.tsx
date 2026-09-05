@@ -112,8 +112,10 @@ export function LibraryPanelV2({
   const [detailError, setDetailError] = useState(false)
   const detailTrigger = useRef<HTMLElement | null>(null)
   const detailRequest = useRef(0)
+  const previousResetKey = useRef(resetKey)
   const filters: LibraryFilters = { mediaType, query, sort, direction, pageSize, refresh: false }
   const list = useLibrary({ active, authenticated, filters, fetchJson, onCatalogRevisionChange })
+  const refreshLibrary = list.refresh
 
   const resetSelection = useCallback(() => {
     setSelected({})
@@ -130,6 +132,8 @@ export function LibraryPanelV2({
   })
 
   useEffect(() => {
+    const shouldRefresh = previousResetKey.current !== resetKey
+    previousResetKey.current = resetKey
     detailRequest.current += 1
     resetSelection()
     setCatalogRevisions({})
@@ -137,7 +141,8 @@ export function LibraryPanelV2({
     setDetail(null)
     setDetailLoading(false)
     setDetailError(false)
-  }, [resetKey, resetSelection])
+    if (shouldRefresh) refreshLibrary()
+  }, [refreshLibrary, resetKey, resetSelection])
   useEffect(() => {
     if (!authenticated) {
       detailRequest.current += 1
