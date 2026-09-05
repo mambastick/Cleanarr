@@ -133,7 +133,13 @@ class BaseDeletionStrategy(ABC):
         else:
             collector.add(system, action, ActionStatus.DELETED, message, reason=reason, **details)
 
-    async def _cleanup_hashes(self, collector: ActionCollector, hashes: set[str]) -> bool:
+    async def _cleanup_hashes(
+        self,
+        collector: ActionCollector,
+        hashes: set[str],
+        *,
+        allow_empty: bool = False,
+    ) -> bool:
         """Delete resolved hashes and report whether dependent mutations may continue."""
 
         if not hashes:
@@ -144,7 +150,7 @@ class BaseDeletionStrategy(ABC):
                 "No safe downloader hashes were found for deletion.",
                 reason=FailureReason.NO_MATCH,
             )
-            return True
+            return allow_empty
 
         try:
             removal_results = await self._downloader.delete_hashes(
@@ -715,7 +721,11 @@ class SeasonDeletionStrategy(BaseDeletionStrategy):
                 **note.details,
             )
 
-        downloader_ready = await self._cleanup_hashes(collector, set(safety.hashes_to_delete))
+        downloader_ready = await self._cleanup_hashes(
+            collector,
+            set(safety.hashes_to_delete),
+            allow_empty=not safety.episode_file_ids_to_delete,
+        )
         if not downloader_ready:
             self._record_downloader_block(
                 collector,
@@ -828,7 +838,11 @@ class EpisodeDeletionStrategy(BaseDeletionStrategy):
                 **note.details,
             )
 
-        downloader_ready = await self._cleanup_hashes(collector, set(safety.hashes_to_delete))
+        downloader_ready = await self._cleanup_hashes(
+            collector,
+            set(safety.hashes_to_delete),
+            allow_empty=not safety.episode_file_ids_to_delete,
+        )
         if not downloader_ready:
             self._record_downloader_block(
                 collector,

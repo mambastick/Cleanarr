@@ -46,6 +46,7 @@ _SAFE_RETAINED_SKIP_REASONS = frozenset(
         FailureReason.NO_PARTIAL_REQUEST_CLEANUP,
     }
 )
+_VOLATILE_PLAN_ACTION_DETAILS = frozenset({"ratio", "seeding_time_seconds"})
 
 
 class DeletionJobNotFoundError(LookupError):
@@ -481,8 +482,13 @@ class DeletionExecutionFailure(RuntimeError):
 def plan_hash(plan: ProcessingResultResponse) -> str:
     """Hash canonical safety content, excluding presentation and correlation values."""
 
+    material = plan.model_dump(mode="json", exclude={"correlation_id", "display_name"})
+    for action in material["actions"]:
+        action.pop("message", None)
+        for key in _VOLATILE_PLAN_ACTION_DETAILS:
+            action["details"].pop(key, None)
     payload = json.dumps(
-        plan.model_dump(mode="json", exclude={"correlation_id", "display_name"}),
+        material,
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,

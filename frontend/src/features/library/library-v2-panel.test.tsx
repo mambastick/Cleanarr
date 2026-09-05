@@ -194,6 +194,22 @@ describe("LibraryPanelV2", () => {
     expect(screen.queryByText("Data details")).not.toBeInTheDocument()
   })
 
+  it("bypasses the catalogue cache after a controlled reset", async () => {
+    const fetchJson = vi.fn((url: string) => Promise.resolve(
+      url.includes("refresh=true")
+        ? { items: [], next_cursor: null, source_status: "complete", source_failures: [], catalog_revision: "rev-2" }
+        : { items: [item], next_cursor: null, source_status: "complete", source_failures: [], catalog_revision: "rev-1" },
+    )) as unknown as Parameters<typeof LibraryPanelV2>[0]["fetchJson"]
+    const { rerender } = render(<LibraryPanelV2 active authenticated fetchJson={fetchJson} copy={LIBRARY_COPY.en} resetKey={0} />)
+
+    await waitFor(() => expect(screen.getByText("Dune: Part Two")).toBeInTheDocument())
+    rerender(<LibraryPanelV2 active authenticated fetchJson={fetchJson} copy={LIBRARY_COPY.en} resetKey={1} />)
+
+    await waitFor(() => expect(fetchJson).toHaveBeenCalledWith(expect.stringContaining("refresh=true"), expect.anything()))
+    await waitFor(() => expect(screen.queryByText("Dune: Part Two")).not.toBeInTheDocument())
+    expect(screen.getByText("No library items found.")).toBeInTheDocument()
+  })
+
   it("renders Russian copy without English technical labels", async () => {
     const fetchJson = api()
     render(<LibraryPanelV2 active authenticated language="ru" fetchJson={fetchJson} />)
