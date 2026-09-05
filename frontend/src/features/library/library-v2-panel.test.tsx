@@ -94,12 +94,14 @@ describe("LibraryPanelV2", () => {
       await waitFor(() => expect(fetchJson).toHaveBeenCalledWith(expect.stringContaining("limit=15"), expect.anything()))
 
       await user.click(pageSize)
-      await user.click(screen.getByRole("option", { name: "25" }))
+      await waitFor(() => expect(pageSize).toHaveAttribute("aria-expanded", "true"))
+      await user.click(await screen.findByRole("option", { name: "25" }))
       await waitFor(() => expect(fetchJson).toHaveBeenCalledWith(expect.stringContaining("limit=25"), expect.anything()))
 
       const cardSize = screen.getByRole("combobox", { name: "Card size" })
       await user.click(cardSize)
-      await user.click(screen.getByRole("option", { name: "Small" }))
+      await waitFor(() => expect(cardSize).toHaveAttribute("aria-expanded", "true"))
+      await user.click(await screen.findByRole("option", { name: "Small" }))
       await waitFor(() => expect(pageSize).toHaveTextContent("28"))
       await waitFor(() => expect(fetchJson).toHaveBeenCalledWith(expect.stringContaining("limit=28"), expect.anything()))
 
