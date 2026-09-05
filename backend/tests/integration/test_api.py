@@ -415,6 +415,84 @@ async def test_manual_delete_requires_and_persists_exact_preflight(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+async def test_manual_delete_without_arr_history_hash_cannot_be_confirmed(tmp_path: Path) -> None:
+    container = FakeContainer(FakeService(results=[]), db_path=tmp_path / "cleanarr.db")
+    container.config = RuntimeConfig(general=GeneralConfig(dry_run=False))
+    radarr = FakeRadarrClient(
+        movies=[
+            RadarrMovie(
+                id=7,
+                title="Disposable movie",
+                path="/test/movie",
+                tmdb_id=700,
+                imdb_id=None,
+                size_on_disk=1024,
+                has_file=True,
+            )
+        ],
+        history_by_movie={7: []},
+    )
+    sonarr = FakeSonarrClient(
+        series=[],
+        history_by_series={},
+        episodes_by_series={},
+        episode_files_by_series={},
+    )
+    seerr = FakeSeerrClient(
+        media=[
+            SeerrMedia(
+                id=1,
+                media_type="movie",
+                tmdb_id=700,
+                tvdb_id=None,
+                imdb_id=None,
+                jellyfin_media_id=None,
+            )
+        ],
+        requests=[],
+        issues=[],
+    )
+    downloader = FakeDownloaderClient(existing_hashes=set())
+    container.radarr = radarr  # type: ignore[attr-defined]
+    container.sonarr = sonarr  # type: ignore[attr-defined]
+    container.seerr = seerr  # type: ignore[attr-defined]
+    container.downloader = downloader  # type: ignore[attr-defined]
+    container.strategy_factory = DeletionStrategyFactory(  # type: ignore[attr-defined]
+        dry_run=False,
+        logger=logging.getLogger("tests.integration.missing-arr-hash"),
+        radarr=radarr,
+        sonarr=sonarr,
+        seerr=seerr,
+        downloader=downloader,
+    )
+    app = create_app(container=container)
+    headers = {"X-Admin-Token": "admin-token"}
+    request = {"item_type": "Movie", "radarr_movie_id": 7, "display_name": "Disposable movie"}
+
+    async with app_client(app) as client:
+        preview = await client.post("/api/actions/delete/preview", headers=headers, json=request)
+        submitted = await client.post(
+            "/api/actions/delete/jobs",
+            headers=headers,
+            json={
+                **request,
+                "confirmed_plan_hash": preview.json()["plan_hash"],
+                "idempotency_key": str(uuid4()),
+            },
+        )
+
+    assert preview.status_code == 200
+    assert any(
+        action["system"] == "downloader" and action["status"] == "skipped" and action["reason"] == "no_match"
+        for action in preview.json()["plan"]["actions"]
+    )
+    assert submitted.status_code == 409
+    assert submitted.json()["detail"]["code"] == "unsafe_plan"
+    assert radarr.deleted_movie_ids == []
+    assert seerr.deleted_media_ids == []
+
+
+@pytest.mark.asyncio
 async def test_jellyfin_only_movie_preview_is_narrow_and_mutation_free(tmp_path: Path) -> None:
     container = FakeContainer(FakeService(results=[]), db_path=tmp_path / "cleanarr.db")
     container.radarr = FakeRadarrClient(movies=[], history_by_movie={})  # type: ignore[attr-defined]
