@@ -64,6 +64,11 @@ database/config schema migration, retained configuration, and retained activity
 history. The v1.1.0 path additionally restores the automatic schema-v3 sidecar
 created before the candidate writes configuration schema 4 or database schema 6.
 
+The 2.0.4 release gate also rehearses the latest stable
+`v2.0.3 -> candidate -> restored v2.0.3` using its pinned published image,
+seeded configuration/activity, and a verified backup. This patch retains
+database schema 6 and configuration schema 4.
+
 Run the complete gate locally from a clean checkout:
 
 ```bash
