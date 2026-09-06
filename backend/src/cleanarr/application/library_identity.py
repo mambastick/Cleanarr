@@ -65,6 +65,28 @@ def duplicate_jellyfin_item_ids(items: Sequence[JellyfinItem]) -> frozenset[str]
     return frozenset(item_id for item_id, count in counts.items() if count > 1)
 
 
+def matching_jellyfin_seasons(
+    parent_id: str, season_number: int, items: Sequence[JellyfinItem]
+) -> tuple[JellyfinItem, ...]:
+    """Require exact parent and season scope; callers must require one match."""
+
+    parent = parent_id.strip().casefold()
+    ambiguous_ids = duplicate_jellyfin_item_ids(items)
+    candidates = tuple(
+        item
+        for item in items
+        if item.type.strip().casefold() == "season"
+        and item.parent_id is not None
+        and item.parent_id.strip().casefold() == parent
+        and item.season_number == season_number
+    )
+    # Invalid/duplicate IDs must not hide a second child in the requested scope.
+    if len(candidates) != 1:
+        return ()
+    item_id = normalized_jellyfin_item_id(candidates[0])
+    return candidates if item_id and item_id != parent and item_id not in ambiguous_ids else ()
+
+
 def normalized_jellyfin_item_id(item: JellyfinItem) -> str | None:
     """Normalize an opaque Jellyfin ID only for equality and duplicate checks."""
 

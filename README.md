@@ -341,6 +341,12 @@ available for series or batch selection.
 
 ### Season deletion
 
+Open **Library → Series**, open a series, and choose **Delete season** in its
+season breakdown. Review the season-specific plan and confirm it (or run the
+simulation in dry-run mode). Other seasons and the series entry are retained.
+The Jellyfin cleanup target is the exact matched season, never its parent series;
+missing or ambiguous season bindings omit that direct Jellyfin action.
+
 1. Resolve parent series in Sonarr
 2. Unmonitor all episodes in the target season
 3. Delete only episode files and hashes fully covered by the season scope

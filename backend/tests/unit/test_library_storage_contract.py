@@ -477,6 +477,134 @@ class LibrarySonarrFake:
         return [SonarrEpisodeFile(7, "/private/show.mkv", "show.mkv", 1, 100)]
 
 
+def _season_services() -> tuple[LibraryService, ManualDeletionService, LibraryJellyfinFake]:
+    series = SonarrSeries(-3, "Example series", "/media/series", 44, None, None, service_id="sonarr-one")
+    sonarr = LibrarySonarrFake([series])
+    jellyfin = LibraryJellyfinFake(
+        [
+            JellyfinItem(id="jf-series", name="Example series", type="Series", tvdb_id=44),
+            JellyfinItem(id="jf-season-1", name="Season 1", type="Season", parent_id="jf-series", season_number=1),
+            JellyfinItem(id="jf-season-2", name="Season 2", type="Season", parent_id="jf-series", season_number=2),
+            JellyfinItem(id="jf-other-1", name="Other season", type="Season", parent_id="jf-other", season_number=1),
+        ]
+    )
+    config = _config(sonarr=[_sonarr_profile()])
+    library = LibraryService(
+        config=lambda: config, radarr=lambda: object(), sonarr=lambda: sonarr, jellyfin=lambda: jellyfin
+    )
+    deletion = ManualDeletionService(
+        config=lambda: config,
+        radarr=lambda: cast(Any, object()),
+        sonarr=lambda: cast(Any, sonarr),
+        jellyfin=lambda: cast(Any, jellyfin),
+        strategy_factory=lambda: cast(Any, object()),
+        is_dry_run=lambda: True,
+        activity_recorder=cast(Any, object()),
+    )
+    return library, deletion, jellyfin
+
+
+def _season_request(jellyfin_id: str | None = "jf-season-1") -> ManualDeleteRequest:
+    return ManualDeleteRequest(
+        item_type=ItemType.SEASON,
+        sonarr_series_id=-3,
+        season_number=1,
+        jellyfin_item_id=jellyfin_id,
+        library_resource_id=encode_library_resource(LibraryMediaType.SERIES, "sonarr-one", 1),
+    )
+
+
+@pytest.mark.asyncio
+async def test_library_season_binding_round_trips_to_exact_manual_season_scope() -> None:
+    library, deletion, jellyfin = _season_services()
+    page = await library.list_items(media_type=LibraryMediaType.SERIES)
+    detail = LibraryDetailResponse.from_domain(await library.get_item(page.items[0].resource_id))
+    assert detail.seasons is not None
+    assert detail.seasons[0].jellyfin_item_id == "jf-season-1"
+    event = await deletion.resolve(_season_request(detail.seasons[0].jellyfin_item_id))
+    assert event.item_type is ItemType.SEASON
+    assert event.season_number == 1
+    assert event.item_id == "manual:sonarr:-3:season:1"
+    assert jellyfin.deleted_items == []
+    assert (await deletion.resolve(_season_request(None))).item_type is ItemType.SEASON
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["jf-series", "jf-season-2", "jf-other-1", "missing"])
+async def test_manual_season_binding_rejects_parent_sibling_other_series_and_missing(target: str) -> None:
+    _, deletion, jellyfin = _season_services()
+    with pytest.raises(LibraryItemChangedError):
+        await deletion.resolve(_season_request(target))
+    assert jellyfin.deleted_items == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("duplicate_id", ["jf-season-1", "JF-SEASON-1", "another-season-1"])
+async def test_duplicate_season_bindings_are_not_projected_or_accepted(duplicate_id: str) -> None:
+    library, deletion, jellyfin = _season_services()
+    jellyfin.items.append(
+        JellyfinItem(id=duplicate_id, name="Duplicate", type="Season", parent_id="jf-series", season_number=1)
+    )
+    detail = LibraryDetailResponse.from_domain(await library.get_item(_season_request().library_resource_id or ""))
+    assert detail.seasons is not None
+    assert detail.seasons[0].jellyfin_item_id is None
+    with pytest.raises(LibraryItemChangedError):
+        await deletion.resolve(_season_request())
+    assert jellyfin.deleted_items == []
+
+
+@pytest.mark.asyncio
+async def test_duplicate_or_invalid_child_ids_cannot_hide_an_ambiguous_season_scope() -> None:
+    library, deletion, jellyfin = _season_services()
+    duplicate = JellyfinItem(id="duplicate", name="Duplicate", type="Season", parent_id="jf-series", season_number=1)
+    jellyfin.items.extend([duplicate, duplicate])
+    detail = LibraryDetailResponse.from_domain(await library.get_item(_season_request().library_resource_id or ""))
+    assert detail.seasons is not None
+    assert detail.seasons[0].jellyfin_item_id is None
+    with pytest.raises(LibraryItemChangedError):
+        await deletion.resolve(_season_request())
+
+
+@pytest.mark.asyncio
+async def test_season_binding_is_rechecked_after_preview_and_topology_change() -> None:
+    _, deletion, jellyfin = _season_services()
+    await deletion.resolve(_season_request())
+    jellyfin.items[1] = replace(jellyfin.items[1], parent_id="moved-series")
+    with pytest.raises(LibraryItemChangedError):
+        await deletion.resolve(_season_request())
+    with pytest.raises(LibraryItemChangedError):
+        await deletion.resolve(
+            _season_request(None).model_copy(
+                update={
+                    "library_resource_id": encode_library_resource(LibraryMediaType.SERIES, "sonarr-other", 1),
+                }
+            )
+        )
+    assert jellyfin.deleted_items == []
+
+
+@pytest.mark.asyncio
+async def test_season_lookup_failure_keeps_arr_scope_and_marks_jellyfin_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    library, deletion, jellyfin = _season_services()
+    original = jellyfin.list_items
+
+    async def unavailable(*, include_types: list[str], accept_language: str | None = None) -> list[JellyfinItem]:
+        if "Season" in include_types:
+            raise RuntimeError("Unavailable")
+        return await original(include_types=include_types, accept_language=accept_language)
+
+    monkeypatch.setattr(jellyfin, "list_items", unavailable)
+    detail = LibraryDetailResponse.from_domain(await library.get_item(_season_request().library_resource_id or ""))
+    assert detail.seasons is not None
+    assert detail.seasons[0].jellyfin_item_id is None
+    assert "season_jellyfin_unavailable" in detail.unknown_reasons
+    with pytest.raises(LibraryItemChangedError):
+        await deletion.resolve(_season_request())
+    assert jellyfin.deleted_items == []
+
+
 def _movie(raw_id: int, title: str, *, added: datetime, size: int, tmdb_id: int) -> RadarrMovie:
     # Routed IDs are the negative triangular values produced by MultiRadarrClient.
     paired = raw_id * (raw_id + 1) // 2 + raw_id

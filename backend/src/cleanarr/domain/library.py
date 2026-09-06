@@ -137,6 +137,7 @@ class LibraryDetail:
     error_code: str | None = None
     episodes: tuple[LibraryEpisode, ...] = ()
     files: tuple[LibraryFile, ...] = ()
+    season_jellyfin_ids: tuple[tuple[int, str], ...] = ()
 
 
 @dataclass(frozen=True)

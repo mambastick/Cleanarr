@@ -49,6 +49,7 @@ export interface LibraryItemDetail extends LibraryItem {
     episode_count: number | null
     episode_file_count: number | null
     size: number | null
+    jellyfin_item_id?: string | null
   }> | null
   safety?: { status: "safe" | "blocked" | "unknown"; reason: string | null } | null
   // Flat aliases are accepted for adapters that serialize the detail contract
@@ -241,15 +242,18 @@ function normalizeLibraryItem(value: unknown, revision: string): LibraryItem | n
 
 function normalizeSeasons(response: Record<string, unknown>, rawItem: Record<string, unknown>): LibraryItemDetail["seasons"] {
   if (Array.isArray(rawItem.seasons)) {
-    return rawItem.seasons.map((value) => {
+    return rawItem.seasons.flatMap((value) => {
       const season = record(value)
-      return {
-        season_number: nullableNumber(season.season_number) ?? 0,
+      const number = nullableNumber(season.season_number)
+      if (number == null || !Number.isSafeInteger(number) || number < 0) return []
+      return [{
+        season_number: number,
         title: stringValue(season.title),
         episode_count: nullableNumber(season.episode_count),
         episode_file_count: nullableNumber(season.episode_file_count),
         size: nullableNumber(season.size) ?? nullableNumber(season.size_bytes),
-      }
+        jellyfin_item_id: stringValue(season.jellyfin_item_id),
+      }]
     })
   }
   if (!Array.isArray(response.episodes) && !Array.isArray(response.files)) return null
@@ -257,7 +261,7 @@ function normalizeSeasons(response: Record<string, unknown>, rawItem: Record<str
   for (const value of Array.isArray(response.episodes) ? response.episodes : []) {
     const episode = record(value)
     const number = nullableNumber(episode.season_number)
-    if (number == null) continue
+    if (number == null || !Number.isSafeInteger(number) || number < 0) continue
     const current = grouped.get(number) ?? { episodes: 0, files: 0, size: 0 }
     current.episodes += 1
     if (episode.has_file === true) current.files += 1
@@ -266,7 +270,7 @@ function normalizeSeasons(response: Record<string, unknown>, rawItem: Record<str
   for (const value of Array.isArray(response.files) ? response.files : []) {
     const file = record(value)
     const number = nullableNumber(file.season_number)
-    if (number == null) continue
+    if (number == null || !Number.isSafeInteger(number) || number < 0) continue
     const current = grouped.get(number) ?? { episodes: 0, files: 0, size: 0 }
     current.size += nullableNumber(file.size_bytes) ?? 0
     grouped.set(number, current)

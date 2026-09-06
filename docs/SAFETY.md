@@ -48,7 +48,7 @@ decision. Confirmation is bound to the SHA-256 hash of that canonical plan.
 CleanArr rejects a missing, changed, or stale hash and recomputes the plan
 before the first mutation.
 
-The confirmation shows the selected scope, concrete torrent names (or hashes
+The single-item confirmation shows the selected scope, concrete torrent names (or hashes
 when names are unavailable), service instances, target IDs, and the effect of
 each step. Torrent entry removal is distinguished from removal with downloaded
 files; Seerr request/issue/availability cleanup and Sonarr monitoring changes

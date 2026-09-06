@@ -19,6 +19,7 @@ V0211_IMAGE = "ghcr.io/mambastick/cleanarr:0.2.11@sha256:a7c8c64f102e134c30a385e
 V090_IMAGE = "ghcr.io/mambastick/cleanarr:0.9.0@sha256:c77bffd72ca49279b95a5c1b82e3b20938d702d7016ab759ce11fc39be29de67"
 V100_IMAGE = "ghcr.io/mambastick/cleanarr:1.0.0@sha256:fd039528eed3326ad0c16d8f36630a4dc5b67962e3c93d3687a768e206979dc5"
 V110_IMAGE = "ghcr.io/mambastick/cleanarr:1.1.0@sha256:67cadfe8caa795ec5c6a5d9daaf61df25260ffce1f54bf72199aec47f5e37336"
+V203_IMAGE = "ghcr.io/mambastick/cleanarr:2.0.3@sha256:0e174f17d163ba46edbe82b5875a07a94b0df330c30e0fb2ee3bec7e45ae8864"
 CANDIDATE_DATABASE_SCHEMA_VERSION = 6
 CANDIDATE_CONFIG_SCHEMA_VERSION = 4
 AUTOMATIC_V3_BACKUP_NAME = "cleanarr.config-v3.backup.db"
@@ -144,6 +145,37 @@ SOURCES = (
                 "sso_allowed_groups": [],
                 "sso_group_claim": "groups",
                 "seeding_stop_policy": {},
+            },
+            "radarr": [],
+            "sonarr": [],
+            "seerr": [],
+            "downloaders": [],
+            "jellyfin": [],
+        },
+    ),
+    SourceRelease(
+        version="2.0.3",
+        image=V203_IMAGE,
+        schema_version=6,
+        config={
+            "config_schema_version": 4,
+            "admin": {
+                "username": "upgrade-admin",
+                "password_salt": "upgrade-salt",
+                "password_hash": "upgrade-hash",
+            },
+            "general": {
+                "dry_run": False,
+                "log_level": "WARNING",
+                "webhook_shared_token": "upgrade-marker-2.0.3",
+                "ui_language": "ru",
+                "sso_mode": "password_only",
+                "sso_allowed_users": [],
+                "sso_allowed_groups": [],
+                "sso_group_claim": "groups",
+                "seeding_stop_policy": {},
+                "storage_warning_free_percent": 15.0,
+                "storage_critical_free_percent": 5.0,
             },
             "radarr": [],
             "sonarr": [],

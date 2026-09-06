@@ -170,6 +170,7 @@ class LibrarySeasonResponse(BaseModel):
     episode_count: int | None = None
     episode_file_count: int | None = None
     size: int | None = None
+    jellyfin_item_id: str | None = None
 
 
 class LibraryItemResponse(BaseModel):
@@ -390,6 +391,7 @@ def _season_summaries(detail: LibraryDetail) -> list[LibrarySeasonResponse]:
         result.append(
             LibrarySeasonResponse(
                 season_number=season_number,
+                jellyfin_item_id=dict(detail.season_jellyfin_ids).get(season_number),
                 episode_count=len(episodes) if episodes else None,
                 episode_file_count=len({file.id for file in files}) if files else None,
                 size=size,

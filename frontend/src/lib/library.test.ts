@@ -81,6 +81,25 @@ describe("library API adapter", () => {
     const fetchJson = vi.fn(async () => ({ items: [] })) as unknown as LibraryFetchJson
     await expect(fetchLibraryItems(fetchJson, { media_type: "movie" })).rejects.toThrow("Invalid library list response")
   })
+
+  it("preserves exact season bindings and never turns malformed numbers into specials", async () => {
+    const fetchJson = vi.fn(async () => ({
+      resource_id: "series-1", media_type: "series", title: "Example series",
+      delete_target: { sonarr_series_id: -3, jellyfin_item_id: "parent" },
+      seasons: [
+        {}, { season_number: null }, { season_number: -1 }, { season_number: 1.5 },
+        { season_number: 0, jellyfin_item_id: "specials" },
+        { season_number: 2, jellyfin_item_id: "season-2" },
+        { season_number: 3 },
+      ],
+    })) as unknown as LibraryFetchJson
+    const detail = await fetchLibraryItem(fetchJson, "series-1")
+    expect(detail.seasons).toEqual([
+      expect.objectContaining({ season_number: 0, jellyfin_item_id: "specials" }),
+      expect.objectContaining({ season_number: 2, jellyfin_item_id: "season-2" }),
+      expect.objectContaining({ season_number: 3, jellyfin_item_id: null }),
+    ])
+  })
 })
 
 describe("library artwork", () => {
