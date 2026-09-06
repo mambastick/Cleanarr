@@ -186,6 +186,10 @@ class BaseDeletionStrategy(ABC):
                     downloader_id=result.client_id,
                     downloader_name=result.client_name,
                     downloader_kind=result.client_kind,
+                    torrent_name=result.torrent_name,
+                    content_path=result.content_path,
+                    download_directory=result.download_directory,
+                    delete_files=result.delete_files,
                 )
                 continue
             if result.existed and result.skip_reason:
@@ -202,6 +206,10 @@ class BaseDeletionStrategy(ABC):
                     seeding_policy=result.seeding_policy,
                     ratio=result.ratio,
                     seeding_time_seconds=result.seeding_time_seconds,
+                    torrent_name=result.torrent_name,
+                    content_path=result.content_path,
+                    download_directory=result.download_directory,
+                    delete_files=result.delete_files,
                 )
                 continue
             if self._dry_run and result.existed:
@@ -225,6 +233,10 @@ class BaseDeletionStrategy(ABC):
                 seeding_policy=result.seeding_policy,
                 ratio=result.ratio,
                 seeding_time_seconds=result.seeding_time_seconds,
+                torrent_name=result.torrent_name,
+                content_path=result.content_path,
+                download_directory=result.download_directory,
+                delete_files=result.delete_files,
             )
         return cleanup_succeeded
 

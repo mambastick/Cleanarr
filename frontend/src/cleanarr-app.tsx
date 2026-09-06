@@ -11,6 +11,7 @@ import { DashboardPanel } from "@/features/dashboard/dashboard-panel"
 import { STORAGE_COPY, type StorageCopy } from "@/features/dashboard/storage-copy"
 const DownloadsPanel = lazy(() => import("@/features/downloads/downloads-panel").then((module) => ({ default: module.DownloadsPanel })))
 import { DeleteConfirmationDialog } from "@/features/deletion/delete-confirmation-dialog"
+import { inspectionServices } from "@/features/deletion/plan-presentation"
 import { buildConfirmedDeleteRequest, deleteSessionReducer, initialDeleteSession } from "@/features/deletion/delete-session"
 import { BatchDeleteConfirmationDialog } from "@/features/deletion/batch-delete-confirmation-dialog"
 import { batchChildRequests, batchDeleteSessionReducer, buildBatchRequest, initialBatchDeleteSession } from "@/features/deletion/batch-delete-session"
@@ -45,6 +46,7 @@ type AuthMode = "register" | "login"
 function CleanArrApp() {
   const { theme, setTheme } = useTheme()
   const [dashboard, setDashboard] = useState<DashboardPayload | null>(null)
+  const jobsReturnFocusRef = useRef<HTMLDivElement>(null)
   const [config, setConfig] = useState<RuntimeConfigPayload | null>(null)
   const [authStatus, setAuthStatus] = useState<AuthStatusPayload | null>(null)
   const [isDashboardLoading, setIsDashboardLoading] = useState(true)
@@ -662,12 +664,11 @@ function CleanArrApp() {
         storageHeadline={shellStorage}
         labels={SHELL_COPY[shellLanguage]}
         canAdmin={isAdmin}
-        jobsSlot={deleteJobs.length || deleteBatches.length ? <JobsSheet
+        jobsSlot={<JobsSheet
           jobs={deleteJobs}
           batches={deleteBatches}
           title={uiText.backgroundTasks}
           activeLabel={uiText.active}
-          recentLabel={uiText.recent}
           dismissLabel={uiText.dismiss}
           closeLabel={uiLanguage === "ru" ? "Закрыть" : "Close"}
           progressLabel={uiText.progress}
@@ -675,10 +676,11 @@ function CleanArrApp() {
           announcement={deleteJobAnnouncement}
           announcementTone={deleteJobAnnouncementTone}
           canDismiss={isAdmin}
+          returnFocusRef={jobsReturnFocusRef}
           onDismiss={(jobId) => void dismissDeleteJob(jobId)}
-        /> : null}
+        />}
       >
-        <div className={activeTab === "library" ? "mx-auto w-full max-w-[100rem]" : "mx-auto w-full max-w-6xl"}>
+        <div ref={jobsReturnFocusRef} tabIndex={-1} className={activeTab === "library" ? "mx-auto w-full max-w-[100rem]" : "mx-auto w-full max-w-6xl"}>
           <div hidden={activeTab !== "overview"}>
             <DashboardPanel
               text={uiText}
@@ -837,6 +839,7 @@ function CleanArrApp() {
         isDryRun={!isLive}
         language={uiLanguage === "ru" ? "ru" : "en"}
         copy={getDeleteDialogCopy(uiLanguage, uiText)}
+        services={inspectionServices(config)}
         returnFocusRef={deleteReturnFocusRef}
         onConfirm={() => void executeDelete()}
         onRetry={() => {

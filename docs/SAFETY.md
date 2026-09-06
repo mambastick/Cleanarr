@@ -48,6 +48,23 @@ decision. Confirmation is bound to the SHA-256 hash of that canonical plan.
 CleanArr rejects a missing, changed, or stale hash and recomputes the plan
 before the first mutation.
 
+The confirmation shows the selected scope, concrete torrent names (or hashes
+when names are unavailable), service instances, target IDs, and the effect of
+each step. Torrent entry removal is distinguished from removal with downloaded
+files; Seerr request/issue/availability cleanup and Sonarr monitoring changes
+are described separately. Retained or blocked targets include an explanation.
+An exact content path and a download directory are labelled differently;
+missing metadata remains unknown. The plan does not promise a reclaimed byte
+count, because shared files and hardlinks can change the physical result.
+
+Optional inspection links open a configured service or a known media page in
+a new tab. They do not execute the plan. Internal service addresses may only
+work from the administrator's network; RPC-only addresses and URLs containing
+credentials or query parameters are not offered as browser links. Extra
+identifiers and paths can be expanded without exposing raw backend messages or
+confirmation tokens. Changed reviewed torrent metadata or file-removal mode
+requires a refreshed confirmation, including previews created before an upgrade.
+
 Stable service identifiers, hashes, and paths remain the only ownership inputs.
 `display_name` is presentation data only. A batch previews every child without
 mutation, binds its ordered child plans to one batch hash, and rechecks them at

@@ -392,6 +392,7 @@
 .app-shell__storage--unknown .app-shell__storage-meter span { background: var(--status-unknown); }
 .app-shell__main { min-height: 100vh; margin-left: var(--app-shell-sidebar-width); padding: 2rem clamp(1.25rem, 2vw, 2rem); transition: margin-left 220ms ease; }
 .app-shell__desktop-status { display: flex; min-height: 2.75rem; align-items: center; justify-content: flex-end; gap: 0.5rem; margin-bottom: 1rem; }
+.app-shell__desktop-status:has(> .jobs-announcement:only-child) { min-height: 0; margin-bottom: 0; }
 .jobs-sheet-trigger { display: inline-flex; }
 .app-shell__runtime-status { display: inline-flex; min-height: 2.25rem; align-items: center; gap: 0.45rem; border: 1px solid; border-radius: 0.625rem; padding: 0.35rem 0.7rem; font-size: 0.75rem; font-weight: 650; outline: none; }
 .app-shell__runtime-status--live { border-color: var(--status-success-border); background: var(--status-success-bg); color: var(--status-success); }

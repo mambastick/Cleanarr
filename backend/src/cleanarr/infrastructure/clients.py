@@ -6,6 +6,7 @@ import asyncio
 import base64
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -138,6 +139,29 @@ def _optional_int(value: object) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _safe_metadata_text(value: object, *, limit: int = 160) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = " ".join("".join(character for character in value if character.isprintable()).split())[:limit]
+    if not text or "://" in text:
+        return None
+    return text
+
+
+def _safe_content_path(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    # A displayed path must identify the observed object exactly; never truncate
+    # or remove characters to manufacture a different valid-looking path.
+    if not value or len(value) > 4096 or not value.isprintable() or "://" in value:
+        return None
+    text = value
+    paths = (PurePosixPath(text), PureWindowsPath(text))
+    if not any(path.is_absolute() and ".." not in path.parts and len(path.parts) >= 3 for path in paths):
+        return None
+    return text
 
 
 def _qbt_hash(value: object) -> str:
@@ -1121,7 +1145,7 @@ class QbittorrentClient:
             if match is None:
                 results.append(self._result(hash_value, existed=False))
                 continue
-            canonical_hash, status = match
+            canonical_hash, status, torrent_name, content_path = match
             skip_reason = seeding_policy_skip_reason(
                 self._seeding_policy,
                 min_seed_ratio=self._min_seed_ratio,
@@ -1136,6 +1160,9 @@ class QbittorrentClient:
                     existed=True,
                     skip_reason=skip_reason,
                     status=status,
+                    torrent_name=torrent_name,
+                    content_path=content_path,
+                    delete_files=delete_files if skip_reason is None else False,
                 )
             )
         if deletion_hashes and not dry_run:
@@ -1234,7 +1261,7 @@ class QbittorrentClient:
     async def _matching_torrents(
         self,
         hashes: Sequence[str],
-    ) -> dict[str, tuple[str, TorrentSeedingStatus]]:
+    ) -> dict[str, tuple[str, TorrentSeedingStatus, str | None, str | None]]:
         try:
             response = await self._client.get(
                 "/api/v2/torrents/info",
@@ -1261,7 +1288,7 @@ class QbittorrentClient:
             raise ExternalServiceError(self._system, "qBittorrent returned an unexpected torrent list.")
 
         requested = set(hashes)
-        matches: dict[str, tuple[str, TorrentSeedingStatus]] = {}
+        matches: dict[str, tuple[str, TorrentSeedingStatus, str | None, str | None]] = {}
         for item in payload:
             if not isinstance(item, dict):
                 continue
@@ -1274,8 +1301,10 @@ class QbittorrentClient:
                 ratio=_optional_float(item.get("ratio")),
                 seeding_time_seconds=_optional_int(item.get("seeding_time")),
             )
+            torrent_name = _safe_metadata_text(item.get("name"))
+            content_path = _safe_content_path(item.get("content_path"))
             for hash_value in matched:
-                matches[hash_value] = (canonical_hash, status)
+                matches[hash_value] = (canonical_hash, status, torrent_name, content_path)
         return matches
 
     async def _delete_existing_hashes(self, hashes: set[str], *, delete_files: bool) -> None:
@@ -1305,6 +1334,9 @@ class QbittorrentClient:
         existed: bool,
         skip_reason: str | None = None,
         status: TorrentSeedingStatus | None = None,
+        torrent_name: str | None = None,
+        content_path: str | None = None,
+        delete_files: bool | None = None,
     ) -> DownloaderRemovalResult:
         return DownloaderRemovalResult(
             hash_value=hash_value,
@@ -1316,6 +1348,9 @@ class QbittorrentClient:
             seeding_policy=self._seeding_policy.value,
             ratio=status.ratio if status is not None else None,
             seeding_time_seconds=status.seeding_time_seconds if status is not None else None,
+            torrent_name=torrent_name,
+            content_path=content_path,
+            delete_files=delete_files,
         )
 
 
