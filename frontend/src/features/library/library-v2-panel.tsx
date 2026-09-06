@@ -44,7 +44,8 @@ import {
 import { cn } from "@/lib/utils"
 import { LIBRARY_COPY, libraryEvidenceReason, librarySourceLabel, type LibraryLanguage, type LibraryV2Copy } from "./library-copy"
 import { cardGridClass, libraryGridBreakpoint, libraryPageSizeOptions, type LibraryCardSize } from "./library-grid"
-import { libraryDeleteTargetFromItem } from "./library-selection"
+import { LibrarySeasons } from "./library-seasons"
+import { libraryDeleteTargetFromItem, type LibraryDeleteTarget } from "./library-selection"
 import { useLibrary, type LibraryFilters } from "./use-library"
 
 export interface LibraryPanelV2Props {
@@ -55,6 +56,7 @@ export interface LibraryPanelV2Props {
   fetchJson: LibraryFetchJson
   /** The application owns confirmation; this callback must only prepare a plan. */
   onDeletePreview?: (item: LibraryItem, trigger: HTMLElement) => void
+  onSeasonDeletePreview?: (target: LibraryDeleteTarget, trigger: HTMLElement) => void
   onBatchPreview?: (items: LibraryItem[], trigger: HTMLElement) => void
   canPlanDeletion?: boolean
   deletionPlanningUnavailableReason?: string
@@ -105,6 +107,7 @@ export function LibraryPanelV2({
   copy,
   fetchJson,
   onDeletePreview,
+  onSeasonDeletePreview,
   onBatchPreview,
   canPlanDeletion = true,
   deletionPlanningUnavailableReason,
@@ -227,7 +230,7 @@ export function LibraryPanelV2({
   useEffect(() => {
     if (!detail || !desktopInspector) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeDetail()
+      if (event.key === "Escape" && !(event.target instanceof Element && event.target.closest('[role="dialog"], [role="alertdialog"]'))) closeDetail()
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
@@ -347,7 +350,7 @@ export function LibraryPanelV2({
             <div className="h-64 bg-muted"><Artwork resourceId={detail.resource_id} artwork={detail.artwork} fallback={detail.media_type === "movie" ? <Film className="size-12 text-muted-foreground" /> : <Tv className="size-12 text-muted-foreground" />} /></div>
             <div className="relative -mt-8 min-h-[calc(100vh-14rem)] rounded-t-3xl bg-card p-5">
               <p className="sr-only">{text.technicalDetails}</p>
-              <Inspector desktop detail={detail} loading={detailLoading} error={detailError} text={text} language={language} onDeletePreview={onDeletePreview} canPlanDeletion={canPlanDeletion} deletionPlanningUnavailableReason={deletionPlanningUnavailableReason} onSelect={() => { toggle(detail); setSelectMode(true) }} onRetry={retryDetail} />
+              <Inspector desktop detail={detail} loading={detailLoading} error={detailError} text={text} language={language} onDeletePreview={onDeletePreview} onSeasonDeletePreview={onSeasonDeletePreview} canPlanDeletion={canPlanDeletion} deletionPlanningUnavailableReason={deletionPlanningUnavailableReason} onSelect={() => { toggle(detail); setSelectMode(true) }} onRetry={retryDetail} />
             </div>
           </aside>
         ) : null}
@@ -366,7 +369,7 @@ export function LibraryPanelV2({
             <SheetBackdrop className="fixed inset-0 z-50 bg-foreground/25 backdrop-blur-[1px]" />
             <SheetContent className="fixed inset-y-0 right-0 z-[51] w-full overflow-y-auto border-l bg-card p-5 shadow-2xl outline-none sm:w-[360px]">
               <div className="flex items-start justify-between gap-3"><div><SheetTitle>{detail?.display_name ?? text.title}</SheetTitle><SheetDescription>{text.technicalDetails}</SheetDescription></div><SheetClose render={<Button variant="ghost" size="icon" aria-label={text.close} title={text.close} />}><X aria-hidden="true" /></SheetClose></div>
-              {detail ? <Inspector detail={detail} loading={detailLoading} error={detailError} text={text} language={language} onDeletePreview={onDeletePreview} canPlanDeletion={canPlanDeletion} deletionPlanningUnavailableReason={deletionPlanningUnavailableReason} onSelect={() => { toggle(detail); setSelectMode(true) }} onRetry={retryDetail} /> : null}
+              {detail ? <Inspector detail={detail} loading={detailLoading} error={detailError} text={text} language={language} onDeletePreview={onDeletePreview} onSeasonDeletePreview={onSeasonDeletePreview} canPlanDeletion={canPlanDeletion} deletionPlanningUnavailableReason={deletionPlanningUnavailableReason} onSelect={() => { toggle(detail); setSelectMode(true) }} onRetry={retryDetail} /> : null}
             </SheetContent>
           </SheetPortal>
         </Sheet>
@@ -426,7 +429,7 @@ function Artwork({ resourceId, artwork, fallback }: { resourceId: string; artwor
   return <div className="size-full">{url && !failed ? <img src={url} alt="" loading="lazy" decoding="async" className="size-full object-cover" onError={() => setFailed(true)} /> : <div className="grid size-full place-items-center" aria-hidden="true">{fallback}</div>}</div>
 }
 
-function Inspector({ detail, loading, error, text, language, onDeletePreview, canPlanDeletion, deletionPlanningUnavailableReason, onSelect, onRetry, desktop = false }: { detail: LibraryItemDetail; loading: boolean; error: boolean; text: LibraryV2Copy; language: LibraryLanguage; onDeletePreview?: (item: LibraryItem, trigger: HTMLElement) => void; canPlanDeletion: boolean; deletionPlanningUnavailableReason?: string; onSelect: () => void; onRetry: () => void; desktop?: boolean }) {
+function Inspector({ detail, loading, error, text, language, onDeletePreview, onSeasonDeletePreview, canPlanDeletion, deletionPlanningUnavailableReason, onSelect, onRetry, desktop = false }: { detail: LibraryItemDetail; loading: boolean; error: boolean; text: LibraryV2Copy; language: LibraryLanguage; onDeletePreview?: (item: LibraryItem, trigger: HTMLElement) => void; onSeasonDeletePreview?: (target: LibraryDeleteTarget, trigger: HTMLElement) => void; canPlanDeletion: boolean; deletionPlanningUnavailableReason?: string; onSelect: () => void; onRetry: () => void; desktop?: boolean }) {
   const playback = detail.playback
   const seeding = detail.seeding
   const watched = playback?.watched ?? detail.playback_status
@@ -437,8 +440,6 @@ function Inspector({ detail, loading, error, text, language, onDeletePreview, ca
   const seededTime = seeding?.seeded_seconds ?? detail.seeding_time_seconds
   const seedReason = seeding?.reason ?? detail.seeding_reason
   const safetyStatus = detail.safety?.status ?? "unknown"
-  const seasonCount = detail.seasons?.length ?? detail.series_counts?.seasons ?? detail.counts?.seasons
-  const episodeCount = detail.seasons?.reduce((sum, season) => sum + (season.episode_count ?? 0), 0) ?? detail.series_counts?.episodes ?? detail.counts?.episodes
   const hasDeleteTarget = Boolean(libraryDeleteTargetFromItem(detail))
   const deleteAvailable = Boolean(canPlanDeletion && onDeletePreview && hasDeleteTarget && !loading && !error)
   const safetyClass = safetyStatus === "safe" ? "border-status-success-border bg-status-success-bg text-status-success" : safetyStatus === "blocked" ? "border-status-danger-border bg-status-danger-bg text-status-danger" : "border-status-unknown-border bg-status-unknown-bg text-status-unknown"
@@ -460,29 +461,12 @@ function Inspector({ detail, loading, error, text, language, onDeletePreview, ca
         <Metric label={text.readiness} value={readiness === "ready" ? text.ready : readiness === "not_ready" ? text.notReady : text.unknown} />
       </dl>
       {detail.unknown_reasons?.length || seedReason ? <div className="rounded-xl border border-status-unknown-border bg-status-unknown-bg p-3 text-xs"><p className="font-medium">{text.unknownReasons}</p><p className="mt-1 text-muted-foreground">{text.evidenceSummary}</p><ul className="mt-2 list-disc space-y-1 pl-4">{[...new Set([...(detail.unknown_reasons ?? []), seedReason].filter((reason): reason is string => Boolean(reason)))].map((reason) => <li key={reason}>{libraryEvidenceReason(language, reason)}</li>)}</ul></div> : null}
-      {detail.media_type === "series" && seasonCount != null ? <div className="rounded-xl border border-border p-3 text-sm"><p className="font-medium">{text.seasonBreakdown}</p><p className="mt-1 text-muted-foreground">{formatMediaCount(seasonCount, "season", language)} · {episodeCount == null ? `${text.unknown} ${text.episodes.toLowerCase()}` : formatMediaCount(episodeCount, "episode", language)}</p>{detail.seasons?.length ? <ul className="mt-3 divide-y rounded-lg border">{detail.seasons.map((season) => <li key={season.season_number} className="grid gap-1 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"><span className="font-medium">{season.title || `${text.season} ${season.season_number}`}</span><span className="text-xs text-muted-foreground">{season.episode_file_count ?? text.unknown}/{season.episode_count ?? text.unknown} {mediaUnitLabel(season.episode_count, "episode", language)}{season.size != null ? ` · ${formatSize(season.size)}` : ""}</span></li>)}</ul> : null}</div> : null}
-      <div className={cn("rounded-xl border p-3 text-sm", safetyClass)}><p className="font-medium">{text.safety}</p><p className="mt-1 text-current/80">{safetyStatus === "safe" ? text.safe : safetyStatus === "blocked" ? text.blocked : text.signalUnavailable}</p></div>
-      <div className="grid gap-2"><Button variant="destructive" className="w-full" disabled={!deleteAvailable} onClick={(event) => onDeletePreview?.(detail, event.currentTarget)}><Trash2 aria-hidden="true" />{text.reviewPlan}</Button>{!deleteAvailable ? <p className="text-xs text-muted-foreground">{deletionPlanningUnavailableReason ?? text.deleteUnavailable}</p> : null}<Button variant="outline" className="w-full" disabled={!canPlanDeletion || !hasDeleteTarget || loading || error} onClick={onSelect}>{text.selectForGroup}</Button></div>
+      <LibrarySeasons detail={detail} text={text} language={language} onPreview={onSeasonDeletePreview} unavailableReason={loading ? text.loadingDetails : error ? text.deleteUnavailable : !canPlanDeletion ? deletionPlanningUnavailableReason ?? text.deleteUnavailable : undefined} />
+      <div className={cn("rounded-xl border p-3 text-sm", safetyClass)}><p className="font-medium">{text.safety}</p><p className="mt-1 text-current">{safetyStatus === "safe" ? text.safe : safetyStatus === "blocked" ? text.blocked : text.signalUnavailable}</p></div>
+      <div className="grid gap-2"><Button variant="destructive" className="w-full bg-status-danger-bg text-status-danger hover:bg-status-danger-bg dark:bg-status-danger-bg dark:hover:bg-status-danger-bg" disabled={!deleteAvailable} onClick={(event) => onDeletePreview?.(detail, event.currentTarget)}><Trash2 aria-hidden="true" />{text.reviewPlan}</Button>{!deleteAvailable ? <p className="text-xs text-muted-foreground">{deletionPlanningUnavailableReason ?? text.deleteUnavailable}</p> : null}<Button variant="outline" className="w-full" disabled={!canPlanDeletion || !hasDeleteTarget || loading || error} onClick={onSelect}>{text.selectForGroup}</Button></div>
       <details><summary className="cursor-pointer text-sm font-medium">{text.additional}</summary><dl className="mt-2 grid gap-2 rounded-lg bg-muted p-3 text-xs"><Metric label={text.checkedAt} value={formatDate(detail.fetched_at, language, text.unknown)} /><Metric label={text.safety} value={detail.safety?.reason ? libraryEvidenceReason(language, detail.safety.reason) : text.evidenceComplete} /></dl></details>
     </div>
   )
-}
-
-function formatMediaCount(value: number, unit: "season" | "episode", language: LibraryLanguage) {
-  return `${value} ${mediaUnitLabel(value, unit, language)}`
-}
-
-function mediaUnitLabel(value: number | null | undefined, unit: "season" | "episode", language: LibraryLanguage) {
-  if (language === "en") {
-    const singular = unit === "season" ? "season" : "episode"
-    return value === 1 ? singular : `${singular}s`
-  }
-  const forms = unit === "season" ? ["сезон", "сезона", "сезонов"] : ["эпизод", "эпизода", "эпизодов"]
-  if (value == null) return forms[2]
-  const lastTwo = value % 100
-  if (lastTwo >= 11 && lastTwo <= 14) return forms[2]
-  const last = value % 10
-  return last === 1 ? forms[0] : last >= 2 && last <= 4 ? forms[1] : forms[2]
 }
 
 function Metric({ label, value }: { label: string; value: string }) { return <div><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 break-words font-medium">{value}</dd></div> }

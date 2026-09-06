@@ -10,7 +10,7 @@ from typing import Protocol
 
 from cleanarr.application.deletion_jobs import DeletionProgressReporter
 from cleanarr.application.deletion_models import ManualDeleteJobPhase, ManualDeleteRequest, ProcessingResultResponse
-from cleanarr.application.library_identity import matching_jellyfin_items
+from cleanarr.application.library_identity import matching_jellyfin_items, matching_jellyfin_seasons
 from cleanarr.application.ports import RadarrClientPort, SonarrClientPort
 from cleanarr.application.resolver import StrictMovieResolver
 from cleanarr.application.results import observe_actions
@@ -261,6 +261,8 @@ class ManualDeletionService:
             return
         try:
             include_types = ["Movie"] if media_type is LibraryMediaType.MOVIE else ["Series"]
+            if payload.item_type is ItemType.SEASON:
+                include_types.append("Season")
             value = await self._jellyfin().list_items(include_types=include_types)
         except asyncio.CancelledError:
             raise
@@ -277,12 +279,18 @@ class ManualDeletionService:
             media_type,
             tuple(value),
         )
-        if len(matches) != 1 or matches[0].id != payload.jellyfin_item_id:
+        if len(matches) != 1:
             raise LibraryItemChangedError()
         owners = [
             candidate for candidate in arr_items if len(matching_jellyfin_items(candidate, media_type, matches)) == 1
         ]
         if len(owners) != 1 or owners[0] is not raw_item:
+            raise LibraryItemChangedError()
+        targets: tuple[JellyfinItem, ...] = matches
+        if payload.item_type is ItemType.SEASON:
+            assert payload.season_number is not None
+            targets = matching_jellyfin_seasons(matches[0].id, payload.season_number, tuple(value))
+        if len(targets) != 1 or targets[0].id != payload.jellyfin_item_id:
             raise LibraryItemChangedError()
 
     async def preview(self, payload: ManualDeleteRequest, event: MediaDeletionEvent) -> ProcessingResultResponse:

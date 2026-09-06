@@ -1,5 +1,5 @@
 import type { ItemType } from "@/lib/dashboard"
-import type { LibraryItem, ManualDeleteRequest } from "@/lib/library"
+import type { LibraryItem, LibraryItemDetail, ManualDeleteRequest } from "@/lib/library"
 
 export type LibraryDeleteTarget =
   | { kind: "movie"; radarr_movie_id: number; movie_title: string; jellyfin_movie_id?: string | null; library_resource_id?: string | null }
@@ -80,6 +80,17 @@ export function libraryDeleteTargetFromItem(item: LibraryItem): LibraryDeleteTar
 export function librarySelectionItemFromItem(item: LibraryItem): BatchSelectionItem | null {
   const target = libraryDeleteTargetFromItem(item)
   return target ? selectionItem(target, item.display_name, item.size) : null
+}
+
+export function librarySeasonDeleteTarget(detail: LibraryItemDetail, seasonNumber: number): LibraryDeleteTarget | null {
+  const series = libraryDeleteTargetFromItem(detail)
+  if (series?.kind !== "series" || !Number.isSafeInteger(seasonNumber) || seasonNumber < 0) return null
+  const seasons = detail.seasons?.filter((season) => season.season_number === seasonNumber)
+  if (seasons?.length !== 1) return null
+  const seasonId = seasons[0].jellyfin_item_id ?? null
+  // A series ID must never be reused as the season's Jellyfin deletion target.
+  if (seasonId && seasonId.trim().toLowerCase() === series.jellyfin_item_id?.trim().toLowerCase()) return null
+  return { ...series, item_type: "Season", season_number: seasonNumber, jellyfin_item_id: seasonId }
 }
 
 function routedOrLegacyInteger(value: unknown): number | null {

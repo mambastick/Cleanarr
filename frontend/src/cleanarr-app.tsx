@@ -722,6 +722,7 @@ function CleanArrApp() {
               fetchJson={fetchJson}
               resetKey={libraryResetKey}
               onDeletePreview={isAdmin ? openLibraryDeletePreview : undefined}
+              onSeasonDeletePreview={isAdmin ? openDeletePreview : undefined}
               onBatchPreview={isAdmin ? openLibraryBatchPreview : undefined}
               canPlanDeletion={isAdmin && isRuntimeKnown}
               deletionPlanningUnavailableReason={isRuntimeKnown ? undefined : uiText.runtimeModeLoadingDescription}

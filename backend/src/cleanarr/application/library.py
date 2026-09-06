@@ -14,7 +14,11 @@ from datetime import UTC, datetime
 from math import isqrt
 from typing import Literal, cast
 
-from cleanarr.application.library_identity import duplicate_jellyfin_item_ids, matching_jellyfin_items
+from cleanarr.application.library_identity import (
+    duplicate_jellyfin_item_ids,
+    matching_jellyfin_items,
+    matching_jellyfin_seasons,
+)
 from cleanarr.application.ports import JellyfinServerClientPort, RadarrClientPort, SonarrClientPort
 from cleanarr.domain import (
     ArtworkData,
@@ -184,6 +188,7 @@ class LibraryService:
             sonarr.list_episodes(item.legacy_id),
             sonarr.list_episode_files(item.legacy_id),
             self._enrich_detail(item),
+            self._season_items(item),
             return_exceptions=True,
         )
         episodes: tuple[LibraryEpisode, ...] = ()
@@ -209,6 +214,19 @@ class LibraryService:
         else:
             enriched_item, enrichment_error = results[2]
             detail_error = detail_error or enrichment_error
+        if isinstance(results[3], asyncio.CancelledError):
+            raise asyncio.CancelledError
+        season_ids: list[tuple[int, str]] = []
+        if isinstance(results[3], BaseException):
+            detail_error = detail_error or "season_jellyfin_unavailable"
+        elif item.jellyfin_item_id:
+            numbers = {episode.season_number for episode in episodes} | {
+                file.season_number for file in files if file.season_number is not None
+            }
+            for number in sorted(numbers):
+                matches = matching_jellyfin_seasons(item.jellyfin_item_id, number, results[3])
+                if len(matches) == 1:
+                    season_ids.append((number, matches[0].id))
         return LibraryDetail(
             item=enriched_item,
             state=LibraryReadState.PARTIAL if detail_error else entry.state,
@@ -216,7 +234,21 @@ class LibraryService:
             error_code=detail_error,
             episodes=episodes,
             files=files,
+            season_jellyfin_ids=tuple(season_ids),
         )
+
+    async def _season_items(self, item: LibraryItem) -> tuple[JellyfinItem, ...]:
+        if not item.jellyfin_item_id:
+            return ()
+        jellyfin = cast(JellyfinServerClientPort, self._jellyfin())
+        value = await asyncio.wait_for(jellyfin.list_items(include_types=["Season"]), timeout=60)
+        if (
+            not isinstance(value, Sequence)
+            or isinstance(value, (str, bytes, bytearray))
+            or any(not isinstance(candidate, JellyfinItem) for candidate in value)
+        ):
+            raise ValueError("Season catalogue is unavailable.")
+        return tuple(value)
 
     async def _enrich_detail(self, item: LibraryItem) -> tuple[LibraryItem, str | None]:
         """Run optional bounded detail enrichment without touching list cards."""

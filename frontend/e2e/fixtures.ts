@@ -186,7 +186,8 @@ function toLibrarySeries(value: unknown, index: number) {
     artwork_url: `/api/library/artwork/${encodeURIComponent(resourceId)}`,
     seasons: seriesItem.seasons.map((season) => ({
       season_number: season.season_number,
-      title: `Season ${season.season_number}`,
+      title: null,
+      jellyfin_item_id: season.jellyfin_season_id ?? null,
       episode_count: season.episode_count,
       episode_file_count: season.episode_file_count,
       size_bytes: season.size_bytes,
