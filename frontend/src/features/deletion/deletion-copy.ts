@@ -1,4 +1,5 @@
 import { ApiError } from "@/lib/api-client"
+import type { ManualDeletePreviewResponse } from "@/lib/library"
 import type { DashboardAction } from "@/lib/dashboard"
 import type { SubmissionRecovery } from "./delete-session"
 
@@ -78,4 +79,8 @@ export function localizedBatchStatus(status: string, language: DeletionLanguage)
   if (status === "completed") return labels.jobCompleted
   if (status === "queued") return labels.jobQueued
   return labels.jobRunning
+}
+
+export function isExecutablePlan(preview: ManualDeletePreviewResponse): boolean {
+  return preview.plan.status === "success" && !preview.plan.actions.some((action) => actionGroup(action) === "attention")
 }

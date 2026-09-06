@@ -282,7 +282,7 @@ class SeerrIssue:
 
 @dataclass(frozen=True)
 class DownloaderRemovalResult:
-    """Download-client removal outcome for a single hash."""
+    """Download-client removal outcome and observed presentation metadata for one hash."""
 
     hash_value: str
     existed: bool
@@ -294,3 +294,7 @@ class DownloaderRemovalResult:
     seeding_policy: str | None = None
     ratio: float | None = None
     seeding_time_seconds: int | None = None
+    torrent_name: str | None = None
+    content_path: str | None = None
+    download_directory: str | None = None
+    delete_files: bool | None = None

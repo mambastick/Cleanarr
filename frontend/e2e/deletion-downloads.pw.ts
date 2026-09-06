@@ -82,6 +82,8 @@ test("dry-run terminal jobs announce and display a completed simulation for sing
   const api = await boot(page, { jobs: activeJobs, batches: activeBatches })
   await expect.poll(() => api.count("/api/actions/delete/jobs", "GET")).toBeGreaterThan(0)
 
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole("button", { name: "Background tasks" }).click()
   activeJobs.splice(0, 1, { ...job, status: "completed", phase: "completed", progress_percent: 100, completed_at: "2026-01-01T00:00:02Z", result: simulatedResult })
   activeBatches.splice(0, 1, {
     ...activeBatches[0], status: "completed", completed_at: "2026-01-01T00:00:02Z", running_count: 0, completed_count: 1,
@@ -89,12 +91,14 @@ test("dry-run terminal jobs announce and display a completed simulation for sing
   })
 
   await expect(page.getByLabel("Notifications alt+T").getByText("Fixture Movie: Simulation completed — no changes were made.")).toBeVisible()
-  await page.setViewportSize({ width: 390, height: 844 })
-  await page.getByRole("button", { name: "Background tasks" }).click()
   await expect(page.getByText("Simulation completed — no changes were made.").first()).toBeVisible()
   await expect(page.getByText("Fixture batch item")).toBeVisible()
   expect(await page.locator("body").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
   expect(api.count("/api/actions/delete/jobs", "GET")).toBeGreaterThan(1)
+  await page.getByRole("dialog", { name: "Background tasks" }).getByRole("button", { name: "Close" }).click()
+  await expect(page.getByRole("button", { name: "Background tasks" })).toHaveCount(0)
+  // Base UI returns to the first tabbable child of the explicit content fallback.
+  await expect(page.locator("main :focus")).toBeVisible()
 })
 
 test("single deletion retries the exact serialized request and prevents rapid duplicate submission", async ({ page }) => {

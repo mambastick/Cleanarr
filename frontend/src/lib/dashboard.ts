@@ -44,13 +44,20 @@ export interface DashboardRule {
   guardrails: string[]
 }
 
+export interface DeletionActionDetails extends Record<string, unknown> {
+  torrent_name?: string | null
+  content_path?: string | null
+  download_directory?: string | null
+  delete_files?: boolean | null
+}
+
 export interface DashboardAction {
   system: string
   action: string
   status: ActionStatus
   message: string
   reason: string | null
-  details: Record<string, unknown>
+  details: DeletionActionDetails
 }
 
 export interface DashboardProcessingResult {

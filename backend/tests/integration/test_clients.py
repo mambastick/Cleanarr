@@ -615,7 +615,9 @@ async def test_qbittorrent_client_accepts_no_content_login_response() -> None:
 @respx.mock
 async def test_qbittorrent_client_marks_absent_hashes() -> None:
     respx.post("http://qbt/api/v2/auth/login").respond(text="Ok.")
-    respx.get("http://qbt/api/v2/torrents/info").respond(json=[{"hash": "AA"}])
+    respx.get("http://qbt/api/v2/torrents/info").respond(
+        json=[{"hash": "AA", "name": "Example release", "content_path": "/downloads/Example release"}]
+    )
     delete_route = respx.post("http://qbt/api/v2/torrents/delete").respond(status_code=200)
 
     client = QbittorrentClient(base_url="http://qbt", username="user", password="pass", timeout_seconds=5)
@@ -626,6 +628,69 @@ async def test_qbittorrent_client_marks_absent_hashes() -> None:
 
     assert delete_route.called
     assert [(result.hash_value, result.existed) for result in results] == [("AA", True), ("BB", False)]
+    assert results[0].torrent_name == "Example release"
+    assert results[0].content_path == "/downloads/Example release"
+    assert results[0].download_directory is None
+    assert results[0].delete_files is True
+    assert results[1].torrent_name is None
+    assert results[1].content_path is None
+    assert results[1].download_directory is None
+    assert results[1].delete_files is None
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_qbittorrent_dry_run_reports_metadata_without_removing_the_torrent() -> None:
+    respx.post("http://qbt/api/v2/auth/login").respond(text="Ok.")
+    respx.get("http://qbt/api/v2/torrents/info").respond(
+        json=[{"hash": "AA", "name": "Preview release", "content_path": "/downloads/Preview release"}]
+    )
+    delete_route = respx.post("http://qbt/api/v2/torrents/delete").respond(status_code=200)
+
+    client = QbittorrentClient(base_url="http://qbt", username="user", password="pass", timeout_seconds=5)
+    try:
+        result = (await client.delete_hashes(["AA"], delete_files=True, dry_run=True))[0]
+    finally:
+        await client.close()
+
+    assert delete_route.called is False
+    assert result.torrent_name == "Preview release"
+    assert result.content_path == "/downloads/Preview release"
+    assert result.download_directory is None
+    assert result.delete_files is True
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_qbittorrent_bounds_and_validates_untrusted_removal_metadata() -> None:
+    name = "n" * 200
+    respx.post("http://qbt/api/v2/auth/login").respond(text="Ok.")
+    respx.get("http://qbt/api/v2/torrents/info").respond(
+        json=[
+            {
+                "hash": "AA",
+                "name": f"\t{name}\x00",
+                "content_path": "/downloads//Preview release/",
+            },
+            {
+                "hash": "BB",
+                "name": "https://untrusted.example/release",
+                "content_path": "https://untrusted.example/release",
+            },
+        ]
+    )
+    respx.post("http://qbt/api/v2/torrents/delete").respond(status_code=200)
+
+    client = QbittorrentClient(base_url="http://qbt", username="user", password="pass", timeout_seconds=5)
+    try:
+        results = await client.delete_hashes(["AA", "BB"], delete_files=False)
+    finally:
+        await client.close()
+
+    assert results[0].torrent_name == name[:160]
+    assert results[0].content_path == "/downloads//Preview release/"
+    assert results[1].torrent_name is None
+    assert results[1].content_path is None
 
 
 @pytest.mark.asyncio
