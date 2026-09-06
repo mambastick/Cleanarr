@@ -469,6 +469,18 @@ contracts.
 - Direct-Jellyfin series deletion and batch selection remain out of scope until
   they have an equally explicit physical-scope and ownership contract.
 
+### Accepted deletion-preview clarification — 2026-09-07
+
+- [Issue #39](https://github.com/mambastick/Cleanarr/issues/39) makes the single
+  deletion preview identify concrete torrents and downstream records, explain
+  file versus record effects, and offer bounded inspection links. Unknown
+  metadata remains explicit; confirmation remains bound to the reviewed plan.
+- Remove the shell's recent-job history entry point; Activity is the history
+  surface. Keep access to active background work and the completion of work
+  already being followed, with keyboard focus preserved when the panel closes.
+- Preserve the existing release order, ownership rules, dry-run defaults and
+  required backend/frontend interaction gates. This is not a release claim.
+
 ## Required 1.0 scope
 
 ### 1. Download clients and routing

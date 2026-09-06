@@ -40,7 +40,16 @@ async def test_transmission_legacy_rpc_negotiates_session_and_removes_existing_h
                 200,
                 json={
                     "result": "success",
-                    "arguments": {"torrents": [{"id": 7, "hashString": "AA"}]},
+                    "arguments": {
+                        "torrents": [
+                            {
+                                "id": 7,
+                                "hashString": "AA",
+                                "name": "Legacy release",
+                                "downloadDir": "/downloads/legacy",
+                            }
+                        ]
+                    },
                 },
             )
         return httpx.Response(200, json={"result": "success", "arguments": {}})
@@ -60,6 +69,14 @@ async def test_transmission_legacy_rpc_negotiates_session_and_removes_existing_h
     removal = next(call for call in calls if call["method"] == "torrent-remove")
     assert removal["arguments"] == {"ids": [7], "delete-local-data": False}
     assert [(result.hash_value, result.existed) for result in results] == [("AA", True), ("BB", False)]
+    assert results[0].torrent_name == "Legacy release"
+    assert results[0].content_path is None
+    assert results[0].download_directory == "/downloads/legacy"
+    assert results[0].delete_files is False
+    assert results[1].torrent_name is None
+    assert results[1].content_path is None
+    assert results[1].download_directory is None
+    assert results[1].delete_files is None
 
 
 @pytest.mark.asyncio
@@ -74,7 +91,16 @@ async def test_transmission_json_rpc_uses_snake_case_methods() -> None:
         if method == "session_get":
             result: dict[str, Any] = {"version": "4.1.0", "rpc_version_semver": "6.0.0"}
         elif method == "torrent_get":
-            result = {"torrents": [{"id": 9, "hash_string": "BB"}]}
+            result = {
+                "torrents": [
+                    {
+                        "id": 9,
+                        "hash_string": "BB",
+                        "name": "Modern release",
+                        "download_dir": "/downloads/modern",
+                    }
+                ]
+            }
         else:
             result = {}
         return httpx.Response(200, json={"jsonrpc": "2.0", "result": result, "id": payload["id"]})
@@ -95,6 +121,10 @@ async def test_transmission_json_rpc_uses_snake_case_methods() -> None:
     removal = next(call for call in calls if call["method"] == "torrent_remove")
     assert removal["params"] == {"ids": [9], "delete_local_data": True}
     assert results[0].existed is True
+    assert results[0].torrent_name == "Modern release"
+    assert results[0].content_path is None
+    assert results[0].download_directory == "/downloads/modern"
+    assert results[0].delete_files is True
 
 
 @pytest.mark.asyncio
@@ -125,7 +155,18 @@ async def test_transmission_defers_removal_until_seed_ratio_is_met() -> None:
         if payload["method"] == "session_get":
             result: dict[str, Any] = {"version": "4.1.0"}
         else:
-            result = {"torrents": [{"id": 9, "hash_string": "AA", "upload_ratio": 0.5, "seconds_seeding": 7_200}]}
+            result = {
+                "torrents": [
+                    {
+                        "id": 9,
+                        "hash_string": "AA",
+                        "upload_ratio": 0.5,
+                        "seconds_seeding": 7_200,
+                        "name": "Retained release",
+                        "download_dir": "/downloads/retained",
+                    }
+                ]
+            }
         return httpx.Response(200, json={"jsonrpc": "2.0", "result": result, "id": payload["id"]})
 
     respx.post("http://transmission/transmission/rpc").mock(side_effect=handler)
@@ -145,6 +186,10 @@ async def test_transmission_defers_removal_until_seed_ratio_is_met() -> None:
     assert all(call["method"] != "torrent_remove" for call in calls)
     assert results[0].existed is True
     assert results[0].skip_reason == "Torrent removal deferred: seed ratio is 0.5 (required 1)."
+    assert results[0].torrent_name == "Retained release"
+    assert results[0].content_path is None
+    assert results[0].download_directory == "/downloads/retained"
+    assert results[0].delete_files is False
 
 
 @pytest.mark.asyncio
@@ -161,6 +206,7 @@ async def test_deluge_web_rpc_authenticates_and_uses_batch_removal() -> None:
             "web.connected": True,
             "daemon.get_version": "2.2.0",
             "core.get_session_state": ["aa", "cc"],
+            "core.get_torrents_status": {"aa": {"name": "Deluge release", "save_path": "/downloads/deluge"}},
             "core.remove_torrents": [],
         }
         return httpx.Response(200, json={"id": payload["id"], "result": results[method], "error": None})
@@ -176,6 +222,14 @@ async def test_deluge_web_rpc_authenticates_and_uses_batch_removal() -> None:
     removal = next(call for call in calls if call["method"] == "core.remove_torrents")
     assert removal["params"] == [["aa"], True]
     assert [(result.hash_value, result.existed) for result in results] == [("AA", True), ("BB", False)]
+    assert results[0].torrent_name == "Deluge release"
+    assert results[0].content_path is None
+    assert results[0].download_directory == "/downloads/deluge"
+    assert results[0].delete_files is True
+    assert results[1].torrent_name is None
+    assert results[1].content_path is None
+    assert results[1].download_directory is None
+    assert results[1].delete_files is None
 
 
 @pytest.mark.asyncio
@@ -239,6 +293,7 @@ async def test_rtorrent_xmlrpc_removes_data_only_from_validated_absolute_path() 
         results: dict[str, Any] = {
             "system.client_version": "0.15.5",
             "download_list": ["AA"],
+            "d.name": "rTorrent release",
             "d.base_path": "/downloads/movies/Movie",
             "d.stop": 0,
             "d.close": 0,
@@ -266,6 +321,14 @@ async def test_rtorrent_xmlrpc_removes_data_only_from_validated_absolute_path() 
         ("d.erase", ("AA",))
     )
     assert [(result.hash_value, result.existed) for result in results] == [("AA", True), ("BB", False)]
+    assert results[0].torrent_name == "rTorrent release"
+    assert results[0].content_path == "/downloads/movies/Movie"
+    assert results[0].download_directory is None
+    assert results[0].delete_files is True
+    assert results[1].torrent_name is None
+    assert results[1].content_path is None
+    assert results[1].download_directory is None
+    assert results[1].delete_files is None
 
 
 @pytest.mark.asyncio
@@ -273,7 +336,7 @@ async def test_rtorrent_xmlrpc_removes_data_only_from_validated_absolute_path() 
 async def test_rtorrent_refuses_unsafe_data_path() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         _, method = loads(request.content)
-        results: dict[str, Any] = {"download_list": ["AA"], "d.base_path": "/"}
+        results: dict[str, Any] = {"download_list": ["AA"], "d.name": "unsafe", "d.base_path": "/"}
         return httpx.Response(200, content=dumps((results[method],), methodresponse=True, allow_none=True))
 
     respx.post("http://rtorrent/RPC2").mock(side_effect=handler)
@@ -301,6 +364,8 @@ async def test_rtorrent_defers_removal_using_scaled_ratio() -> None:
         calls.append((method, params))
         results: dict[str, Any] = {
             "download_list": ["AA"],
+            "d.name": "Deferred release",
+            "d.base_path": "/downloads/deferred",
             "d.ratio": 750,
             "d.timestamp.finished": 1,
         }
