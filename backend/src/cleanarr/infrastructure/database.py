@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -160,6 +161,20 @@ MIGRATIONS = (
             "CREATE INDEX IF NOT EXISTS idx_user_accounts_last_seen ON user_accounts(last_seen_at DESC)",
         ),
     ),
+    DatabaseMigration(
+        version=7,
+        statements=(
+            "CREATE TABLE IF NOT EXISTS retained_torrents ("
+            " client_id TEXT NOT NULL, info_hash TEXT NOT NULL,"
+            " policy TEXT NOT NULL CHECK (policy IN ('keep','defer')),"
+            " correlation_id TEXT NOT NULL, provider_ids_json TEXT NOT NULL,"
+            " item_scope TEXT NOT NULL, retained_at TEXT NOT NULL,"
+            " min_seed_ratio REAL, min_seed_time_minutes INTEGER,"
+            " PRIMARY KEY(client_id, info_hash)"
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_retained_torrents_retained_at ON retained_torrents(retained_at DESC)",
+        ),
+    ),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
@@ -169,11 +184,20 @@ class UnsupportedDatabaseVersionError(RuntimeError):
     """Raised when a newer database is opened by an older CleanArr build."""
 
 
+@contextmanager
+def _connect(db_path: Path) -> Iterator[sqlite3.Connection]:
+    """Open one short-lived connection and close it after its transaction."""
+
+    with closing(sqlite3.connect(db_path)) as connection:
+        with connection:
+            yield connection
+
+
 def migrate_database(db_path: Path) -> int:
     """Apply pending migrations in order and return the resulting version."""
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(db_path) as connection:
+    with _connect(db_path) as connection:
         current_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
         if current_version > LATEST_SCHEMA_VERSION:
             raise UnsupportedDatabaseVersionError(

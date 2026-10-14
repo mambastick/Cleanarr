@@ -12,12 +12,22 @@ from urllib.parse import quote, urlparse
 
 import httpx
 
+from cleanarr.application.data_safety import (
+    ContentSafetyAssessment,
+    assess_content_inventory,
+    content_safety_skip_reason,
+    read_content_inventory,
+    validate_scope_path,
+)
 from cleanarr.domain import (
     ArtworkData,
     AuthenticationError,
     CleanupMediaType,
     DownloadControlAction,
     DownloadControlOutcome,
+    DownloaderContentInventory,
+    DownloaderContentInventoryFailure,
+    DownloaderContentScope,
     DownloaderControlResult,
     DownloaderListing,
     DownloaderReadFailure,
@@ -49,6 +59,7 @@ from cleanarr.domain.seeding import TorrentSeedingStatus, seeding_policy_skip_re
 _CONTROL_VERIFICATION_DELAYS = (0.0, 0.05, 0.1, 0.2, 0.4, 0.8)
 _JELLYFIN_LIBRARY_PAGE_SIZE = 500
 _JELLYFIN_LIBRARY_MAX_ITEMS = 20_000
+_JELLYFIN_TARGETED_PROVIDER_MAX_ITEMS = 1_000
 
 
 def _optional_datetime(value: object) -> datetime | None:
@@ -484,7 +495,24 @@ class RadarrClient(JsonServiceClient):
             "/history/movie",
             params={"movieId": movie_id, "page": 1, "pageSize": 1000, "sortKey": "date", "sortDirection": "descending"},
         )
-        records = payload if isinstance(payload, list) else payload.get("records", [])
+        if isinstance(payload, list):
+            records = payload
+        elif isinstance(payload, dict) and isinstance(payload.get("records"), list):
+            records = payload["records"]
+            total = payload.get("totalRecords")
+            if isinstance(total, bool) or not isinstance(total, int) or total != len(records):
+                raise ExternalServiceError("radarr", "Radarr returned incomplete movie history.")
+        else:
+            raise ExternalServiceError("radarr", "Radarr returned invalid movie history.")
+        if len(records) > 10000 or any(
+            not isinstance(item, dict)
+            or not isinstance(item.get("id"), int)
+            or not isinstance(item.get("movieId"), int)
+            or not isinstance(item.get("eventType"), str)
+            or not isinstance(item.get("data", {}), dict)
+            for item in records
+        ):
+            raise ExternalServiceError("radarr", "Radarr returned invalid or excessive movie history.")
         return [
             RadarrHistoryRecord(
                 id=item["id"],
@@ -1138,6 +1166,14 @@ class QbittorrentClient:
 
         await self._login()
         matches = await self._matching_torrents(normalized)
+        assessment: ContentSafetyAssessment | None = None
+        if delete_files:
+            inventory = await read_content_inventory(self)
+            assessment = assess_content_inventory(
+                ((self._system, inventory),),
+                normalized,
+                known_existing={self._system: tuple(matches)},
+            )
         deletion_hashes: set[str] = set()
         results: list[DownloaderRemovalResult] = []
         for hash_value in normalized:
@@ -1146,12 +1182,17 @@ class QbittorrentClient:
                 results.append(self._result(hash_value, existed=False))
                 continue
             canonical_hash, status, torrent_name, content_path = match
-            skip_reason = seeding_policy_skip_reason(
+            safety_reason = (
+                content_safety_skip_reason(assessment, self._system, hash_value) if assessment is not None else None
+            )
+            skip_reason = safety_reason or seeding_policy_skip_reason(
                 self._seeding_policy,
                 min_seed_ratio=self._min_seed_ratio,
                 min_seed_time_minutes=self._min_seed_time_minutes,
                 status=status,
             )
+            if delete_files and safety_reason is None and skip_reason is None and content_path is None:
+                skip_reason = "ownership_unverifiable"
             if skip_reason is None:
                 deletion_hashes.add(canonical_hash)
             results.append(
@@ -1168,6 +1209,50 @@ class QbittorrentClient:
         if deletion_hashes and not dry_run:
             await self._delete_existing_hashes(deletion_hashes, delete_files=delete_files)
         return results
+
+    async def list_content_inventory(self) -> DownloaderContentInventory:
+        """Read qBittorrent content roots for every torrent without exposing them publicly."""
+
+        await self._login()
+        try:
+            response = await self._client.get(
+                "/api/v2/torrents/info",
+                params={"fields": "hash,infohash_v1,infohash_v2,content_path"},
+            )
+        except httpx.HTTPError as exc:
+            raise ExternalServiceError(self._system, "qBittorrent content inventory failed.") from exc
+        if response.status_code in {401, 403}:
+            raise AuthenticationError(self._system, "qBittorrent rejected the configured credentials.")
+        if response.status_code >= 400:
+            raise ExternalServiceError(self._system, "qBittorrent content inventory failed.")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ExternalServiceError(self._system, "qBittorrent returned an invalid content inventory.") from exc
+        if not isinstance(payload, list):
+            return DownloaderContentInventory(
+                failures=(DownloaderContentInventoryFailure("invalid_content_inventory"),)
+            )
+        scopes: list[DownloaderContentScope] = []
+        failures: list[DownloaderContentInventoryFailure] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                failures.append(DownloaderContentInventoryFailure("malformed_content_scope"))
+                continue
+            raw_aliases = [item.get(key) for key in ("hash", "infohash_v1", "infohash_v2")]
+            if any(raw_value not in (None, "") and not _qbt_hash(raw_value) for raw_value in raw_aliases):
+                failures.append(DownloaderContentInventoryFailure("invalid_content_scope"))
+                continue
+            aliases = tuple(
+                dict.fromkeys(_qbt_hash(raw_value) for raw_value in raw_aliases if raw_value not in (None, ""))
+            )
+            info_hash = aliases[0] if aliases else ""
+            path = validate_scope_path(item.get("content_path"))
+            if not info_hash or path is None:
+                failures.append(DownloaderContentInventoryFailure("invalid_content_scope"))
+                continue
+            scopes.append(DownloaderContentScope(info_hash=info_hash, hash_aliases=aliases[1:], paths=(path,)))
+        return DownloaderContentInventory(scopes=tuple(scopes), failures=tuple(failures))
 
     async def list_torrents(self) -> DownloaderListing:
         """Return safe normalized torrent snapshots without exposing data paths."""
@@ -1372,6 +1457,70 @@ class JellyfinServerClient(JsonServiceClient):
     async def get_version(self) -> str:
         payload = await self._request("GET", "/System/Info")
         return str(payload.get("Version") or "unknown") if isinstance(payload, dict) else "unknown"
+
+    async def find_items(
+        self,
+        *,
+        ids: Sequence[str] = (),
+        provider_ids: Sequence[str] = (),
+        include_types: Sequence[str] = (),
+        accept_language: str | None = None,
+    ) -> Sequence[JellyfinItem]:
+        """Look up a bounded set of Jellyfin items without paginating a library."""
+        if not ids and not provider_ids:
+            raise ExternalServiceError("jellyfin", "Jellyfin lookup requires an item or provider identifier.")
+        request_kwargs: dict[str, Any] = {}
+        if accept_language:
+            request_kwargs["headers"] = {"Accept-Language": accept_language}
+        params: dict[str, Any] = {
+            "Recursive": "true",
+            "Fields": "ProviderIds,ParentId,IndexNumber",
+            "EnableTotalRecordCount": "true",
+        }
+        if ids:
+            params["Ids"] = ",".join(ids)
+        else:
+            params["Limit"] = _JELLYFIN_TARGETED_PROVIDER_MAX_ITEMS
+        if include_types:
+            params["IncludeItemTypes"] = ",".join(include_types)
+        payload = await self._request("GET", "/Items", params=params, **request_kwargs)
+        if not isinstance(payload, dict) or not isinstance(payload.get("Items"), list):
+            raise ExternalServiceError("jellyfin", "Jellyfin returned invalid targeted lookup data.")
+        total = payload.get("TotalRecordCount")
+        if total is None or isinstance(total, bool) or not isinstance(total, int) or total < 0:
+            raise ExternalServiceError("jellyfin", "Jellyfin returned invalid targeted lookup metadata.")
+        if not ids and total > _JELLYFIN_TARGETED_PROVIDER_MAX_ITEMS:
+            raise ExternalServiceError("jellyfin", "Jellyfin provider lookup exceeds the safe bounded limit.")
+        raw_items = payload["Items"]
+        if isinstance(total, int) and len(raw_items) != total:
+            raise ExternalServiceError("jellyfin", "Jellyfin returned an incomplete targeted lookup.")
+        result: list[JellyfinItem] = []
+        for item in raw_items:
+            parsed = self._library_item(item)
+            if parsed is None:
+                raise ExternalServiceError("jellyfin", "Jellyfin returned invalid targeted lookup data.")
+            result.append(parsed)
+        if ids:
+            requested_ids = set(ids)
+            returned_ids = [item.id for item in result]
+            if any(item_id not in requested_ids for item_id in returned_ids) or len(returned_ids) != len(
+                set(returned_ids)
+            ):
+                raise ExternalServiceError("jellyfin", "Jellyfin returned inconsistent targeted lookup items.")
+            return result
+        provider_tokens = {provider_id.casefold() for provider_id in provider_ids}
+        return [item for item in result if self._matches_provider_ids(item, provider_tokens)]
+
+    @staticmethod
+    def _matches_provider_ids(item: JellyfinItem, provider_tokens: set[str]) -> bool:
+        item_tokens: set[str] = set()
+        if item.tmdb_id is not None:
+            item_tokens.add(f"tmdb.{item.tmdb_id}")
+        if item.tvdb_id is not None:
+            item_tokens.add(f"tvdb.{item.tvdb_id}")
+        if item.imdb_id:
+            item_tokens.add(f"imdb.{item.imdb_id}")
+        return bool({token.casefold() for token in item_tokens} & provider_tokens)
 
     async def list_items(
         self,
@@ -1754,6 +1903,16 @@ class NullJellyfinServerClient:
     async def get_version(self) -> str:
         return "not configured"
 
+    async def find_items(
+        self,
+        *,
+        ids: Sequence[str] = (),
+        provider_ids: Sequence[str] = (),
+        include_types: Sequence[str] = (),
+        accept_language: str | None = None,
+    ) -> Sequence[JellyfinItem]:
+        raise ExternalServiceError("jellyfin", "Jellyfin is not configured; source absence cannot be verified.")
+
     async def list_items(
         self,
         *,
@@ -1817,6 +1976,9 @@ class NullDownloaderClient:
 
     async def list_torrents(self) -> DownloaderListing:
         return DownloaderListing()
+
+    async def list_content_inventory(self) -> DownloaderContentInventory:
+        return DownloaderContentInventory()
 
     async def control_torrent(
         self, client_id: str, info_hash: str | None = None, *, action: DownloadControlAction

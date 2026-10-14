@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
@@ -36,6 +38,15 @@ from cleanarr.redaction import redact_sensitive_text
 _logger = logging.getLogger("cleanarr")
 
 
+@contextmanager
+def _connect(db_path: Path) -> Iterator[sqlite3.Connection]:
+    """Open one short-lived connection and close it after its transaction."""
+
+    with closing(sqlite3.connect(db_path)) as connection:
+        with connection:
+            yield connection
+
+
 class SQLiteDeletionRepository:
     """One cohesive SQLite implementation of all deletion persistence ports."""
 
@@ -46,7 +57,7 @@ class SQLiteDeletionRepository:
         migrate_database(self._db_path)
 
     def load_jobs(self) -> list[DeletionJobRecord]:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             rows = connection.execute(
                 "SELECT id, request_json, event_json, preflight_json, status, phase, progress_percent,"
                 " message, item_name, created_at, started_at, completed_at, next_retry_at,"
@@ -62,7 +73,7 @@ class SQLiteDeletionRepository:
         return jobs
 
     def load_job(self, job_id: UUID) -> DeletionJobRecord | None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             row = connection.execute(
                 "SELECT id, request_json, event_json, preflight_json, status, phase, progress_percent,"
                 " message, item_name, created_at, started_at, completed_at, next_retry_at,"
@@ -73,17 +84,17 @@ class SQLiteDeletionRepository:
         return _job_from_row(row) if row is not None else None
 
     def save_job(self, job: DeletionJobRecord) -> None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             _save_job_in_connection(connection, job)
             connection.commit()
 
     def delete_job(self, job_id: UUID) -> None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute("DELETE FROM manual_delete_jobs WHERE id = ?", (str(job_id),))
             connection.commit()
 
     def load_batches(self) -> list[DeletionBatchRecord]:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute("PRAGMA foreign_keys = ON")
             parent_rows = connection.execute(
                 "SELECT id, canonical_request_json, confirmed_batch_hash, status, message, created_at, "
@@ -103,7 +114,7 @@ class SQLiteDeletionRepository:
         return list(batches.values())
 
     def load_batch(self, batch_id: UUID) -> DeletionBatchRecord | None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute("PRAGMA foreign_keys = ON")
             row = connection.execute(
                 "SELECT id, canonical_request_json, confirmed_batch_hash, status, message, created_at, "
@@ -123,19 +134,19 @@ class SQLiteDeletionRepository:
         return batch
 
     def save_batch(self, batch: DeletionBatchRecord) -> None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute("PRAGMA foreign_keys = ON")
             _save_batch_in_connection(connection, batch)
             connection.commit()
 
     def delete_batch(self, batch_id: UUID) -> None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute("PRAGMA foreign_keys = ON")
             connection.execute("DELETE FROM manual_delete_batches WHERE id = ?", (str(batch_id),))
             connection.commit()
 
     def lookup_destructive_idempotency(self, key: UUID) -> DestructiveIdempotencyRecord | None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             row = connection.execute(
                 "SELECT request_kind, canonical_request_json, original_request_json, resource_id "
                 "FROM destructive_idempotency_ledger WHERE idempotency_key = ?",
@@ -153,7 +164,7 @@ class SQLiteDeletionRepository:
         """Atomically claim a key and save a visible single job when it is new."""
 
         assert job.idempotency_key is not None
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 "SELECT request_kind, canonical_request_json, original_request_json, resource_id "
@@ -188,7 +199,7 @@ class SQLiteDeletionRepository:
     ) -> BatchCreationResult:
         """Atomically claim a batch key while enforcing the durable queue bound."""
 
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute("PRAGMA foreign_keys = ON")
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
@@ -225,7 +236,7 @@ class SQLiteDeletionRepository:
     def load_completed_webhook(
         self, event_key: str, *, completed_after: datetime
     ) -> tuple[MediaDeletionEvent, ProcessingResultResponse] | None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             row = connection.execute(
                 "SELECT event_json, result_json FROM processed_webhook_events"
                 " WHERE event_key = ? AND completed_at IS NOT NULL AND completed_at >= ?",
@@ -236,7 +247,7 @@ class SQLiteDeletionRepository:
         return decode_persisted_event(str(row[0])), ProcessingResultResponse.model_validate_json(str(row[1]))
 
     def has_incomplete_webhook(self, event_key: str) -> bool:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             row = connection.execute(
                 "SELECT 1 FROM processed_webhook_events WHERE event_key = ? AND completed_at IS NULL",
                 (event_key,),
@@ -245,7 +256,7 @@ class SQLiteDeletionRepository:
 
     def mark_webhook_processing(self, event_key: str, event: MediaDeletionEvent, *, purge_before: datetime) -> None:
         now = datetime.now(UTC).isoformat()
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute(
                 "DELETE FROM processed_webhook_events WHERE completed_at IS NOT NULL AND completed_at < ?",
                 (purge_before.isoformat(),),
@@ -262,7 +273,7 @@ class SQLiteDeletionRepository:
             connection.commit()
 
     def mark_webhook_completed(self, event_key: str, result: ProcessingResultResponse) -> None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute(
                 "UPDATE processed_webhook_events SET completed_at = ?, result_json = ? WHERE event_key = ?",
                 (datetime.now(UTC).isoformat(), result.model_dump_json(), event_key),
@@ -270,12 +281,12 @@ class SQLiteDeletionRepository:
             connection.commit()
 
     def delete_webhook(self, event_key: str) -> None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute("DELETE FROM processed_webhook_events WHERE event_key = ?", (event_key,))
             connection.commit()
 
     def purge_webhooks(self, *, completed_before: datetime) -> None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute(
                 "DELETE FROM processed_webhook_events WHERE completed_at IS NOT NULL AND completed_at < ?",
                 (completed_before.isoformat(),),

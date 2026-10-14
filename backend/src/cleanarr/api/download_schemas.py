@@ -23,6 +23,16 @@ class DownloadActionProjection(BaseModel):
     result: dict[str, str | None] | None = None
 
 
+class RetentionProjection(BaseModel):
+    """Durable seeding-policy evidence, without paths or ownership fields."""
+
+    policy: str
+    retained_at: datetime
+    correlation_id: str
+    min_seed_ratio: float | None = None
+    min_seed_time_minutes: int | None = None
+
+
 class DownloadItemResponse(BaseModel):
     client_id: str
     client_name: str
@@ -53,6 +63,7 @@ class DownloadItemResponse(BaseModel):
     policy_reason_code: str | None = None
     policy_facts: dict[str, object] | None = None
     latest_action: DownloadActionProjection | None = None
+    retention: RetentionProjection | None = None
 
     @classmethod
     def from_domain(
@@ -60,6 +71,7 @@ class DownloadItemResponse(BaseModel):
         item: TorrentSnapshot,
         policy: dict[str, object] | None = None,
         action: dict[str, object] | None = None,
+        retention: dict[str, object] | None = None,
     ) -> DownloadItemResponse:
         payload = {**item.__dict__, "tags": list(item.tags) if item.tags is not None else None}
         if policy:
@@ -70,6 +82,8 @@ class DownloadItemResponse(BaseModel):
             )
         if action:
             payload["latest_action"] = DownloadActionProjection.model_validate(action)
+        if retention:
+            payload["retention"] = RetentionProjection.model_validate(retention)
         return cls(**payload)
 
 

@@ -484,6 +484,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
         repository=DownloadsRepository(Path(settings.db_path)),
         downloader=cast(DownloaderFleetPort, getattr(resolved_container, "downloader", NullDownloaderFleet())),
         execution_lock=execution_coordinator.lock,
+        retention=getattr(resolved_container, "retention_repository", None),
     )
     cleanup_candidates_service = CleanupCandidatesService(
         playback=getattr(resolved_container, "jellyfin_server", NullJellyfinServerClient()),
@@ -1965,7 +1966,7 @@ def create_app(*, container: ServiceContainer | None = None) -> FastAPI:
     )
     async def dismiss_manual_delete_job(job_id: UUID) -> Response:
         try:
-            deletion_jobs.dismiss(job_id)
+            await deletion_jobs.dismiss(job_id)
         except DeletionJobNotFoundError as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

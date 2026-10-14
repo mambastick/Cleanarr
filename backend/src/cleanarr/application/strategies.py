@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from datetime import UTC, datetime
 
 from cleanarr.application.ports import (
     DownloaderClientPort,
     RadarrClientPort,
+    RetentionRecorderPort,
     SeerrClientPort,
     SonarrClientPort,
 )
@@ -26,12 +29,15 @@ from cleanarr.domain import (
     ItemType,
     MediaDeletionEvent,
     ProcessingResult,
+    RadarrMovie,
     ResourceNotFoundError,
+    RetainedTorrent,
     SeerrIssue,
     SeerrMedia,
     SeerrRequest,
     SonarrEpisode,
 )
+from cleanarr.domain.config import TorrentRemovalPolicy
 
 Mutation = Callable[[], Awaitable[object | None]]
 
@@ -60,16 +66,38 @@ class BaseDeletionStrategy(ABC):
         logger: logging.Logger,
         seerr: SeerrClientPort,
         downloader: DownloaderClientPort,
+        retention: RetentionRecorderPort | None = None,
+        retention_thresholds: Mapping[str, tuple[float | None, int | None]] | None = None,
     ) -> None:
         self._dry_run = dry_run
         self._logger = logger
         self._seerr = seerr
         self._downloader = downloader
+        self._retention = retention
+        self._retention_thresholds = dict(retention_thresholds or {})
         self._seerr_resolver = StrictSeerrResolver()
 
-    @abstractmethod
     async def handle(self, event: MediaDeletionEvent) -> ProcessingResult:
-        """Process a single event."""
+        """Keep every observed action even when a later read unexpectedly fails."""
+        collector = ActionCollector(event)
+        try:
+            return await self._handle(event, collector)
+        except Exception as exc:
+            collector.add(
+                getattr(exc, "system", "cleanarr"),
+                "process_event",
+                ActionStatus.FAILED,
+                "A downstream operation failed; earlier actions are retained.",
+                reason=FailureReason.AUTHENTICATION_FAILED
+                if isinstance(exc, AuthenticationError)
+                else FailureReason.DOWNSTREAM_ERROR,
+                error=str(exc),
+            )
+            return collector.build()
+
+    @abstractmethod
+    async def _handle(self, event: MediaDeletionEvent, collector: ActionCollector) -> ProcessingResult:
+        """Process a single event using the caller-owned audit collector."""
 
     async def _run_mutation(
         self,
@@ -139,6 +167,7 @@ class BaseDeletionStrategy(ABC):
         hashes: set[str],
         *,
         allow_empty: bool = False,
+        event: MediaDeletionEvent | None = None,
     ) -> bool:
         """Delete resolved hashes and report whether dependent mutations may continue."""
 
@@ -193,12 +222,74 @@ class BaseDeletionStrategy(ABC):
                 )
                 continue
             if result.existed and result.skip_reason:
+                skip_reason = {
+                    "shared_path": FailureReason.SHARED_PATH,
+                    "ownership_unverifiable": FailureReason.OWNERSHIP_UNVERIFIABLE,
+                }.get(result.skip_reason, FailureReason.SEEDING_POLICY)
+                if skip_reason is not FailureReason.SEEDING_POLICY:
+                    cleanup_succeeded = False
+                if skip_reason is FailureReason.SEEDING_POLICY and not self._dry_run:
+                    if (
+                        event is None
+                        or not result.client_id
+                        or result.seeding_policy
+                        not in {
+                            TorrentRemovalPolicy.KEEP.value,
+                            TorrentRemovalPolicy.DEFER.value,
+                        }
+                    ):
+                        collector.add(
+                            result.client_kind or "downloader",
+                            "record_retention",
+                            ActionStatus.FAILED,
+                            "Retention evidence was incomplete; dependent cleanup was blocked.",
+                            reason=FailureReason.DOWNSTREAM_ERROR,
+                            hash=result.hash_value,
+                            downloader_id=result.client_id,
+                            seeding_policy=result.seeding_policy,
+                        )
+                        cleanup_succeeded = False
+                        continue
+                    min_ratio, min_time = self._retention_thresholds.get(result.client_id, (None, None))
+                    record = RetainedTorrent(
+                        client_id=result.client_id,
+                        info_hash=result.hash_value.upper(),
+                        policy=TorrentRemovalPolicy(result.seeding_policy),
+                        correlation_id=collector.correlation_id,
+                        provider_ids=self._provider_ids(event),
+                        item_scope=self._item_scope(event),
+                        retained_at=datetime.now(UTC),
+                        min_seed_ratio=min_ratio,
+                        min_seed_time_minutes=min_time,
+                    )
+                    retention_error: Exception | None = None
+                    if self._retention is None:
+                        retention_error = RuntimeError("retention recorder is not configured")
+                    else:
+                        try:
+                            await self._retention.record_retention(record)
+                        except Exception as exc:  # noqa: BLE001
+                            retention_error = exc
+                    if retention_error is not None:
+                        collector.add(
+                            result.client_kind or "downloader",
+                            "record_retention",
+                            ActionStatus.FAILED,
+                            "Could not persist retention evidence; dependent cleanup was blocked.",
+                            reason=FailureReason.DOWNSTREAM_ERROR,
+                            error=str(retention_error),
+                            hash=result.hash_value,
+                            downloader_id=result.client_id,
+                            seeding_policy=result.seeding_policy,
+                        )
+                        cleanup_succeeded = False
+                        continue
                 collector.add(
                     result.client_kind or "downloader",
                     "delete_hash",
                     ActionStatus.SKIPPED,
                     result.skip_reason,
-                    reason=FailureReason.SEEDING_POLICY,
+                    reason=skip_reason,
                     hash=result.hash_value,
                     downloader_id=result.client_id,
                     downloader_name=result.client_name,
@@ -241,6 +332,28 @@ class BaseDeletionStrategy(ABC):
         return cleanup_succeeded
 
     @staticmethod
+    def _provider_ids(event: MediaDeletionEvent) -> dict[str, int | str]:
+        """Keep only provider identifiers; paths and display metadata are excluded."""
+
+        result: dict[str, int | str] = {}
+        if event.fingerprint.tmdb_id is not None:
+            result["tmdb_id"] = event.fingerprint.tmdb_id
+        if event.fingerprint.tvdb_id is not None:
+            result["tvdb_id"] = event.fingerprint.tvdb_id
+        if event.fingerprint.imdb_id:
+            result["imdb_id"] = event.fingerprint.imdb_id
+        return result
+
+    @staticmethod
+    def _item_scope(event: MediaDeletionEvent) -> str:
+        scope = event.item_type.value
+        if event.season_number is not None:
+            scope += f":season:{event.season_number}"
+        if event.episode_numbers:
+            scope += ":episodes:" + ",".join(str(number) for number in sorted(event.episode_numbers))
+        return scope
+
+    @staticmethod
     def _record_downloader_block(
         collector: ActionCollector,
         *,
@@ -258,13 +371,34 @@ class BaseDeletionStrategy(ABC):
             **details,
         )
 
-    async def _list_requests_for_media(self, media_id: int) -> list[SeerrRequest]:
-        requests = await self._seerr.list_requests()
-        return [request for request in requests if request.media_id == media_id]
+    async def _read_seerr[T](
+        self,
+        collector: ActionCollector,
+        action: str,
+        read: Callable[[], Awaitable[Sequence[T]]],
+    ) -> list[T] | None:
+        try:
+            return list(await read())
+        except Exception as exc:
+            collector.add(
+                "seerr",
+                action,
+                ActionStatus.FAILED,
+                "Could not read Seerr cleanup evidence.",
+                reason=FailureReason.AUTHENTICATION_FAILED
+                if isinstance(exc, AuthenticationError)
+                else FailureReason.DOWNSTREAM_ERROR,
+                error=str(exc),
+            )
+            return None
 
-    async def _list_issues_for_media(self, media_id: int) -> list[SeerrIssue]:
-        issues = await self._seerr.list_issues()
-        return [issue for issue in issues if issue.media_id == media_id]
+    async def _list_requests_for_media(self, media_id: int, collector: ActionCollector) -> list[SeerrRequest] | None:
+        requests = await self._read_seerr(collector, "list_requests", self._seerr.list_requests)
+        return None if requests is None else [request for request in requests if request.media_id == media_id]
+
+    async def _list_issues_for_media(self, media_id: int, collector: ActionCollector) -> list[SeerrIssue] | None:
+        issues = await self._read_seerr(collector, "list_issues", self._seerr.list_issues)
+        return None if issues is None else [issue for issue in issues if issue.media_id == media_id]
 
     async def _resolve_seerr_media(
         self,
@@ -273,7 +407,9 @@ class BaseDeletionStrategy(ABC):
         media_type: str,
         collector: ActionCollector,
     ) -> SeerrMedia | None:
-        media_items = list(await self._seerr.list_media())
+        media_items = await self._read_seerr(collector, "resolve_media", self._seerr.list_media)
+        if media_items is None:
+            return None
         if media_type == "movie":
             decision = self._seerr_resolver.resolve_movie(event.fingerprint, media_items)
         else:
@@ -300,8 +436,10 @@ class BaseDeletionStrategy(ABC):
         if media is None:
             return
 
-        requests = await self._list_requests_for_media(media.id)
-        issues = await self._list_issues_for_media(media.id)
+        requests = await self._list_requests_for_media(media.id, collector)
+        issues = await self._list_issues_for_media(media.id, collector)
+        if requests is None or issues is None:
+            return
 
         for request in requests:
             await self._run_mutation(
@@ -341,8 +479,10 @@ class BaseDeletionStrategy(ABC):
         if media is None:
             return
 
-        requests = await self._list_requests_for_media(media.id)
-        issues = await self._list_issues_for_media(media.id)
+        requests = await self._list_requests_for_media(media.id, collector)
+        issues = await self._list_issues_for_media(media.id, collector)
+        if requests is None or issues is None:
+            return
 
         for request in requests:
             await self._run_mutation(
@@ -382,8 +522,10 @@ class BaseDeletionStrategy(ABC):
         if media is None or event.season_number is None:
             return
 
-        requests = await self._list_requests_for_media(media.id)
-        issues = await self._list_issues_for_media(media.id)
+        requests = await self._list_requests_for_media(media.id, collector)
+        issues = await self._list_issues_for_media(media.id, collector)
+        if requests is None or issues is None:
+            return
 
         for request in requests:
             if event.season_number not in request.season_numbers:
@@ -437,8 +579,10 @@ class BaseDeletionStrategy(ABC):
         if media is None or event.season_number is None or not event.episode_numbers:
             return
 
-        requests = await self._list_requests_for_media(media.id)
-        issues = await self._list_issues_for_media(media.id)
+        requests = await self._list_requests_for_media(media.id, collector)
+        issues = await self._list_issues_for_media(media.id, collector)
+        if requests is None or issues is None:
+            return
         season_number = event.season_number
         episode_numbers = event.episode_numbers
         known_season_episodes = {
@@ -534,18 +678,75 @@ class MovieDeletionStrategy(BaseDeletionStrategy):
         radarr: RadarrClientPort,
         seerr: SeerrClientPort,
         downloader: DownloaderClientPort,
+        retention: RetentionRecorderPort | None = None,
+        retention_thresholds: Mapping[str, tuple[float | None, int | None]] | None = None,
     ) -> None:
         super().__init__(
             dry_run=dry_run,
             logger=logger,
             seerr=seerr,
             downloader=downloader,
+            retention=retention,
+            retention_thresholds=retention_thresholds,
         )
         self._radarr = radarr
         self._resolver = StrictMovieResolver()
 
-    async def handle(self, event: MediaDeletionEvent) -> ProcessingResult:
-        collector = ActionCollector(event)
+    async def _movie_hashes_exclusive(
+        self,
+        collector: ActionCollector,
+        movie_id: int,
+        movies: Sequence[RadarrMovie],
+        hashes: set[str],
+    ) -> bool:
+        """Retain the entire cascade unless all configured Radarr histories isolate the hash."""
+        if not hashes:
+            return True  # The normal missing-hash guard below still blocks deletion.
+        if len(movies) > 1000:
+            collector.add(
+                "radarr",
+                "verify_download_ownership",
+                ActionStatus.SKIPPED,
+                "Radarr ownership inventory exceeds the safety bound.",
+                reason=FailureReason.OWNERSHIP_UNVERIFIABLE,
+            )
+            return False
+        semaphore = asyncio.Semaphore(4)
+
+        async def references(candidate: RadarrMovie) -> bool:
+            other_id = candidate.id
+            if other_id == movie_id:
+                return False
+            async with semaphore:
+                records = await self._radarr.list_movie_history(other_id)
+            return any(record.download_id and record.download_id.upper() in hashes for record in records)
+
+        try:
+            shared = any(await asyncio.gather(*(references(candidate) for candidate in movies)))
+        except Exception as exc:
+            collector.add(
+                "radarr",
+                "verify_download_ownership",
+                ActionStatus.FAILED,
+                "Could not verify exclusive movie download ownership.",
+                reason=FailureReason.AUTHENTICATION_FAILED
+                if isinstance(exc, AuthenticationError)
+                else FailureReason.OWNERSHIP_UNVERIFIABLE,
+                error=str(exc),
+            )
+            return False
+        if shared:
+            collector.add(
+                "radarr",
+                "verify_download_ownership",
+                ActionStatus.SKIPPED,
+                "A download hash is referenced by another movie; all dependent cleanup is blocked.",
+                reason=FailureReason.PACK_TORRENT,
+                hashes=sorted(hashes),
+            )
+        return not shared
+
+    async def _handle(self, event: MediaDeletionEvent, collector: ActionCollector) -> ProcessingResult:
         movies = list(await self._radarr.list_movies())
         decision = self._resolver.resolve(event.fingerprint, movies)
         movie = decision.candidate
@@ -564,7 +765,9 @@ class MovieDeletionStrategy(BaseDeletionStrategy):
                 for record in history_records
                 if record.event_type == "grabbed" and record.download_id
             }
-            downloader_ready = await self._cleanup_hashes(collector, hashes)
+            downloader_ready = await self._movie_hashes_exclusive(collector, movie.id, movies, hashes)
+            if downloader_ready:
+                downloader_ready = await self._cleanup_hashes(collector, hashes, event=event)
             if downloader_ready:
                 await self._run_mutation(
                     collector,
@@ -593,6 +796,8 @@ class MovieDeletionStrategy(BaseDeletionStrategy):
                     path=movie.path,
                 )
 
+        if movie is None and decision.reason is not FailureReason.NO_MATCH:
+            return collector.build()
         if movie is None or downloader_ready:
             await self._cleanup_seerr_movie(event, collector)
         else:
@@ -616,19 +821,22 @@ class SeriesDeletionStrategy(BaseDeletionStrategy):
         sonarr: SonarrClientPort,
         seerr: SeerrClientPort,
         downloader: DownloaderClientPort,
+        retention: RetentionRecorderPort | None = None,
+        retention_thresholds: Mapping[str, tuple[float | None, int | None]] | None = None,
     ) -> None:
         super().__init__(
             dry_run=dry_run,
             logger=logger,
             seerr=seerr,
             downloader=downloader,
+            retention=retention,
+            retention_thresholds=retention_thresholds,
         )
         self._sonarr = sonarr
         self._resolver = StrictSeriesResolver()
         self._safety = SonarrDeletionSafetyAnalyzer()
 
-    async def handle(self, event: MediaDeletionEvent) -> ProcessingResult:
-        collector = ActionCollector(event)
+    async def _handle(self, event: MediaDeletionEvent, collector: ActionCollector) -> ProcessingResult:
         series_list = list(await self._sonarr.list_series())
         decision = self._resolver.resolve(event.fingerprint, series_list)
         series = decision.candidate
@@ -647,7 +855,7 @@ class SeriesDeletionStrategy(BaseDeletionStrategy):
                     reason=note.reason,
                     **note.details,
                 )
-            downloader_ready = await self._cleanup_hashes(collector, set(safety.hashes_to_delete))
+            downloader_ready = await self._cleanup_hashes(collector, set(safety.hashes_to_delete), event=event)
             if downloader_ready:
                 await self._run_mutation(
                     collector,
@@ -676,6 +884,8 @@ class SeriesDeletionStrategy(BaseDeletionStrategy):
                     path=series.path,
                 )
 
+        if series is None and decision.reason is not FailureReason.NO_MATCH:
+            return collector.build()
         if series is None or downloader_ready:
             await self._cleanup_seerr_series(event, collector)
         else:
@@ -699,24 +909,29 @@ class SeasonDeletionStrategy(BaseDeletionStrategy):
         sonarr: SonarrClientPort,
         seerr: SeerrClientPort,
         downloader: DownloaderClientPort,
+        retention: RetentionRecorderPort | None = None,
+        retention_thresholds: Mapping[str, tuple[float | None, int | None]] | None = None,
     ) -> None:
         super().__init__(
             dry_run=dry_run,
             logger=logger,
             seerr=seerr,
             downloader=downloader,
+            retention=retention,
+            retention_thresholds=retention_thresholds,
         )
         self._sonarr = sonarr
         self._resolver = StrictSeriesResolver()
         self._safety = SonarrDeletionSafetyAnalyzer()
 
-    async def handle(self, event: MediaDeletionEvent) -> ProcessingResult:
-        collector = ActionCollector(event)
+    async def _handle(self, event: MediaDeletionEvent, collector: ActionCollector) -> ProcessingResult:
         series_list = list(await self._sonarr.list_series())
         decision = self._resolver.resolve(event.fingerprint, series_list)
         series = decision.candidate
         if series is None:
             self._record_sonarr_match_failure(collector, decision.reason)
+            if decision.reason is not FailureReason.NO_MATCH:
+                return collector.build()
             await self._cleanup_seerr_season(event, collector)
             return collector.build()
 
@@ -737,6 +952,7 @@ class SeasonDeletionStrategy(BaseDeletionStrategy):
             collector,
             set(safety.hashes_to_delete),
             allow_empty=not safety.episode_file_ids_to_delete,
+            event=event,
         )
         if not downloader_ready:
             self._record_downloader_block(
@@ -816,24 +1032,29 @@ class EpisodeDeletionStrategy(BaseDeletionStrategy):
         sonarr: SonarrClientPort,
         seerr: SeerrClientPort,
         downloader: DownloaderClientPort,
+        retention: RetentionRecorderPort | None = None,
+        retention_thresholds: Mapping[str, tuple[float | None, int | None]] | None = None,
     ) -> None:
         super().__init__(
             dry_run=dry_run,
             logger=logger,
             seerr=seerr,
             downloader=downloader,
+            retention=retention,
+            retention_thresholds=retention_thresholds,
         )
         self._sonarr = sonarr
         self._resolver = StrictSeriesResolver()
         self._safety = SonarrDeletionSafetyAnalyzer()
 
-    async def handle(self, event: MediaDeletionEvent) -> ProcessingResult:
-        collector = ActionCollector(event)
+    async def _handle(self, event: MediaDeletionEvent, collector: ActionCollector) -> ProcessingResult:
         series_list = list(await self._sonarr.list_series())
         decision = self._resolver.resolve(event.fingerprint, series_list)
         series = decision.candidate
         if series is None:
             self._record_sonarr_match_failure(collector, decision.reason)
+            if decision.reason is not FailureReason.NO_MATCH:
+                return collector.build()
             await self._cleanup_seerr_episode(event, collector, episodes=())
             return collector.build()
 
@@ -854,6 +1075,7 @@ class EpisodeDeletionStrategy(BaseDeletionStrategy):
             collector,
             set(safety.hashes_to_delete),
             allow_empty=not safety.episode_file_ids_to_delete,
+            event=event,
         )
         if not downloader_ready:
             self._record_downloader_block(
@@ -921,6 +1143,8 @@ class DeletionStrategyFactory:
         sonarr: SonarrClientPort,
         seerr: SeerrClientPort,
         downloader: DownloaderClientPort,
+        retention: RetentionRecorderPort | None = None,
+        retention_thresholds: Mapping[str, tuple[float | None, int | None]] | None = None,
     ) -> None:
         self._dry_run = dry_run
         self._logger = logger
@@ -928,6 +1152,8 @@ class DeletionStrategyFactory:
         self._sonarr = sonarr
         self._seerr = seerr
         self._downloader = downloader
+        self._retention = retention
+        self._retention_thresholds = dict(retention_thresholds or {})
 
     def for_item_type(
         self,
@@ -945,6 +1171,8 @@ class DeletionStrategyFactory:
                 radarr=self._radarr,
                 seerr=self._seerr,
                 downloader=self._downloader,
+                retention=self._retention,
+                retention_thresholds=self._retention_thresholds,
             )
         if item_type is ItemType.SERIES:
             return SeriesDeletionStrategy(
@@ -953,6 +1181,8 @@ class DeletionStrategyFactory:
                 sonarr=self._sonarr,
                 seerr=self._seerr,
                 downloader=self._downloader,
+                retention=self._retention,
+                retention_thresholds=self._retention_thresholds,
             )
         if item_type is ItemType.SEASON:
             return SeasonDeletionStrategy(
@@ -961,6 +1191,8 @@ class DeletionStrategyFactory:
                 sonarr=self._sonarr,
                 seerr=self._seerr,
                 downloader=self._downloader,
+                retention=self._retention,
+                retention_thresholds=self._retention_thresholds,
             )
         return EpisodeDeletionStrategy(
             dry_run=effective_dry_run,
@@ -968,4 +1200,6 @@ class DeletionStrategyFactory:
             sonarr=self._sonarr,
             seerr=self._seerr,
             downloader=self._downloader,
+            retention=self._retention,
+            retention_thresholds=self._retention_thresholds,
         )

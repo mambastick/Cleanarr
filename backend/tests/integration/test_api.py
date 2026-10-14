@@ -37,6 +37,7 @@ from cleanarr.domain import (
 from cleanarr.domain.config import GeneralConfig, RadarrServiceConfig, RuntimeConfig
 from cleanarr.infrastructure.container import ServiceContainer
 from cleanarr.infrastructure.deletion_repository import SQLiteDeletionRepository
+from cleanarr.infrastructure.retention_repository import SqliteRetentionRepository
 from cleanarr.infrastructure.settings import Settings
 from tests.fakes import (
     FakeDownloaderClient,
@@ -139,6 +140,7 @@ class FakeContainer:
         self.webhook_shared_token = "secret-token"
         self.config_service = None
         self.auth_service = FakeAuthService()
+        self.retention_repository = SqliteRetentionRepository(db_path)
 
     async def close(self) -> None:
         return None

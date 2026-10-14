@@ -6,6 +6,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from cleanarr.api.app import create_app
+from cleanarr.domain import RetainedTorrent
+from cleanarr.domain.config import TorrentRemovalPolicy
 from cleanarr.domain.downloads import (
     DownloadActionStatus,
     DownloadControlAction,
@@ -35,6 +37,19 @@ async def test_downloads_api_auth_cursor_bounds_and_refresh(tmp_path: Path) -> N
     app.state.downloads_service.repository.save_listing(tuple(_item(index) for index in range(51)), {"client"})
     repository = app.state.downloads_service.repository
     target = _item(0)
+    await app.state.container.retention_repository.record_retention(
+        RetainedTorrent(
+            client_id=target.client_id,
+            info_hash=target.info_hash,
+            policy=TorrentRemovalPolicy.DEFER,
+            correlation_id="retention-correlation",
+            provider_ids={"tmdb_id": 42},
+            item_scope="Movie",
+            retained_at=datetime.now(UTC),
+            min_seed_ratio=1.0,
+            min_seed_time_minutes=30,
+        )
+    )
     repository.record_policy_evaluation(
         revision="revision",
         snapshot=target,
@@ -80,6 +95,9 @@ async def test_downloads_api_auth_cursor_bounds_and_refresh(tmp_path: Path) -> N
             assert projected["policy_facts"]["ratio"] == 2.0
             assert projected["latest_action"]["source"] == "policy"
             assert projected["latest_action"]["code"] == "target_not_fresh"
+            assert projected["retention"]["policy"] == "defer"
+            assert projected["retention"]["correlation_id"] == "retention-correlation"
+            assert "content_path" not in projected["retention"]
             assert "idempotency_key" not in projected["latest_action"]
             cursor = response.json()["next_cursor"]
             assert cursor

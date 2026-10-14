@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import posixpath
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -15,11 +14,27 @@ from xmlrpc.client import Fault, dumps, loads
 
 import httpx
 
-from cleanarr.application.ports import DownloaderClientPort, DownloaderControlPort, DownloaderReadPort
+from cleanarr.application.data_safety import (
+    ContentSafetyAssessment,
+    assess_content_inventory,
+    content_safety_skip_reason,
+    join_scope_path,
+    read_content_inventory,
+    validate_scope_path,
+)
+from cleanarr.application.ports import (
+    DownloaderClientPort,
+    DownloaderControlPort,
+    DownloaderDataPort,
+    DownloaderReadPort,
+)
 from cleanarr.domain import (
     AuthenticationError,
     DownloadControlAction,
     DownloadControlOutcome,
+    DownloaderContentInventory,
+    DownloaderContentInventoryFailure,
+    DownloaderContentScope,
     DownloaderControlResult,
     DownloaderListing,
     DownloaderReadFailure,
@@ -82,6 +97,11 @@ class MultiDownloaderClient:
         if not normalized:
             return []
 
+        if delete_files:
+            safety_results = await self._content_safe_results(normalized)
+            if safety_results is not None:
+                return safety_results
+
         outcomes = await asyncio.gather(
             *(
                 target.client.delete_hashes(normalized, delete_files=delete_files, dry_run=dry_run)
@@ -109,6 +129,53 @@ class MultiDownloaderClient:
                 raise outcome
             results.extend(outcome)
         return results
+
+    async def _content_safe_results(self, hashes: Sequence[str]) -> list[DownloaderRemovalResult] | None:
+        """Read every configured client before allowing any local-data removal."""
+
+        semaphore = asyncio.Semaphore(self._max_read_concurrency)
+        inventories = await asyncio.gather(
+            *(self._read_content_inventory(target, semaphore) for target in self._targets),
+        )
+        assessment = assess_content_inventory(
+            tuple((target.id, inventory) for target, inventory in zip(self._targets, inventories, strict=True)), hashes
+        )
+        if not assessment.complete:
+            return [
+                DownloaderRemovalResult(
+                    hash_value=hash_value,
+                    existed=True,
+                    client_id=target.id,
+                    client_name=target.name,
+                    client_kind=target.kind,
+                    skip_reason="ownership_unverifiable",
+                    delete_files=False,
+                )
+                for target in self._targets
+                for hash_value in hashes
+            ]
+
+        if not assessment.conflicts:
+            return None
+        return [
+            DownloaderRemovalResult(
+                hash_value=hash_value,
+                existed=True,
+                client_id=target.id,
+                client_name=target.name,
+                client_kind=target.kind,
+                skip_reason=content_safety_skip_reason(assessment, target.id, hash_value) or "ownership_unverifiable",
+                delete_files=False,
+            )
+            for target in self._targets
+            for hash_value in hashes
+        ]
+
+    async def _read_content_inventory(
+        self, target: DownloaderTarget, semaphore: asyncio.Semaphore
+    ) -> DownloaderContentInventory | None:
+        async with semaphore:
+            return await read_content_inventory(cast(DownloaderDataPort, target.client))
 
     async def list_torrents(self) -> DownloaderListing:
         """Read every configured client without allowing one failed target to hide others."""
@@ -270,6 +337,7 @@ class TransmissionClient:
         result = await self._call_generation(
             method="torrent_get" if modern else "torrent-get",
             params={
+                "ids": normalized,
                 "fields": [
                     "id",
                     hash_key,
@@ -277,13 +345,12 @@ class TransmissionClient:
                     seeding_time_key,
                     "name",
                     "download_dir" if modern else "downloadDir",
-                ]
+                ],
             },
             modern=modern,
         )
         torrents = result.get("torrents", [])
-        torrent_ids: list[int] = []
-        matches: dict[str, tuple[TorrentSeedingStatus, str | None, str | None, str | None]] = {}
+        matches: dict[str, tuple[TorrentSeedingStatus, str | None, str | None, str | None, int]] = {}
         for torrent in torrents if isinstance(torrents, list) else []:
             if not isinstance(torrent, dict):
                 continue
@@ -294,14 +361,33 @@ class TransmissionClient:
                     seeding_time_seconds=_optional_int(torrent.get(seeding_time_key)),
                 )
                 skip_reason = self._skip_reason(status)
+                content_path = _safe_content_path(torrent.get("download_dir" if modern else "downloadDir"))
                 matches[hash_value] = (
                     status,
                     skip_reason,
                     _safe_text(torrent.get("name")),
-                    _safe_content_path(torrent.get("download_dir" if modern else "downloadDir")),
+                    content_path,
+                    torrent["id"],
                 )
-                if skip_reason is None:
-                    torrent_ids.append(torrent["id"])
+        assessment: ContentSafetyAssessment | None = None
+        if delete_files:
+            inventory = await read_content_inventory(self)
+            assessment = assess_content_inventory(
+                ((self._system, inventory),),
+                normalized,
+                known_existing={self._system: tuple(matches)},
+            )
+        torrent_ids: list[int] = []
+        for hash_value, (status, skip_reason, torrent_name, content_path, torrent_id) in tuple(matches.items()):
+            safety_reason = (
+                content_safety_skip_reason(assessment, self._system, hash_value) if assessment is not None else None
+            )
+            skip_reason = safety_reason or skip_reason
+            if delete_files and safety_reason is None and skip_reason is None and content_path is None:
+                skip_reason = "ownership_unverifiable"
+            matches[hash_value] = (status, skip_reason, torrent_name, content_path, torrent_id)
+            if skip_reason is None:
+                torrent_ids.append(torrent_id)
 
         if torrent_ids and not dry_run:
             await self._call_generation(
@@ -330,6 +416,47 @@ class TransmissionClient:
             )
             for hash_value in normalized
         ]
+
+    async def list_content_inventory(self) -> DownloaderContentInventory:
+        """Read exact Transmission file scopes for every torrent."""
+
+        await self.get_version()
+        modern = self._modern is True
+        hash_key = "hash_string" if modern else "hashString"
+        root_key = "download_dir" if modern else "downloadDir"
+        result = await self._call_generation(
+            method="torrent_get" if modern else "torrent-get",
+            params={"fields": [hash_key, root_key, "files"]},
+            modern=modern,
+        )
+        raw_torrents = result.get("torrents")
+        if not isinstance(raw_torrents, list):
+            return DownloaderContentInventory(
+                failures=(DownloaderContentInventoryFailure("invalid_content_inventory"),)
+            )
+        scopes: list[DownloaderContentScope] = []
+        failures: list[DownloaderContentInventoryFailure] = []
+        for torrent in raw_torrents:
+            if not isinstance(torrent, dict):
+                failures.append(DownloaderContentInventoryFailure("malformed_content_scope"))
+                continue
+            info_hash = _normalize_single_hash(str(torrent.get(hash_key, "")))
+            raw_files = torrent.get("files")
+            if not info_hash or not isinstance(raw_files, list) or not raw_files:
+                failures.append(DownloaderContentInventoryFailure("invalid_content_scope"))
+                continue
+            paths = tuple(
+                path
+                for raw_file in raw_files
+                for name in [_file_name(raw_file)]
+                for path in [join_scope_path(torrent.get(root_key), name, minimum_root_parts=2)]
+                if path is not None
+            )
+            if len(paths) != len(raw_files):
+                failures.append(DownloaderContentInventoryFailure("invalid_content_scope"))
+            else:
+                scopes.append(DownloaderContentScope(info_hash=info_hash, paths=paths))
+        return DownloaderContentInventory(scopes=tuple(scopes), failures=tuple(failures))
 
     async def list_torrents(self) -> DownloaderListing:
         await self.get_version()
@@ -621,9 +748,28 @@ class DelugeClient:
                         seeding_time_seconds=_optional_int(raw_status.get("seeding_time")),
                     )
 
-        decisions = {
-            hash_value: self._skip_reason(statuses.get(hash_value, TorrentSeedingStatus())) for hash_value in existing
-        }
+        assessment: ContentSafetyAssessment | None = None
+        if delete_files:
+            inventory = await read_content_inventory(self)
+            assessment = assess_content_inventory(
+                ((self._system, inventory),),
+                normalized,
+                known_existing={self._system: tuple(existing)},
+            )
+        decisions = {}
+        for hash_value in existing:
+            safety_reason = (
+                content_safety_skip_reason(assessment, self._system, hash_value) if assessment is not None else None
+            )
+            decision = safety_reason or self._skip_reason(statuses.get(hash_value, TorrentSeedingStatus()))
+            if (
+                delete_files
+                and safety_reason is None
+                and decision is None
+                and metadata.get(hash_value, (None, None))[1] is None
+            ):
+                decision = "ownership_unverifiable"
+            decisions[hash_value] = decision
         removable = {hash_value for hash_value in existing if decisions[hash_value] is None}
         if removable and not dry_run:
             errors = await self._rpc(
@@ -644,6 +790,42 @@ class DelugeClient:
             )
             for hash_value in normalized
         ]
+
+    async def list_content_inventory(self) -> DownloaderContentInventory:
+        """Read exact Deluge file scopes for every torrent."""
+
+        await self._login()
+        raw_statuses = await self._rpc("core.get_torrents_status", [{}, ["save_path", "files"]])
+        if not isinstance(raw_statuses, dict):
+            return DownloaderContentInventory(
+                failures=(DownloaderContentInventoryFailure("invalid_content_inventory"),)
+            )
+        scopes: list[DownloaderContentScope] = []
+        failures: list[DownloaderContentInventoryFailure] = []
+        for torrent_id, raw_status in raw_statuses.items():
+            if not isinstance(raw_status, dict):
+                failures.append(DownloaderContentInventoryFailure("malformed_content_scope"))
+                continue
+            raw_files = raw_status.get("files")
+            if not isinstance(raw_files, list) or not raw_files:
+                failures.append(DownloaderContentInventoryFailure("invalid_content_scope"))
+                continue
+            paths = tuple(
+                path
+                for raw_file in raw_files
+                for name in [_file_name(raw_file)]
+                for path in [join_scope_path(raw_status.get("save_path"), name, minimum_root_parts=2)]
+                if path is not None
+            )
+            if len(paths) != len(raw_files):
+                failures.append(DownloaderContentInventoryFailure("invalid_content_scope"))
+            else:
+                info_hash = _normalize_single_hash(str(torrent_id))
+                if not info_hash:
+                    failures.append(DownloaderContentInventoryFailure("invalid_content_scope"))
+                else:
+                    scopes.append(DownloaderContentScope(info_hash=info_hash, paths=paths))
+        return DownloaderContentInventory(scopes=tuple(scopes), failures=tuple(failures))
 
     async def list_torrents(self) -> DownloaderListing:
         await self._login()
@@ -855,18 +1037,35 @@ class RTorrentClient:
         torrent_ids = await self._rpc("download_list")
         torrent_ids = torrent_ids if isinstance(torrent_ids, (list, tuple)) else []
         existing = {str(torrent_id).upper() for torrent_id in torrent_ids if str(torrent_id).upper() in normalized}
+        assessment: ContentSafetyAssessment | None = None
+        if delete_files:
+            inventory = await read_content_inventory(self)
+            assessment = assess_content_inventory(
+                ((self._system, inventory),),
+                normalized,
+                known_existing={self._system: tuple(existing)},
+            )
         statuses: dict[str, TorrentSeedingStatus] = {}
         decisions: dict[str, str | None] = {}
         metadata: dict[str, tuple[str | None, str | None]] = {}
         for hash_value in sorted(existing):
             status = await self._seeding_status(hash_value)
             statuses[hash_value] = status
-            decisions[hash_value] = self._skip_reason(status)
+            decisions[hash_value] = (
+                content_safety_skip_reason(assessment, self._system, hash_value) if assessment is not None else None
+            ) or self._skip_reason(status)
             metadata[hash_value] = await self._metadata(hash_value)
-            if decisions[hash_value] is not None or dry_run:
+            if decisions[hash_value] is not None:
                 continue
             if delete_files:
-                data_path = await self._data_path(hash_value)
+                try:
+                    data_path = await self._data_path(hash_value)
+                except ExternalServiceError:
+                    decisions[hash_value] = "ownership_unverifiable"
+                    continue
+            if dry_run:
+                continue
+            if delete_files:
                 await self._rpc("d.stop", hash_value)
                 await self._rpc("d.close", hash_value)
                 await self._rpc("execute.throw", "", "/bin/rm", "-rf", "--", data_path)
@@ -889,6 +1088,30 @@ class RTorrentClient:
             )
             for hash_value in normalized
         ]
+
+    async def list_content_inventory(self) -> DownloaderContentInventory:
+        """Read validated rTorrent base paths for every torrent."""
+
+        raw_ids = await self._rpc("download_list")
+        if not isinstance(raw_ids, (list, tuple)):
+            return DownloaderContentInventory(
+                failures=(DownloaderContentInventoryFailure("invalid_content_inventory"),)
+            )
+        default_root = await self._rpc("directory.default")
+        scopes: list[DownloaderContentScope] = []
+        failures: list[DownloaderContentInventoryFailure] = []
+        for torrent_id in raw_ids:
+            info_hash = _normalize_single_hash(str(torrent_id))
+            if not info_hash:
+                failures.append(DownloaderContentInventoryFailure("invalid_content_scope"))
+                continue
+            try:
+                path = await self._data_path(info_hash, default_root=default_root)
+            except ExternalServiceError:
+                failures.append(DownloaderContentInventoryFailure("invalid_content_scope"))
+                continue
+            scopes.append(DownloaderContentScope(info_hash=info_hash, paths=(path,)))
+        return DownloaderContentInventory(scopes=tuple(scopes), failures=tuple(failures))
 
     async def list_torrents(self) -> DownloaderListing:
         raw_ids = await self._rpc("download_list")
@@ -994,21 +1217,17 @@ class RTorrentClient:
             status=status,
         )
 
-    async def _data_path(self, hash_value: str) -> str:
+    async def _data_path(self, hash_value: str, *, default_root: object | None = None) -> str:
         base_path = str(await self._rpc("d.base_path", hash_value) or "")
-        if not base_path:
-            directory = str(await self._rpc("d.directory", hash_value) or "")
-            name = str(await self._rpc("d.name", hash_value) or "")
-            is_multi_file = bool(await self._rpc("d.is_multi_file", hash_value))
-            base_path = directory if is_multi_file else posixpath.join(directory, name)
-
-        path = PurePosixPath(base_path)
-        if not path.is_absolute() or ".." in path.parts or len(path.parts) < 3:
+        root_value = default_root if default_root is not None else await self._rpc("directory.default")
+        path = validate_scope_path(base_path, minimum_parts=2)
+        root = validate_scope_path(root_value, minimum_parts=2)
+        if path is None or root is None or path == root or not path.startswith(f"{root}/"):
             raise ExternalServiceError(
                 self._system,
-                f"rTorrent returned an unsafe data path; refusing local-data removal: {base_path!r}",
+                f"rTorrent returned an unsafe or non-specific data path; refusing local-data removal: {base_path!r}",
             )
-        return str(path)
+        return path
 
     async def _metadata(self, hash_value: str) -> tuple[str | None, str | None]:
         """Read only direct, validated rTorrent metadata for presentation."""
@@ -1472,6 +1691,18 @@ def _rtorrent_snapshot(info_hash: str, values: Sequence[object], *, client: Any)
 
 def _normalize_hashes(hashes: Sequence[str]) -> list[str]:
     return list(dict.fromkeys(hash_value.strip().upper() for hash_value in hashes if hash_value.strip()))
+
+
+def _file_name(value: object) -> str | None:
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, dict):
+        return None
+    for key in ("name", "path"):
+        candidate = value.get(key)
+        if isinstance(candidate, str):
+            return candidate
+    return None
 
 
 def _safe_content_path(value: object) -> str | None:

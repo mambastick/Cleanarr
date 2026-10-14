@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import hashlib
 import json
 import logging
+from collections import deque
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -35,6 +37,90 @@ ManualDeleteRunner = Callable[
     [ManualDeleteRequest, MediaDeletionEvent, DeletionProgressReporter],
     Awaitable[ProcessingResultResponse],
 ]
+
+
+class _OrderedJobWriter:
+    """Serialize async progress snapshots through one worker-thread writer."""
+
+    def __init__(self, repository: DeletionRepositoryPort) -> None:
+        self._repository = repository
+        self._pending: deque[DeletionJobRecord] = deque()
+        self._task: asyncio.Task[None] | None = None
+        self._failure: BaseException | None = None
+
+    def submit(self, job: DeletionJobRecord) -> None:
+        snapshot = copy.deepcopy(job)
+        if self._pending and self._pending[-1].phase is snapshot.phase:
+            self._pending[-1] = snapshot
+        else:
+            self._pending.append(snapshot)
+        if self._task is not None and self._task.done() and self._failure is None:
+            try:
+                self._task.result()
+            except BaseException as exc:  # noqa: BLE001 - preserve the first writer failure for flush()
+                self._failure = exc
+        if self._failure is None and (self._task is None or self._task.done()):
+            self._task = asyncio.create_task(self._drain(), name="cleanarr-manual-deletion-progress-writer")
+
+    async def _drain(self) -> None:
+        while self._pending:
+            snapshot = self._pending.popleft()
+            await asyncio.to_thread(self._repository.save_job, snapshot)
+
+    async def flush(self) -> None:
+        if self._failure is not None:
+            raise self._failure
+        task = self._task
+        if task is not None:
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                # Cancelling the caller must not cancel a worker-thread write.
+                # The owning job drains the still-running writer in its finally block.
+                if task.cancelled() and self._failure is None:
+                    self._failure = asyncio.CancelledError()
+                raise
+            except BaseException as exc:  # noqa: BLE001 - expose persistence failure to the job worker
+                if self._failure is None:
+                    self._failure = exc
+                raise
+        if self._failure is not None:
+            raise self._failure
+
+
+class _JobProgressReporter:
+    """Synchronous callback facade with an awaitable ordered flush."""
+
+    def __init__(self, job: DeletionJobRecord, writer: _OrderedJobWriter) -> None:
+        self._job = job
+        self._writer = writer
+
+    def __call__(self, phase: ManualDeleteJobPhase, progress_percent: int, message: str, item_name: str | None) -> None:
+        self._job.status = ManualDeleteJobStatus.RUNNING
+        self._job.phase = phase
+        self._job.progress_percent = max(self._job.progress_percent, min(progress_percent, 99))
+        self._job.message = message
+        if item_name is not None:
+            self._job.item_name = item_name
+        self._writer.submit(self._job)
+
+    async def flush(self) -> None:
+        await self._writer.flush()
+
+
+async def _flush_writer_before_cancellation(writer: _OrderedJobWriter) -> None:
+    """Drain an in-flight SQLite write before the owning job releases its lock."""
+
+    flush_task = asyncio.create_task(writer.flush(), name="cleanarr-manual-deletion-progress-flush")
+    try:
+        await asyncio.shield(flush_task)
+    except asyncio.CancelledError:
+        # ``to_thread`` cannot cancel an SQLite call already running in the
+        # executor.  Keep awaiting the writer so its close/commit boundary is
+        # reached before the job's execution lock is released.
+        await asyncio.shield(flush_task)
+        raise
+
 
 _logger = logging.getLogger("cleanarr")
 _SAFE_RETAINED_SKIP_REASONS = frozenset(
@@ -114,6 +200,8 @@ class ManualDeletionJobService:
         self._worker_task: asyncio.Task[None] | None = None
         self._initialized = False
         self._start_lock = asyncio.Lock()
+        self._dismiss_lock = asyncio.Lock()
+        self._settled: dict[UUID, asyncio.Event] = {}
 
     async def start(self) -> None:
         """Initialize persistence and start the queue worker."""
@@ -126,8 +214,8 @@ class ManualDeletionJobService:
                 self._jobs_by_idempotency_key = {
                     job.idempotency_key: job for job in loaded_jobs if job.idempotency_key is not None
                 }
-                self._recover_interrupted_jobs()
-                self._prune_history()
+                await self._recover_interrupted_jobs()
+                await self._prune_history()
                 self._initialized = True
             if self._worker_task is None or self._worker_task.done():
                 self._worker_task = asyncio.create_task(
@@ -186,7 +274,7 @@ class ManualDeletionJobService:
         event = await self._resolver(payload)
         preflight = with_display_name(await self._previewer(payload, event), display_name(payload, event))
         validate_plan_confirmation(payload, preflight)
-        self._prune_history(reserve=1)
+        await self._prune_history(reserve=1)
         job = DeletionJobRecord(
             id=uuid4(),
             request=payload,
@@ -259,26 +347,35 @@ class ManualDeletionJobService:
         jobs = sorted(self._jobs.values(), key=lambda job: job.created_at, reverse=True)
         return [self._to_response(job) for job in jobs]
 
-    def dismiss(self, job_id: UUID) -> None:
-        job = self._jobs.get(job_id)
-        if job is None:
-            raise DeletionJobNotFoundError(str(job_id))
-        if job.status in self._ACTIVE_STATUSES:
-            raise DeletionJobActiveError(str(job_id))
-        del self._jobs[job_id]
-        if job.idempotency_key is not None:
-            self._jobs_by_idempotency_key.pop(job.idempotency_key, None)
-        self._repository.delete_job(job_id)
+    async def dismiss(self, job_id: UUID) -> None:
+        """Dismiss on the event loop only after the worker's final write settles."""
+        async with self._dismiss_lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                raise DeletionJobNotFoundError(str(job_id))
+            if job.status in self._ACTIVE_STATUSES:
+                raise DeletionJobActiveError(str(job_id))
+            settled = self._settled.get(job_id)
+            if settled is not None:
+                await settled.wait()
+            await asyncio.to_thread(self._repository.delete_job, job_id)
+            self._jobs.pop(job_id, None)
+            self._settled.pop(job_id, None)
+            if job.idempotency_key is not None:
+                self._jobs_by_idempotency_key.pop(job.idempotency_key, None)
 
     async def _worker_loop(self) -> None:
         while True:
             job_id = await self._queue.get()
             self._scheduled.discard(job_id)
+            settled = asyncio.Event()
+            self._settled[job_id] = settled
             try:
                 job = self._jobs.get(job_id)
                 if job is not None and job.status in self._ACTIVE_STATUSES:
                     await self._run_job(job)
             finally:
+                settled.set()
                 self._queue.task_done()
 
     async def _run_job(self, job: DeletionJobRecord) -> None:
@@ -291,15 +388,14 @@ class ManualDeletionJobService:
         job.next_retry_at = None
         job.attempt_count += 1
         job.error = None
-        self._repository.save_job(job)
+        # Freeze the planning snapshot before handing it to the worker thread.
+        running_snapshot = copy.deepcopy(job)
+        running_snapshot.status = ManualDeleteJobStatus.RUNNING
+        await asyncio.to_thread(self._repository.save_job, running_snapshot)
 
-        def report(phase: ManualDeleteJobPhase, progress_percent: int, message: str, item_name: str | None) -> None:
-            job.phase = phase
-            job.progress_percent = max(job.progress_percent, min(progress_percent, 99))
-            job.message = message
-            if item_name is not None:
-                job.item_name = item_name
-            self._repository.save_job(job)
+        progress_writer = _OrderedJobWriter(self._repository)
+
+        report = _JobProgressReporter(job, progress_writer)
 
         try:
             async with self._execution_lock:
@@ -315,7 +411,7 @@ class ManualDeletionJobService:
                                 job,
                                 "library_item_changed: The library item changed; preview it again before retrying.",
                             )
-                            self._repository.save_job(job)
+                            await asyncio.to_thread(self._repository.save_job, job)
                             return
                         raise
                 current_plan = await self._previewer(job.request, verified_event)
@@ -324,24 +420,45 @@ class ManualDeletionJobService:
                         job,
                         "The deletion plan changed while the job was queued. Preview it and confirm again.",
                     )
-                    self._repository.save_job(job)
+                    await asyncio.to_thread(self._repository.save_job, job)
                     return
                 job.progress_percent = max(job.progress_percent, 20)
                 job.message = "Preflight verified; starting cleanup."
-                self._repository.save_job(job)
-                result = await self._runner(job.request, verified_event, report)
+                await asyncio.to_thread(self._repository.save_job, job)
+                try:
+                    result = await self._runner(job.request, verified_event, report)
+                finally:
+                    await _flush_writer_before_cancellation(progress_writer)
         except asyncio.CancelledError:
             raise
         except DeletionExecutionFailure as exc:
             self._mark_failed(job, exc.message)
-            self._repository.save_job(job)
+            await asyncio.to_thread(self._repository.save_job, job)
         except Exception as exc:  # noqa: BLE001
             _logger.exception("Manual deletion background job %s attempt %s failed", job.id, job.attempt_count)
-            self._retry_or_fail(job, str(exc) or type(exc).__name__)
+            message = str(exc) or type(exc).__name__
+            if job.phase not in {ManualDeleteJobPhase.PLANNING, ManualDeleteJobPhase.LOCATING}:
+                self._mark_failed(job, "interrupted_unknown: " + message)
+                await asyncio.to_thread(self._repository.save_job, job)
+            else:
+                await self._retry_or_fail(job, message)
         else:
             job.result = with_display_name(result, job.display_name or display_name(job.request, job.event))
             if result.status is OverallStatus.PARTIAL_FAILURE:
-                self._retry_or_fail(job, "The deletion finished with retryable downstream errors.")
+                failed_action = next(
+                    (action for action in result.actions if action.status is ActionStatus.FAILED), None
+                )
+                original_error = (
+                    str(failed_action.details.get("error") or failed_action.message)
+                    if failed_action is not None
+                    else "The deletion finished with downstream errors."
+                )
+                if any(action.status is ActionStatus.DELETED for action in result.actions):
+                    self._mark_failed(job, original_error)
+                    job.message = "Partial cleanup completed; automatic replay is blocked."
+                    await asyncio.to_thread(self._repository.save_job, job)
+                else:
+                    await self._retry_or_fail(job, original_error)
                 return
             job.status = ManualDeleteJobStatus.COMPLETED
             job.phase = ManualDeleteJobPhase.COMPLETED
@@ -349,14 +466,14 @@ class ManualDeletionJobService:
             job.message = "Deletion completed."
             job.completed_at = datetime.now(UTC)
             job.error = None
-            self._repository.save_job(job)
+            await asyncio.to_thread(self._repository.save_job, job)
 
-    def _retry_or_fail(self, job: DeletionJobRecord, message: str) -> None:
+    async def _retry_or_fail(self, job: DeletionJobRecord, message: str) -> None:
         message = redact_sensitive_text(message)
         job.error = message
         if job.attempt_count >= job.max_attempts:
             self._mark_failed(job, message)
-            self._repository.save_job(job)
+            await asyncio.to_thread(self._repository.save_job, job)
             return
         delay_index = min(job.attempt_count - 1, len(self._retry_delays_seconds) - 1)
         delay_seconds = self._retry_delays_seconds[delay_index]
@@ -367,7 +484,7 @@ class ManualDeletionJobService:
         job.message = (
             f"Attempt {job.attempt_count} of {job.max_attempts} failed; retry scheduled in {delay_seconds:g} seconds."
         )
-        self._repository.save_job(job)
+        await asyncio.to_thread(self._repository.save_job, job)
         self._schedule_job(job)
 
     @staticmethod
@@ -406,7 +523,7 @@ class ManualDeletionJobService:
             name=f"cleanarr-manual-deletion-retry-{job.id}",
         )
 
-    def _recover_interrupted_jobs(self) -> None:
+    async def _recover_interrupted_jobs(self) -> None:
         now = datetime.now(UTC)
         for job in self._jobs.values():
             if job.status is ManualDeleteJobStatus.RUNNING:
@@ -429,19 +546,25 @@ class ManualDeletionJobService:
                     job.error = (
                         "interrupted_unknown: The previous process stopped after a potentially mutating phase began."
                     )
-                self._repository.save_job(job)
+                await asyncio.to_thread(self._repository.save_job, job)
 
-    def _prune_history(self, *, reserve: int = 0) -> None:
+    async def _prune_history(self, *, reserve: int = 0) -> None:
         terminal_jobs = sorted(
-            (job for job in self._jobs.values() if job.status not in self._ACTIVE_STATUSES),
+            (
+                job
+                for job in self._jobs.values()
+                if job.status not in self._ACTIVE_STATUSES
+                and (job.id not in self._settled or self._settled[job.id].is_set())
+            ),
             key=lambda job: job.created_at,
         )
         overflow = len(terminal_jobs) - self._history_limit + reserve
         for job in terminal_jobs[: max(overflow, 0)]:
             self._jobs.pop(job.id, None)
+            self._settled.pop(job.id, None)
             if job.idempotency_key is not None:
                 self._jobs_by_idempotency_key.pop(job.idempotency_key, None)
-            self._repository.delete_job(job.id)
+            await asyncio.to_thread(self._repository.delete_job, job.id)
 
     @staticmethod
     def _to_response(job: DeletionJobRecord) -> ManualDeleteJobResponse:
@@ -468,6 +591,18 @@ class ManualDeletionJobService:
             preflight=job.preflight,
             result=job.result,
             error=job.error,
+            error_code=(
+                "partial_result_not_retryable"
+                if job.status is ManualDeleteJobStatus.FAILED
+                and job.result is not None
+                and job.result.status is OverallStatus.PARTIAL_FAILURE
+                and any(action.status is ActionStatus.DELETED for action in job.result.actions)
+                else "interrupted_unknown"
+                if job.error and job.error.startswith("interrupted_unknown:")
+                else "plan_changed"
+                if job.error and job.error.startswith("The deletion plan changed")
+                else None
+            ),
         )
 
 

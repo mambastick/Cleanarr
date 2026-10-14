@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from collections.abc import Callable, Sequence
 from math import isqrt
 from typing import Protocol
 
-from cleanarr.application.deletion_jobs import DeletionProgressReporter
+from cleanarr.application.deletion_jobs import _SAFE_RETAINED_SKIP_REASONS, DeletionProgressReporter
 from cleanarr.application.deletion_models import ManualDeleteJobPhase, ManualDeleteRequest, ProcessingResultResponse
 from cleanarr.application.library_identity import matching_jellyfin_items, matching_jellyfin_seasons
 from cleanarr.application.ports import RadarrClientPort, SonarrClientPort
@@ -319,13 +320,17 @@ class ManualDeletionService:
         strategy = self._strategy_factory().for_item_type(event.item_type, dry_run=True)
         result = await strategy.handle(event)
         if payload.jellyfin_item_id:
+            blocked = _source_cleanup_blocked(result)
             result = with_jellyfin_action(
                 result,
                 ActionResult(
                     system="jellyfin",
                     action="delete_item",
-                    status=ActionStatus.DRY_RUN,
-                    message="Would remove the selected item from Jellyfin after downstream cleanup succeeds.",
+                    status=ActionStatus.SKIPPED if blocked else ActionStatus.DRY_RUN,
+                    reason=FailureReason.DOWNSTREAM_ERROR if blocked else None,
+                    message="Kept the Jellyfin item because downstream cleanup is blocked."
+                    if blocked
+                    else "Would remove the selected item from Jellyfin after downstream cleanup succeeds.",
                     details={"jellyfin_item_id": payload.jellyfin_item_id},
                 ),
             )
@@ -350,6 +355,7 @@ class ManualDeletionService:
             "Cleaning up Arr services, torrent clients, and Seerr.",
             item_name,
         )
+        await _flush_deletion_progress(report)
         strategy = self._strategy_factory().for_item_type(event.item_type)
         completed_actions = 0
 
@@ -366,7 +372,20 @@ class ManualDeletionService:
         with observe_actions(report_action):
             result = await strategy.handle(event)
 
-        if payload.jellyfin_item_id and self._is_dry_run():
+        source_cleanup_blocked = _source_cleanup_blocked(result)
+        if payload.jellyfin_item_id and source_cleanup_blocked:
+            result = with_jellyfin_action(
+                result,
+                ActionResult(
+                    system="jellyfin",
+                    action="delete_item",
+                    status=ActionStatus.SKIPPED,
+                    message="Kept the Jellyfin item because downstream cleanup is blocked.",
+                    reason=FailureReason.DOWNSTREAM_ERROR,
+                    details={"jellyfin_item_id": payload.jellyfin_item_id},
+                ),
+            )
+        elif payload.jellyfin_item_id and self._is_dry_run():
             result = with_jellyfin_action(
                 result,
                 ActionResult(
@@ -433,6 +452,7 @@ class ManualDeletionService:
     ) -> ProcessingResultResponse:
         report = report_progress or ignore_deletion_progress
         report(ManualDeleteJobPhase.JELLYFIN, 80, "Removing the selected movie from Jellyfin only.", event.name)
+        await _flush_deletion_progress(report)
         if self._is_dry_run():
             action = ActionResult(
                 system="jellyfin",
@@ -495,6 +515,17 @@ def ignore_deletion_progress(
     """No-op reporter used by the backwards-compatible synchronous endpoint."""
 
 
+async def _flush_deletion_progress(report: DeletionProgressReporter) -> None:
+    """Wait for a durable progress writer when one is supplied by a job service."""
+
+    flush = getattr(report, "flush", None)
+    if flush is None:
+        return
+    result = flush()
+    if inspect.isawaitable(result):
+        await result
+
+
 def _decode_requested_resource(value: str, expected: LibraryMediaType) -> LibraryResource:
     try:
         resource = decode_library_resource(value)
@@ -552,3 +583,15 @@ def _routed_parts(value: int, profile_count: int) -> tuple[int, int] | None:
     raw_id = paired - diagonal_start
     target_index = diagonal - raw_id
     return (target_index, raw_id) if 0 <= target_index < profile_count else None
+
+
+def _source_cleanup_blocked(result: ProcessingResult) -> bool:
+    """A retained shared scope never permits source-file removal."""
+    return result.status is OverallStatus.PARTIAL_FAILURE or any(
+        action.status is ActionStatus.SKIPPED
+        and (
+            action.reason in {FailureReason.PACK_TORRENT, FailureReason.SHARED_FILE}
+            or action.reason not in _SAFE_RETAINED_SKIP_REASONS
+        )
+        for action in result.actions
+    )

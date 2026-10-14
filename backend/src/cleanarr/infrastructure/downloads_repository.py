@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -48,6 +50,15 @@ _SAFE_ACTION_CODES = RETRYABLE_BEFORE_MUTATION_CODES | {
     "unknown",
     "unsupported_client_version",
 }
+
+
+@contextmanager
+def _connect(db_path: Path) -> Iterator[sqlite3.Connection]:
+    """Open one short-lived connection and close it after its transaction."""
+
+    with closing(sqlite3.connect(db_path)) as connection:
+        with connection:
+            yield connection
 
 
 def _dt(value: datetime | None) -> str | None:
@@ -133,7 +144,7 @@ class DownloadsRepository:
         migrate_database(db_path)
 
     def save_listing(self, snapshots: tuple[TorrentSnapshot, ...], successful_clients: set[str]) -> None:
-        with sqlite3.connect(self.db_path) as db:
+        with _connect(self.db_path) as db:
             db.execute("PRAGMA foreign_keys = ON")
             # Every prior observation is stale until this complete cycle
             # explicitly refreshes it. Failed/removed clients therefore can
@@ -191,7 +202,7 @@ class DownloadsRepository:
             db.commit()
 
     def mark_all_stale(self, reason: str = "refresh_not_confirmed") -> None:
-        with sqlite3.connect(self.db_path) as db:
+        with _connect(self.db_path) as db:
             rows = db.execute("SELECT client_id, info_hash, snapshot_json FROM download_observations").fetchall()
             for client_id, info_hash, payload in rows:
                 old = snapshot_from_json(payload)
@@ -207,14 +218,14 @@ class DownloadsRepository:
             db.commit()
 
     def list_snapshots(self) -> list[TorrentSnapshot]:
-        with sqlite3.connect(self.db_path) as db:
+        with _connect(self.db_path) as db:
             rows = db.execute(
                 "SELECT snapshot_json FROM download_observations ORDER BY client_id, info_hash"
             ).fetchall()
         return [snapshot_from_json(str(row[0])) for row in rows]
 
     def get_snapshot(self, client_id: str, info_hash: str) -> TorrentSnapshot | None:
-        with sqlite3.connect(self.db_path) as db:
+        with _connect(self.db_path) as db:
             row = db.execute(
                 "SELECT snapshot_json FROM download_observations WHERE client_id=? AND info_hash=?",
                 (client_id, info_hash),
@@ -235,7 +246,7 @@ class DownloadsRepository:
     ) -> DownloadActionClaim:
         now = datetime.now(UTC).isoformat()
         action_id = uuid4().hex
-        with sqlite3.connect(self.db_path) as db:
+        with _connect(self.db_path) as db:
             try:
                 db.execute(
                     "INSERT INTO download_actions("
@@ -292,7 +303,7 @@ class DownloadsRepository:
         code = code if code in _SAFE_ACTION_CODES else ("unknown" if code is not None else None)
         if isinstance(result, dict) and code is not None:
             result = {**result, "code": result.get("code", code)}
-        with sqlite3.connect(self.db_path) as db:
+        with _connect(self.db_path) as db:
             db.execute(
                 "UPDATE download_actions SET status=?, code=?, result_json=?, updated_at=? WHERE id=?",
                 (
@@ -306,14 +317,14 @@ class DownloadsRepository:
             db.commit()
 
     def action_status(self, action_id: str) -> DownloadActionStatus | None:
-        with sqlite3.connect(self.db_path) as db:
+        with _connect(self.db_path) as db:
             row = db.execute("SELECT status FROM download_actions WHERE id=?", (action_id,)).fetchone()
         return DownloadActionStatus(str(row[0])) if row else None
 
     def action_record(self, action_id: str) -> DownloadActionClaim | None:
         """Return the durable status and machine-readable code for a claim."""
 
-        with sqlite3.connect(self.db_path) as db:
+        with _connect(self.db_path) as db:
             row = db.execute("SELECT status, code FROM download_actions WHERE id=?", (action_id,)).fetchone()
         if row is None:
             return None
@@ -333,7 +344,7 @@ class DownloadsRepository:
         ordered_keys = sorted(keys)
         predicate = " OR ".join("(client_id=? AND info_hash=?)" for _ in ordered_keys)
         parameters = tuple(value for key in ordered_keys for value in key)
-        with sqlite3.connect(self.db_path) as db:
+        with _connect(self.db_path) as db:
             rows = db.execute(
                 "SELECT id, client_id, info_hash, source, status, code, attempt_count, max_attempts, "
                 "created_at, updated_at, result_json FROM download_actions "
@@ -371,7 +382,7 @@ class DownloadsRepository:
         return projections
 
     def increment_attempt(self, action_id: str) -> int:
-        with sqlite3.connect(self.db_path) as db:
+        with _connect(self.db_path) as db:
             db.execute(
                 "UPDATE download_actions SET attempt_count=attempt_count+1, updated_at=? WHERE id=?",
                 (datetime.now(UTC).isoformat(), action_id),
@@ -382,7 +393,7 @@ class DownloadsRepository:
         return int(row[0]) if row else 0
 
     def recover_running_actions(self) -> int:
-        with sqlite3.connect(self.db_path) as db:
+        with _connect(self.db_path) as db:
             result = db.execute(
                 "UPDATE download_actions SET status=?, code=?, updated_at=? WHERE status=?",
                 (
@@ -396,13 +407,13 @@ class DownloadsRepository:
             return result.rowcount
 
     def action_status_counts(self) -> dict[str, int]:
-        with sqlite3.connect(self.db_path) as db:
+        with _connect(self.db_path) as db:
             rows = db.execute("SELECT status, COUNT(*) FROM download_actions GROUP BY status").fetchall()
         allowed = {status.value for status in DownloadActionStatus}
         return {str(status): int(count) for status, count in rows if str(status) in allowed}
 
     def policy_decision_counts(self) -> dict[str, int]:
-        with sqlite3.connect(self.db_path) as db:
+        with _connect(self.db_path) as db:
             rows = db.execute("SELECT decision, COUNT(*) FROM policy_evaluations GROUP BY decision").fetchall()
         return {
             str(decision): int(count)
@@ -411,7 +422,7 @@ class DownloadsRepository:
         }
 
     def latest_policy_evaluations(self) -> dict[tuple[str, str], dict[str, object]]:
-        with sqlite3.connect(self.db_path) as db:
+        with _connect(self.db_path) as db:
             rows = db.execute(
                 "SELECT client_id, info_hash, reason_code, decision, facts_json "
                 "FROM policy_evaluations ORDER BY evaluated_at ASC, id ASC"
@@ -429,7 +440,7 @@ class DownloadsRepository:
         self, *, revision: str, snapshot: TorrentSnapshot, facts: dict[str, object], reason_code: str, decision: str
     ) -> None:
         safe_facts = json.dumps(_safe_policy_facts(facts), sort_keys=True, separators=(",", ":"))
-        with sqlite3.connect(self.db_path) as db:
+        with _connect(self.db_path) as db:
             db.execute(
                 "INSERT INTO policy_evaluations("
                 "policy_revision,client_id,info_hash,observation_key,facts_json,reason_code,decision,evaluated_at) "

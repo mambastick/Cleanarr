@@ -12,7 +12,7 @@ from typing import Any
 from uuid import UUID, uuid5
 
 from cleanarr.application.download_policy import evaluate_seeding_stop_policy
-from cleanarr.application.ports import DownloaderFleetPort, DownloadsRepositoryPort
+from cleanarr.application.ports import DownloaderFleetPort, DownloadsRepositoryPort, RetentionReadPort
 from cleanarr.domain.config import GeneralConfig
 from cleanarr.domain.downloads import (
     DownloadActionClaim,
@@ -190,10 +190,12 @@ class DownloadsService:
         repository: DownloadsRepositoryPort,
         downloader: DownloaderFleetPort,
         execution_lock: asyncio.Lock,
+        retention: RetentionReadPort | None = None,
     ) -> None:
         self.repository = repository
         self.downloader = downloader
         self.execution_lock = execution_lock
+        self.retention = retention
         self._last_refresh = RefreshResult(tuple(), tuple(), False)
 
     def set_downloader(self, downloader: DownloaderFleetPort) -> None:
@@ -211,11 +213,11 @@ class DownloadsService:
         try:
             listing: DownloaderListing = await asyncio.wait_for(self.downloader.list_torrents(), timeout=30)
         except TimeoutError:
-            self.repository.mark_all_stale("refresh_timeout")
+            await asyncio.to_thread(self.repository.mark_all_stale, "refresh_timeout")
             self._last_refresh = RefreshResult(tuple(self.repository.list_snapshots()), ("refresh_timeout",), False)
             return self._last_refresh
         except Exception:
-            self.repository.mark_all_stale("refresh_failed")
+            await asyncio.to_thread(self.repository.mark_all_stale, "refresh_failed")
             self._last_refresh = RefreshResult(tuple(self.repository.list_snapshots()), ("refresh_failed",), False)
             return self._last_refresh
         snapshots = tuple(replace(item, info_hash=item.info_hash.upper()) for item in listing.torrents)
@@ -232,7 +234,7 @@ class DownloadsService:
                 arr_source_failed=arr_source_failed,
                 downloader_complete=downloader_complete,
             )
-        self.repository.save_listing(snapshots, successful)
+        await asyncio.to_thread(self.repository.save_listing, snapshots, successful)
         self._last_refresh = RefreshResult(
             snapshots,
             tuple(sorted({failure.code for failure in listing.failures})),
@@ -278,7 +280,8 @@ class DownloadsService:
             sort_keys=True,
             separators=(",", ":"),
         )
-        claim: DownloadActionClaim = self.repository.claim_action(
+        claim: DownloadActionClaim = await asyncio.to_thread(
+            self.repository.claim_action,
             idempotency_key=idempotency_key,
             canonical_request=canonical,
             client_id=client_id,
@@ -302,10 +305,11 @@ class DownloadsService:
             # definite pre-mutation block such as a stale target.  Otherwise
             # policy retries could observe attempt_count=0 forever and evade
             # their configured bound.
-            self.repository.increment_attempt(claim.action_id)
+            await asyncio.to_thread(self.repository.increment_attempt, claim.action_id)
             current = self.repository.get_snapshot(client_id, normalized_hash)
             if current is None or current.freshness is not ListingFreshness.FRESH:
-                self.repository.update_action(
+                await asyncio.to_thread(
+                    self.repository.update_action,
                     claim.action_id,
                     DownloadActionStatus.FAILED,
                     code="target_not_fresh",
@@ -318,7 +322,8 @@ class DownloadsService:
                 else {TorrentState.DOWNLOADING, TorrentState.SEEDING, TorrentState.QUEUED, TorrentState.CHECKING}
             )
             if current.state in desired_states:
-                self.repository.update_action(
+                await asyncio.to_thread(
+                    self.repository.update_action,
                     claim.action_id,
                     DownloadActionStatus.ALREADY_IN_STATE,
                     code="already_in_desired_state",
@@ -330,9 +335,12 @@ class DownloadsService:
                     },
                 )
                 return claim.action_id, DownloadActionStatus.ALREADY_IN_STATE, "already_in_desired_state"
-            self.repository.update_action(claim.action_id, DownloadActionStatus.RUNNING, code="running")
+            await asyncio.to_thread(
+                self.repository.update_action, claim.action_id, DownloadActionStatus.RUNNING, code="running"
+            )
             if dry_run:
-                self.repository.update_action(
+                await asyncio.to_thread(
+                    self.repository.update_action,
                     claim.action_id,
                     DownloadActionStatus.SIMULATED,
                     code="dry_run",
@@ -346,7 +354,8 @@ class DownloadsService:
             try:
                 result = await self.downloader.control_torrent(client_id, normalized_hash, action=action)
             except Exception:
-                self.repository.update_action(
+                await asyncio.to_thread(
+                    self.repository.update_action,
                     claim.action_id,
                     DownloadActionStatus.UNCERTAIN,
                     code="mutation_or_post_read_failed",
@@ -375,11 +384,13 @@ class DownloadsService:
                 "before_state": before_snapshot.state.value if isinstance(before_snapshot, TorrentSnapshot) else None,
                 "after_state": after_snapshot.state.value if isinstance(after_snapshot, TorrentSnapshot) else None,
             }
-            self.repository.update_action(claim.action_id, status, code=code, result=result_summary)
+            await asyncio.to_thread(
+                self.repository.update_action, claim.action_id, status, code=code, result=result_summary
+            )
             return claim.action_id, status, code
 
     async def evaluate_and_apply_policy(self, *, config: GeneralConfig) -> None:
-        revision, evaluations = self.evaluate_policy(config=config)
+        revision, evaluations = await self.evaluate_policy(config=config)
         if not config.seeding_stop_policy.enabled:
             return
         for evaluation in evaluations:
@@ -408,13 +419,14 @@ class DownloadsService:
                 source="policy",
             )
 
-    def evaluate_policy(self, *, config: GeneralConfig) -> tuple[str, list[dict[str, object]]]:
+    async def evaluate_policy(self, *, config: GeneralConfig) -> tuple[str, list[dict[str, object]]]:
         policy = config.seeding_stop_policy
         revision = hashlib.sha256(policy.model_dump_json().encode()).hexdigest()[:32]
         evaluations: list[dict[str, object]] = []
         for snapshot in self.snapshots():
             evaluation = evaluate_seeding_stop_policy(policy, snapshot)
-            self.repository.record_policy_evaluation(
+            await asyncio.to_thread(
+                self.repository.record_policy_evaluation,
                 revision=revision,
                 snapshot=snapshot,
                 facts=evaluation.facts,

@@ -6,7 +6,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from cleanarr.domain import (
+    DownloaderContentInventory,
+    DownloaderContentScope,
     DownloaderRemovalResult,
+    JellyfinItem,
     RadarrHistoryRecord,
     RadarrMovie,
     SeerrIssue,
@@ -17,6 +20,38 @@ from cleanarr.domain import (
     SonarrHistoryRecord,
     SonarrSeries,
 )
+
+
+@dataclass
+class FakeJellyfinLookupClient:
+    """Bounded Jellyfin source lookup fake for cascade scenarios."""
+
+    items: list[JellyfinItem] = field(default_factory=list)
+
+    async def find_items(
+        self,
+        *,
+        ids: tuple[str, ...] = (),
+        provider_ids: tuple[str, ...] = (),
+        include_types: tuple[str, ...] = (),
+        accept_language: str | None = None,
+    ) -> list[JellyfinItem]:
+        candidates = [item for item in self.items if not include_types or item.type in include_types]
+        if ids:
+            return [item for item in candidates if item.id in ids]
+        values = set(provider_ids)
+        return [
+            item
+            for item in candidates
+            if any(
+                value in values
+                for value in (
+                    f"tvdb.{item.tvdb_id}" if item.tvdb_id is not None else "",
+                    f"tmdb.{item.tmdb_id}" if item.tmdb_id is not None else "",
+                    f"imdb.{item.imdb_id.casefold()}" if item.imdb_id else "",
+                )
+            )
+        ]
 
 
 @dataclass
@@ -166,6 +201,14 @@ class FakeDownloaderClient:
 
     existing_hashes: set[str]
     deleted_hashes: list[str] = field(default_factory=list)
+
+    async def list_content_inventory(self) -> DownloaderContentInventory:
+        return DownloaderContentInventory(
+            scopes=tuple(
+                DownloaderContentScope(info_hash=value, paths=(f"/downloads/{value}",))
+                for value in sorted(self.existing_hashes)
+            )
+        )
 
     async def delete_hashes(
         self,

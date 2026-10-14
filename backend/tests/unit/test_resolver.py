@@ -4,7 +4,7 @@ from cleanarr.application.resolver import StrictMovieResolver, StrictSeriesResol
 from cleanarr.domain import FailureReason, MediaFingerprint, RadarrMovie, SonarrSeries
 
 
-def test_movie_resolver_prefers_tmdb_before_imdb_and_path() -> None:
+def test_movie_resolver_rejects_conflicting_identifiers() -> None:
     resolver = StrictMovieResolver()
     movies = [
         RadarrMovie(id=1, title="Movie", path="/data/a", tmdb_id=100, imdb_id="tt100"),
@@ -16,8 +16,8 @@ def test_movie_resolver_prefers_tmdb_before_imdb_and_path() -> None:
         movies,
     )
 
-    assert match.candidate == movies[1]
-    assert match.matched_by == "tmdb_id"
+    assert match.candidate is None
+    assert match.reason == FailureReason.CONFLICTING_IDENTIFIERS
 
 
 def test_movie_resolver_marks_ambiguous_matches() -> None:

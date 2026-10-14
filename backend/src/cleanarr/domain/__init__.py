@@ -5,6 +5,9 @@ from .downloads import (
     DownloadActionStatus,
     DownloadControlAction,
     DownloadControlOutcome,
+    DownloaderContentInventory,
+    DownloaderContentInventoryFailure,
+    DownloaderContentScope,
     DownloaderControlResult,
     DownloaderListing,
     DownloaderReadFailure,
@@ -72,6 +75,7 @@ from .playback import (
     reduce_playback,
     unknown_playback,
 )
+from .retention import RetainedTorrent
 
 __all__ = [
     "ActionResult",
@@ -82,6 +86,9 @@ __all__ = [
     "DownloadActionStatus",
     "DownloadActionClaim",
     "DownloaderControlResult",
+    "DownloaderContentInventory",
+    "DownloaderContentInventoryFailure",
+    "DownloaderContentScope",
     "DownloaderListing",
     "DownloaderRemovalResult",
     "DownloaderReadFailure",
@@ -117,6 +124,7 @@ __all__ = [
     "PlaybackReadResult",
     "PlaybackStatus",
     "SeedingSummary",
+    "RetainedTorrent",
     "RadarrHistoryRecord",
     "RadarrMovie",
     "ResourceNotFoundError",

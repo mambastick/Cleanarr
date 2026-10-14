@@ -38,7 +38,7 @@ class _MetadataDownloader:
 
 
 class _MetadataStrategy(BaseDeletionStrategy):
-    async def handle(self, event: MediaDeletionEvent) -> ProcessingResult:
+    async def _handle(self, event: MediaDeletionEvent, collector: ActionCollector) -> ProcessingResult:
         raise NotImplementedError
 
 
@@ -110,7 +110,7 @@ async def test_cleanup_hashes_propagates_retained_and_failed_metadata() -> None:
     )
     retained_collector = _collector()
 
-    assert await _strategy(dry_run=False, downloader=retained)._cleanup_hashes(retained_collector, {"B" * 40})
+    assert await _strategy(dry_run=True, downloader=retained)._cleanup_hashes(retained_collector, {"B" * 40})
     retained_action = retained_collector.build().actions[0]
     assert retained_action.status is ActionStatus.SKIPPED
     assert retained_action.details["torrent_name"] == "Retained release"

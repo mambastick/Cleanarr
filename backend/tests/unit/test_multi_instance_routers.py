@@ -76,6 +76,9 @@ class FailingDownloader:
     async def get_version(self) -> str:
         return "test"
 
+    async def list_content_inventory(self):
+        raise ExternalServiceError("transmission", self.message)
+
     async def delete_hashes(
         self,
         hashes: list[str],
@@ -230,11 +233,12 @@ async def test_downloader_router_checks_all_clients_and_keeps_partial_errors() -
 
     results = list(await router.delete_hashes(["aa"], delete_files=True))
 
-    assert qbittorrent.deleted_hashes == ["AA"]
-    assert transmission.seen_hashes == ["AA"]
+    assert qbittorrent.deleted_hashes == []
+    assert transmission.seen_hashes == []
     assert results[0].existed is True
+    assert results[0].skip_reason == "ownership_unverifiable"
     assert results[1].client_id == "tr"
-    assert results[1].error == "Transmission timed out"
+    assert results[1].skip_reason == "ownership_unverifiable"
 
 
 @pytest.mark.asyncio

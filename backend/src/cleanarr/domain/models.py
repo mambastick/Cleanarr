@@ -43,6 +43,9 @@ class FailureReason(StrEnum):
 
     AMBIGUOUS_MATCH = "ambiguous_match"
     NO_MATCH = "no_match"
+    CONFLICTING_IDENTIFIERS = "conflicting_identifiers"
+    SHARED_PATH = "shared_path"
+    OWNERSHIP_UNVERIFIABLE = "ownership_unverifiable"
     PACK_TORRENT = "pack_torrent"
     SHARED_FILE = "shared_file"
     NO_PARTIAL_REQUEST_CLEANUP = "no_partial_request_cleanup"
@@ -51,6 +54,7 @@ class FailureReason(StrEnum):
     AUTHENTICATION_FAILED = "authentication_failed"
     UNSUPPORTED_EVENT = "unsupported_event"
     SOURCE_STILL_PRESENT = "source_still_present"
+    SOURCE_UNVERIFIABLE = "source_unverifiable"
     SEEDING_POLICY = "seeding_policy"
 
 

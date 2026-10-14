@@ -31,6 +31,33 @@ class _FakeJellyfinClient:
             raise self.error
         return [item for item in self.items if item.type in include_types]
 
+    async def find_items(
+        self,
+        *,
+        ids: tuple[str, ...] | list[str] = (),
+        provider_ids: tuple[str, ...] | list[str] = (),
+        include_types: tuple[str, ...] | list[str] = (),
+        accept_language: str | None = None,
+    ) -> list[JellyfinItem]:
+        if self.error is not None:
+            raise self.error
+        candidates = [item for item in self.items if not include_types or item.type in include_types]
+        if ids:
+            return [item for item in candidates if item.id in ids]
+        provider_values = set(provider_ids)
+        return [
+            item
+            for item in candidates
+            if any(
+                value in provider_values
+                for value in (
+                    f"tvdb.{item.tvdb_id}" if item.tvdb_id is not None else "",
+                    f"tmdb.{item.tmdb_id}" if item.tmdb_id is not None else "",
+                    f"imdb.{item.imdb_id.casefold()}" if item.imdb_id else "",
+                )
+            )
+        ]
+
 
 @pytest.mark.asyncio
 async def test_service_ignores_non_item_deleted_events() -> None:
@@ -93,7 +120,10 @@ class _PolicyAwareDownloader:
 
 @pytest.mark.asyncio
 async def test_service_turns_downstream_errors_into_partial_failure() -> None:
-    service = CascadeDeletionService(_FailingStrategyFactory())  # type: ignore[arg-type]
+    service = CascadeDeletionService(
+        _FailingStrategyFactory(),  # type: ignore[arg-type]
+        jellyfin=_FakeJellyfinClient(items=[]),
+    )  # type: ignore[arg-type]
 
     result = await service.process(
         MediaDeletionEvent(
@@ -136,7 +166,7 @@ async def test_dry_run_reports_seeding_policy_without_mutating_downloader() -> N
         downloader=downloader,  # type: ignore[arg-type]
     )
 
-    result = await CascadeDeletionService(strategy_factory).process(
+    result = await CascadeDeletionService(strategy_factory, jellyfin=_FakeJellyfinClient(items=[])).process(
         MediaDeletionEvent(
             notification_type="ItemDeleted",
             item_type=ItemType.MOVIE,
@@ -212,6 +242,48 @@ async def test_service_blocks_series_cascade_when_item_reappears_after_move() ->
 
 
 @pytest.mark.asyncio
+async def test_service_provider_fallback_preserves_case_insensitive_imdb_matching() -> None:
+    service = CascadeDeletionService(
+        _FailingStrategyFactory(),  # type: ignore[arg-type]
+        jellyfin=_FakeJellyfinClient(items=[JellyfinItem(id="new-id", name="Movie", type="Movie", imdb_id="tt123")]),
+    )
+
+    result = await service.process(
+        MediaDeletionEvent(
+            notification_type="ItemDeleted",
+            item_type=ItemType.MOVIE,
+            item_id="old-id",
+            name="Movie",
+            fingerprint=MediaFingerprint(imdb_id="TT123"),
+        )
+    )
+
+    assert result.status.value == "ignored"
+    assert result.actions[0].reason is FailureReason.SOURCE_STILL_PRESENT
+
+
+@pytest.mark.asyncio
+async def test_service_allows_cascade_when_provider_catalog_has_no_match() -> None:
+    service = CascadeDeletionService(
+        _FailingStrategyFactory(),  # type: ignore[arg-type]
+        jellyfin=_FakeJellyfinClient(items=[JellyfinItem(id="unrelated-id", name="Other", type="Movie", tmdb_id=99)]),
+    )
+
+    result = await service.process(
+        MediaDeletionEvent(
+            notification_type="ItemDeleted",
+            item_type=ItemType.MOVIE,
+            item_id="old-id",
+            name="Movie",
+            fingerprint=MediaFingerprint(tmdb_id=42),
+        )
+    )
+
+    assert result.status.value == "partial_failure"
+    assert result.actions[0].reason is FailureReason.DOWNSTREAM_ERROR
+
+
+@pytest.mark.asyncio
 async def test_service_fails_closed_when_jellyfin_presence_check_fails() -> None:
     service = CascadeDeletionService(
         _FailingStrategyFactory(),  # type: ignore[arg-type]
@@ -234,4 +306,23 @@ async def test_service_fails_closed_when_jellyfin_presence_check_fails() -> None
     assert result.status.value == "partial_failure"
     assert result.actions[0].action == "confirm_deletion"
     assert result.actions[0].status == ActionStatus.FAILED
-    assert result.actions[0].reason == FailureReason.DOWNSTREAM_ERROR
+    assert result.actions[0].reason == FailureReason.SOURCE_UNVERIFIABLE
+
+
+@pytest.mark.asyncio
+async def test_service_fails_closed_when_jellyfin_is_missing() -> None:
+    service = CascadeDeletionService(_FailingStrategyFactory())  # type: ignore[arg-type]
+
+    result = await service.process(
+        MediaDeletionEvent(
+            notification_type="ItemDeleted",
+            item_type=ItemType.MOVIE,
+            item_id="abc",
+            name="Movie",
+            fingerprint=MediaFingerprint(tmdb_id=1),
+        )
+    )
+
+    assert result.status.value == "partial_failure"
+    assert result.actions[0].status is ActionStatus.FAILED
+    assert result.actions[0].reason is FailureReason.SOURCE_UNVERIFIABLE
