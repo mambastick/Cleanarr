@@ -144,6 +144,7 @@ _DEPENDENCY_SKIP_ACTIONS = frozenset(
         "delete_season_scope",
         "cleanup_season",
         "delete_episode_scope",
+        "delete_item",
     }
 )
 _SAFE_RETAINED_SKIP_REASON_VALUES = frozenset(reason.value for reason in _SAFE_RETAINED_SKIP_REASONS)
@@ -793,6 +794,14 @@ def _execution_result_retryable(plan: ProcessingResultResponse) -> bool:
 
     failed = [action for action in plan.actions if action.status is ActionStatus.FAILED]
     if not failed:
+        if any(
+            action.status is ActionStatus.SKIPPED
+            and action.action in _DEPENDENCY_SKIP_ACTIONS
+            and _action_reason(action) == FailureReason.DOWNSTREAM_ERROR.value
+            for action in plan.actions
+        ):
+            # A dependent skip alone does not prove a retryable upstream failure.
+            return False
         # Keep recovery for a partial result with no action detail, which can
         # arise when a downstream adapter returns an incomplete response.
         return plan.status is OverallStatus.PARTIAL_FAILURE

@@ -179,8 +179,12 @@ results containing safety skips: blocked jobs fail rather than report completion
 A transient downstream/authentication failure on `delete_hash` or `delete_hashes`
 before any recorded `DELETED` action retains bounded `execution_failed` retries,
 with a fresh preflight on each attempt. Dependent `SKIPPED/downstream_error`
-placeholders do not turn that failure into a safety block. Actual safety blockers,
-failed retention recording, other failed mutations, and partial results with
+placeholders, including the Jellyfin `delete_item` kept because downstream
+cleanup was blocked, do not turn that failure into a safety block. A failed
+Jellyfin deletion is a mutation failure and is not automatically replayed.
+The dependency placeholder alone does not authorize retry without a recorded
+failed upstream action. Actual safety blockers, failed retention recording,
+other failed mutations, and partial results with
 applied deletions remain terminal; automatic replay is blocked.
 
 Downloads pause/resume is reversible and distinct from removing a torrent entry

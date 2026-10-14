@@ -186,8 +186,11 @@ Manual preflight повторяет только временные downstream/a
 Временная downstream/authentication ошибка `delete_hash` или `delete_hashes`
 до любого записанного действия `DELETED` сохраняет bounded retry с кодом
 `execution_failed` и свежим preflight на каждой попытке. Зависимые заглушки
-`SKIPPED/downstream_error` не превращают эту ошибку в safety block. Настоящие
-safety blockers, ошибка retention recording, другие failed mutations и
+`SKIPPED/downstream_error`, включая Jellyfin `delete_item`, сохранённый из-за
+блокировки downstream cleanup, не превращают эту ошибку в safety block.
+Фактическая ошибка удаления Jellyfin остаётся ошибкой мутации без автоматического replay.
+Сама зависимая заглушка не разрешает retry без записанного failed upstream action.
+Настоящие safety blockers, ошибка retention recording, другие failed mutations и
 частичный результат с выполненными удалениями остаются terminal без replay.
 
 Pause/resume в Downloads — обратимое действие, отдельное от удаления torrent

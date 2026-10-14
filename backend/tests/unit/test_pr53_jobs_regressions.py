@@ -320,6 +320,16 @@ def test_mixed_transient_and_safety_preflight_prefers_unsafe_plan() -> None:
         reason=FailureReason.DOWNSTREAM_ERROR,
         details={},
     )
+    jellyfin_skip = dependency_skip.model_copy(update={"system": "jellyfin", "action": "delete_item"})
+    downloader_failure = _plan(event, failed=True, action="delete_hashes")
+    assert (
+        _execution_result_block_code(
+            downloader_failure.model_copy(
+                update={"actions": [*downloader_failure.actions, dependency_skip, jellyfin_skip]}
+            )
+        )
+        == "execution_failed"
+    )
     safety_skip = ActionResultResponse(
         system="downloader",
         action="delete_hash",
@@ -328,7 +338,10 @@ def test_mixed_transient_and_safety_preflight_prefers_unsafe_plan() -> None:
         reason=FailureReason.SIBLING_SCOPE_UNKNOWN,
         details={},
     )
-    for actions in ([dependency_skip, safety_skip], [safety_skip, dependency_skip]):
+    for actions in (
+        [dependency_skip, jellyfin_skip, safety_skip],
+        [safety_skip, dependency_skip, jellyfin_skip],
+    ):
         mixed = _plan(event, failed=True, action="delete_hash").model_copy(
             update={"actions": [*_plan(event, failed=True, action="delete_hash").actions, *actions]}
         )
@@ -365,7 +378,12 @@ def test_read_preflight_transient_reasons_are_retryable(reason: FailureReason) -
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "failed_action,expected_code", [("record_retention", "execution_failed"), ("delete_movie", "execution_failed")]
+    "failed_action,expected_code",
+    [
+        ("record_retention", "execution_failed"),
+        ("delete_movie", "execution_failed"),
+        ("delete_item", "execution_failed"),
+    ],
 )
 async def test_durable_or_mutation_failure_is_terminal_and_not_retried(
     tmp_path: Path, failed_action: str, expected_code: str
@@ -780,7 +798,13 @@ async def test_downstream_dependency_skip_after_deletion_is_terminal(tmp_path: P
 
 
 @pytest.mark.asyncio
-async def test_dependency_skip_without_failed_action_is_terminal_execution_error(tmp_path: Path) -> None:
+@pytest.mark.parametrize("status", [OverallStatus.SUCCESS, OverallStatus.PARTIAL_FAILURE])
+@pytest.mark.parametrize("action", ["delete_movie", "delete_item"])
+async def test_dependency_skip_without_failed_action_is_terminal_execution_error(
+    tmp_path: Path,
+    status: OverallStatus,
+    action: str,
+) -> None:
     event = _event()
 
     async def resolver(payload: ManualDeleteRequest) -> MediaDeletionEvent:
@@ -794,11 +818,11 @@ async def test_dependency_skip_without_failed_action_is_terminal_execution_error
             item_type=resolved.item_type,
             item_id=resolved.item_id,
             name=resolved.name,
-            status=OverallStatus.SUCCESS,
+            status=status,
             actions=[
                 ActionResultResponse(
-                    system="radarr",
-                    action="delete_movie",
+                    system="jellyfin" if action == "delete_item" else "radarr",
+                    action=action,
                     status=ActionStatus.SKIPPED,
                     message="dependent action was not attempted",
                     reason=FailureReason.DOWNSTREAM_ERROR,
