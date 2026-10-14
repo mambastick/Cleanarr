@@ -58,16 +58,18 @@ versions and read contracts used by those scenario flows.
 The candidate rehearsal covers both directions with real released containers:
 `v0.2.11 -> candidate -> restored v0.2.11`,
 `v0.9.0 -> candidate -> restored v0.9.0`,
-`v1.0.0 -> candidate -> restored v1.0.0`, and the latest stable
+`v1.0.0 -> candidate -> restored v1.0.0`, and
 `v1.1.0 -> candidate -> restored v1.1.0`. It checks the verified backup,
 database/config schema migration, retained configuration, and retained activity
 history. The v1.1.0 path additionally restores the automatic schema-v3 sidecar
-created before the candidate writes configuration schema 4 or database schema 6.
+created before the candidate writes configuration schema 4 or database schema 8.
 
-The 2.0.4 release gate also rehearses the latest stable
-`v2.0.3 -> candidate -> restored v2.0.3` using its pinned published image,
-seeded configuration/activity, and a verified backup. This patch retains
-database schema 6 and configuration schema 4.
+The gate also rehearses `v2.0.3 -> candidate -> restored v2.0.3` and the latest
+stable `v2.0.4 -> candidate -> restored v2.0.4` using their digest-pinned
+published images, seeded configuration/activity and a verified backup. The
+candidate must reach database schema 8 with retention and job error-code
+storage, retain configuration schema 4, and restore the matching older database
+for rollback. Older binaries are never run against the upgraded database.
 
 Run the complete gate locally from a clean checkout:
 
