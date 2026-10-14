@@ -136,6 +136,18 @@ test("Downloads stays cold until active, refreshes, and sends one safe pause req
   await page.getByRole("button", { name: "Refresh" }).click(); await expect.poll(() => api.count("/api/downloads/refresh", "POST")).toBe(1)
 })
 
+test("Downloads reports a localized secure-randomness error instead of sending an invalid key", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(globalThis, "crypto", { configurable: true, value: {} })
+  })
+  const api = await boot(page, { downloads: [downloadItem()] })
+  await navButton(page, /downloads/i).click()
+  await expect(page.getByText("Fixture torrent")).toBeVisible()
+  await page.getByRole("button", { name: "Pause" }).click()
+  await expect(page.getByText("This control is unavailable because the browser cannot provide secure randomness. Use HTTPS or enable Web Crypto, then try again.")).toBeVisible()
+  expect(api.count("/api/downloads/actions", "POST")).toBe(0)
+})
+
 test("Downloads retries a structured first-load failure, renders unknown evidence, and resumes exactly once", async ({ page }) => {
   let allowDownloads = false
   const unknown = downloadItem({ client_id: "unknown-client", info_hash: "unknown-hash", display_name: "Unknown fixture", state: "unknown", freshness: "unknown", ownership: "unknown", progress: null, total_bytes: null, downloaded_bytes: null, uploaded_bytes: null, ratio: null, seeding_time_seconds: null, download_speed_bytes_per_second: null, upload_speed_bytes_per_second: null, unavailable_reason: "ownership_unknown" })
@@ -196,3 +208,50 @@ test("a Jellyfin-only movie stays out of batches and sends a narrow single-item 
   expect(body).toMatchObject({ item_type: "Movie", jellyfin_item_id: "jf-direct", jellyfin_only: true })
   expect(body).not.toHaveProperty("radarr_movie_id")
 })
+
+test("HTTP-compatible UUID fallback submits one valid confirmation", async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(window.crypto, "randomUUID", { value: undefined, configurable: true }))
+  const api = await boot(page, { config: liveConfig, movies: [fixtureMovie], handlers: [
+    (request) => request.pathname === "/api/actions/delete/preview" ? { body: { generated_at: "2026-01-01T00:00:00Z", plan_hash: "fixture-plan", plan: safePlan } } : undefined,
+    (request) => request.pathname === "/api/actions/delete/jobs" && request.method === "POST" ? { body: job } : undefined,
+  ] })
+  await navButton(page, "Library").click()
+  await page.getByRole("tab", { name: "Movies" }).click()
+  await page.getByRole("button", { name: "Review deletion plan: Fixture Movie" }).click()
+  await page.getByRole("button", { name: "Delete", exact: true }).click()
+  await expect.poll(() => api.count("/api/actions/delete/jobs", "POST")).toBe(1)
+  const request = JSON.parse(api.last("/api/actions/delete/jobs", "POST")?.body ?? "{}")
+  expect(request.idempotency_key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+})
+
+for (const state of [
+  { language: "en", theme: "light", width: 1440, label: "Deferred for seeding" },
+  { language: "ru", theme: "dark", width: 390, label: "Отложен по политике" },
+] as const) {
+  test(`retained audit stays read-only and visible: ${state.language} ${state.theme} ${state.width}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: state.width, height: 900 })
+    await page.emulateMedia({ colorScheme: state.theme })
+    await page.addInitScript((theme) => localStorage.setItem("cleanarr-theme", theme), state.theme)
+    const config = clone(liveConfig); config.general.ui_language = state.language
+    const retained = { ...downloadItem(), ownership: "unmanaged", retention: { policy: "defer", retained_at: "2026-01-01T00:00:00Z", correlation_id: "fixture-correlation", min_seed_ratio: 2, min_seed_time_minutes: 60 } }
+    const api = await boot(page, { config, handlers: [
+      (request) => request.pathname === "/api/downloads" || request.pathname === "/api/downloads/refresh" ? { body: { items: [retained], next_cursor: null, source_status: "complete", failures: [], failure_details: [], active_count: 1, refreshed: true } } : undefined,
+    ] })
+    await page.emulateMedia({ reducedMotion: "reduce" })
+    await navButton(page, state.language === "en" ? "Downloads" : "Загрузки").click()
+    await expect(page.getByText(state.label).first()).toBeVisible()
+    expect(await page.locator("body").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+    expect(api.count("/api/downloads/actions", "POST")).toBe(0)
+    await expect(page.locator('[data-reduced-motion="true"]:visible')).toHaveCount(1)
+    await expect.poll(async () => {
+      const marker = await page.locator(".app-shell__nav-active-indicator:visible").boundingBox()
+      const target = await navButton(page, state.language === "en" ? "Downloads" : "Загрузки").boundingBox()
+      if (!marker || !target) return Number.POSITIVE_INFINITY
+      return Math.hypot(marker.x + marker.width / 2 - target.x - target.width / 2, marker.y + marker.height / 2 - target.y - target.height / 2)
+    }).toBeLessThan(2)
+    if (state.width < 600) await page.getByRole("note").scrollIntoViewIfNeeded()
+    const screenshot = testInfo.outputPath(`retention-${state.language}-${state.theme}.png`)
+    await page.screenshot({ path: screenshot, fullPage: false })
+    await testInfo.attach("Retained torrent audit evidence", { path: screenshot, contentType: "image/png" })
+  })
+}

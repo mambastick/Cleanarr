@@ -84,3 +84,17 @@ export function localizedBatchStatus(status: string, language: DeletionLanguage)
 export function isExecutablePlan(preview: ManualDeletePreviewResponse): boolean {
   return preview.plan.status === "success" && !preview.plan.actions.some((action) => actionGroup(action) === "attention")
 }
+
+export function localizedJobError(code: string | null | undefined, language: DeletionLanguage): string | null {
+  const messages: Record<string, readonly [string, string]> = {
+    partial_result_not_retryable: ["Some cleanup steps completed. Automatic retry is blocked; inspect the recorded result before continuing.", "Часть очистки выполнена. Автоматический повтор заблокирован; проверьте сохранённый результат перед продолжением."],
+    interrupted_unknown: ["The previous attempt may have changed data. Inspect the result before continuing.", "Предыдущая попытка могла изменить данные. Проверьте результат перед продолжением."],
+    plan_changed: ["The plan changed. Review a new preview before confirming again.", "План изменился. Проверьте новый предпросмотр перед повторным подтверждением."],
+  }
+  return code ? messages[code]?.[language === "ru" ? 1 : 0] ?? null : null
+}
+
+export const DELETE_SESSION_KEY_UNAVAILABLE_COPY: Record<DeletionLanguage, string> = {
+  en: "Deletion is unavailable because the browser cannot provide secure randomness. Use HTTPS or enable Web Crypto, then try again.",
+  ru: "Удаление недоступно: браузер не предоставляет безопасный источник случайности. Используйте HTTPS или включите Web Crypto и повторите попытку.",
+}

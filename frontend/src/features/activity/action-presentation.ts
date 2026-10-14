@@ -47,6 +47,10 @@ const REASON_COPY: Record<string, readonly [string, string]> = {
     "Several records could match. CleanArr did not choose one automatically.",
     "Подходят несколько записей. CleanArr не стал выбирать одну автоматически.",
   ],
+  shared_path: ["Torrent data overlaps another torrent; cleanup was blocked.", "Данные используются другой раздачей; очистка заблокирована."],
+  ownership_unverifiable: ["Exclusive ownership could not be verified; cleanup was blocked.", "Исключительное владение не подтверждено; очистка заблокирована."],
+  conflicting_identifiers: ["Media identifiers disagree; cleanup was blocked.", "Идентификаторы материала противоречат друг другу; очистка заблокирована."],
+  source_unverifiable: ["Jellyfin source absence could not be verified; cleanup was blocked.", "Отсутствие объекта Jellyfin не подтверждено; очистка заблокирована."],
   pack_torrent: [
     "The torrent contains more content than this item and was kept.",
     "Торрент содержит не только этот материал, поэтому он сохранён.",

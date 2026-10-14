@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { emptyBatchSelection, selectedItems, selectionItem, toggleSelection, type BatchSelectionItem, type LibraryDeleteTarget } from "@/features/library/library-selection"
 import { ApiError } from "@/lib/api-client"
 import { EMPTY_DOWNLOAD_FILTERS, type CleanupCandidate, type CleanupSort, type DownloadAction, type DownloadActionResponse, type DownloadItem, type DownloadsFilters } from "@/lib/downloads"
-import { createClientIdempotencyKey } from "@/lib/idempotency"
+import { ClientIdempotencyKeyError, createClientIdempotencyKey } from "@/lib/idempotency"
 import { CleanupView } from "./cleanup-view"
 import { cleanupTarget } from "./cleanup-target"
 import { DOWNLOADS_COPY, enumLabel, reasonLabel, type DownloadsCopy, type DownloadsLanguage } from "./downloads-copy"
@@ -52,7 +52,17 @@ export function DownloadsPanel({ active, authenticated, language, isLive, runtim
     const itemKey = `${item.client_id}:${item.info_hash}:${action}`
     const previous = actionLocks.current.get(itemKey)
     if (previous?.pending) return
-    const body = previous?.body ?? JSON.stringify({ client_id: item.client_id, info_hash: item.info_hash, action, idempotency_key: createClientIdempotencyKey() })
+    let body = previous?.body
+    if (!body) {
+      try {
+        body = JSON.stringify({ client_id: item.client_id, info_hash: item.info_hash, action, idempotency_key: createClientIdempotencyKey() })
+      } catch (error) {
+        if (!(error instanceof ClientIdempotencyKeyError)) throw error
+        actionLocks.current.delete(itemKey)
+        setActionStates((states) => ({ ...states, [itemKey]: { phase: "failed", action, code: "idempotency_key_unavailable", status: null } }))
+        return
+      }
+    }
     actionLocks.current.set(itemKey, { body, pending: true })
     setActionStates((states) => ({ ...states, [itemKey]: { phase: "pending", action, code: null, status: null } }))
     try {
