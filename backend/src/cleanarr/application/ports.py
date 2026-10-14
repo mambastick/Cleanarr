@@ -9,6 +9,7 @@ from cleanarr.domain import (
     DownloadActionClaim,
     DownloadActionStatus,
     DownloadControlAction,
+    DownloaderContentInventory,
     DownloaderControlResult,
     DownloaderListing,
     DownloaderRemovalResult,
@@ -17,6 +18,7 @@ from cleanarr.domain import (
     PlaybackObservation,
     RadarrHistoryRecord,
     RadarrMovie,
+    RetainedTorrent,
     SeerrIssue,
     SeerrMedia,
     SeerrRequest,
@@ -69,6 +71,18 @@ class DownloadsRepositoryPort(Protocol):
     def latest_action_projections(self, keys: set[tuple[str, str]]) -> dict[tuple[str, str], dict[str, object]]: ...
 
 
+class RetentionRecorderPort(Protocol):
+    """Durable record of a downloader retention decision."""
+
+    async def record_retention(self, record: RetainedTorrent) -> None: ...
+
+
+class RetentionReadPort(Protocol):
+    """Read-only projection of durable retention evidence."""
+
+    def latest_retention_projections(self, keys: set[tuple[str, str]]) -> dict[tuple[str, str], dict[str, object]]: ...
+
+
 class DownloaderReadPort(Protocol):
     """Non-destructive downloader observations, separate from deletion."""
 
@@ -81,6 +95,13 @@ class DownloaderControlPort(Protocol):
 
     async def control_torrent(self, info_hash: str, *, action: DownloadControlAction) -> DownloaderControlResult:
         """Reconcile and apply a pause or resume operation exactly once."""
+
+
+class DownloaderDataPort(Protocol):
+    """Private destructive-safety evidence from one configured downloader."""
+
+    async def list_content_inventory(self) -> DownloaderContentInventory:
+        """Return complete, private content scopes for destructive safety checks."""
 
 
 class DownloaderFleetPort(Protocol):
@@ -97,6 +118,16 @@ class DownloaderFleetPort(Protocol):
 
 class JellyfinServerClientPort(Protocol):
     """Jellyfin operations used to confirm webhook deletions."""
+
+    async def find_items(
+        self,
+        *,
+        ids: Sequence[str] = (),
+        provider_ids: Sequence[str] = (),
+        include_types: Sequence[str] = (),
+        accept_language: str | None = None,
+    ) -> Sequence[JellyfinItem]:
+        """Return items from bounded exact-id or provider-id lookups."""
 
     async def list_items(
         self,
@@ -129,6 +160,9 @@ class RadarrClientPort(Protocol):
 
     async def list_movie_history(self, movie_id: int) -> Sequence[RadarrHistoryRecord]:
         """Return history for a single movie."""
+
+    async def list_download_history(self, download_id: str) -> Sequence[RadarrHistoryRecord]:
+        """Return complete bounded history for one downloader identity."""
 
     async def delete_movie(
         self,

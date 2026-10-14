@@ -6,6 +6,8 @@ import hashlib
 import json
 import sqlite3
 import stat
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -13,6 +15,15 @@ from typing import Any
 from cleanarr.domain.config import RuntimeConfig
 from cleanarr.infrastructure.config_migrations import migrate_config_payload
 from cleanarr.infrastructure.database import migrate_database
+
+
+@contextmanager
+def _connect(path: str | Path, *, uri: bool = False) -> Iterator[sqlite3.Connection]:
+    """Open one short-lived connection and close it after its transaction."""
+
+    with closing(sqlite3.connect(path, uri=uri)) as connection:
+        with connection:
+            yield connection
 
 
 class FileConfigStore:
@@ -82,7 +93,7 @@ class SqliteConfigStore:
         """Return the persisted config, auto-migrating from a JSON file if needed."""
 
         with self._lock:
-            with sqlite3.connect(self._db_path) as conn:
+            with _connect(self._db_path) as conn:
                 row = conn.execute("SELECT config_json FROM config WHERE id = 1").fetchone()
             if row:
                 payload = json.loads(row[0])
@@ -104,7 +115,7 @@ class SqliteConfigStore:
             self._save_locked(config)
 
     def _save_locked(self, config: RuntimeConfig) -> None:
-        with sqlite3.connect(self._db_path) as conn:
+        with _connect(self._db_path) as conn:
             conn.execute(
                 "INSERT INTO config (id, config_json) VALUES (1, ?)"
                 " ON CONFLICT(id) DO UPDATE SET config_json = excluded.config_json",
@@ -167,7 +178,7 @@ def _ensure_sqlite_v3_backup(source_path: Path) -> None:
     tmp_path = backup_path.with_suffix(f"{backup_path.suffix}.tmp")
     try:
         tmp_path.unlink(missing_ok=True)
-        with sqlite3.connect(source_path) as source, sqlite3.connect(tmp_path) as backup:
+        with _connect(source_path) as source, _connect(tmp_path) as backup:
             source.backup(backup)
             if backup.execute("PRAGMA integrity_check").fetchone() != ("ok",):
                 raise RuntimeError("The automatic v3 configuration backup failed its integrity check.")
@@ -183,7 +194,7 @@ def _read_sqlite_v3_snapshot(path: Path) -> tuple[dict[str, Any], str]:
     """Validate and fingerprint the complete rollback database without mutation."""
 
     try:
-        with sqlite3.connect(f"file:{path.resolve().as_posix()}?mode=ro", uri=True) as connection:
+        with _connect(f"file:{path.resolve().as_posix()}?mode=ro", uri=True) as connection:
             if connection.execute("PRAGMA integrity_check").fetchone() != ("ok",):
                 raise RuntimeError("The v3 configuration backup failed its integrity check.")
             row = connection.execute("SELECT config_json FROM config WHERE id = 1").fetchone()
@@ -219,7 +230,7 @@ def _has_independent_backup(source_path: Path, backup_path: Path) -> bool:
 def _read_sqlite_config_payload(path: Path) -> dict[str, Any] | None:
     """Read persisted config without mutating an older database schema."""
 
-    with sqlite3.connect(f"file:{path.resolve().as_posix()}?mode=ro", uri=True) as connection:
+    with _connect(f"file:{path.resolve().as_posix()}?mode=ro", uri=True) as connection:
         config_table = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'config'"
         ).fetchone()

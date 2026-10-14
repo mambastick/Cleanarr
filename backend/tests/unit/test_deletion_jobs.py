@@ -166,12 +166,17 @@ async def test_background_deletion_reports_progress_persists_and_dismisses(tmp_p
     try:
         await _wait_for_status(store, queued.id, ManualDeleteJobStatus.RUNNING)
         running = store.get(queued.id)
+        for _ in range(100):
+            running = store.get(queued.id)
+            if running.phase is ManualDeleteJobPhase.LOCATING:
+                break
+            await asyncio.sleep(0.01)
         assert running.phase is ManualDeleteJobPhase.LOCATING
         assert running.progress_percent == 25
         assert running.item_name == "Movie"
         assert running.preflight.item_id == "manual:radarr:1"
         with pytest.raises(DeletionJobActiveError):
-            store.dismiss(queued.id)
+            await store.dismiss(queued.id)
 
         release.set()
         await _wait_for_status(store, queued.id, ManualDeleteJobStatus.COMPLETED)
@@ -181,7 +186,7 @@ async def test_background_deletion_reports_progress_persists_and_dismisses(tmp_p
         assert completed.result is not None
         assert completed.result.status is OverallStatus.SUCCESS
 
-        store.dismiss(queued.id)
+        await store.dismiss(queued.id)
         assert store.list_jobs() == []
     finally:
         await store.stop()
@@ -828,7 +833,7 @@ async def test_idempotency_tombstone_blocks_reexecution_after_dismissal_and_prun
     try:
         first_job = await store.submit(first)
         await _wait_for_status(store, first_job.id, ManualDeleteJobStatus.COMPLETED)
-        store.dismiss(first_job.id)
+        await store.dismiss(first_job.id)
         with pytest.raises(DeletionJobIdempotencyRetiredError):
             await store.submit(first)
 

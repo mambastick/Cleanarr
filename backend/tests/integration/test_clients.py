@@ -195,6 +195,363 @@ async def test_jellyfin_library_pages_beyond_first_response_without_silent_trunc
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_jellyfin_targeted_lookup_uses_exact_id_without_pagination() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["Ids"] == "episode-1"
+        assert request.url.params["IncludeItemTypes"] == "Episode"
+        assert "StartIndex" not in request.url.params
+        return httpx.Response(
+            200,
+            json={
+                "Items": [
+                    {
+                        "Id": "episode-1",
+                        "Name": "Episode 1",
+                        "Type": "Episode",
+                        "ProviderIds": {"Imdb": "tt123"},
+                    }
+                ],
+                "TotalRecordCount": 1,
+            },
+        )
+
+    route = respx.get("http://jellyfin/Items").mock(side_effect=handler)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        items = await client.find_items(ids=["episode-1"], include_types=["Episode"])
+    finally:
+        await client.close()
+
+    assert route.call_count == 1
+    assert [item.id for item in items] == ["episode-1"]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_targeted_lookup_supports_provider_id_fallback() -> None:
+    route = respx.get("http://jellyfin/Items").respond(
+        json={
+            "Items": [
+                {
+                    "Id": "new-id",
+                    "Name": "Movie",
+                    "Type": "Movie",
+                    "ProviderIds": {"Imdb": "TT123", "Tmdb": "42"},
+                },
+                {
+                    "Id": "unrelated-id",
+                    "Name": "Unrelated",
+                    "Type": "Movie",
+                    "ProviderIds": {"Tmdb": "99"},
+                },
+            ],
+            "TotalRecordCount": 2,
+        }
+    )
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        items = await client.find_items(
+            provider_ids=["tmdb.42", "imdb.tt123"],
+            include_types=["Movie"],
+        )
+    finally:
+        await client.close()
+
+    assert route.call_count == 1
+    assert route.calls[0].request.url.params["IncludeItemTypes"] == "Movie"
+    assert route.calls[0].request.url.params["Limit"] == "500"
+    assert route.calls[0].request.url.params["StartIndex"] == "0"
+    assert route.calls[0].request.url.params["EnableTotalRecordCount"] == "true"
+    assert "AnyProviderIdEquals" not in route.calls[0].request.url.params
+    assert items[0].imdb_id == "TT123"
+    assert [item.id for item in items] == ["new-id"]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_provider_lookup_paginates_complete_catalogue_over_1000_items() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        start = int(request.url.params["StartIndex"])
+        assert request.url.params["Limit"] == "500"
+        assert request.url.params["EnableTotalRecordCount"] == "true"
+        assert "AnyProviderIdEquals" not in request.url.params
+        page = [
+            {
+                "Id": f"movie-{index}",
+                "Name": f"Movie {index}",
+                "Type": "Movie",
+                "ProviderIds": {"Imdb": f"tt{index}"},
+            }
+            for index in range(start, min(start + 500, 1001))
+        ]
+        return httpx.Response(200, json={"Items": page, "TotalRecordCount": 1001})
+
+    route = respx.get("http://jellyfin/Items").mock(side_effect=handler)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        items = await client.find_items(provider_ids=["imdb.TT1000"], include_types=["Movie"])
+    finally:
+        await client.close()
+
+    assert route.call_count == 3
+    assert [item.id for item in items] == ["movie-1000"]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_provider_lookup_restarts_after_catalogue_shrinks_and_requires_stable_pass() -> None:
+    scan = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal scan
+        start = int(request.url.params["StartIndex"])
+        if start == 0:
+            scan += 1
+        total = 1001 if scan == 1 and start == 0 else 501
+        end = min(start + 500, total)
+        page = [
+            {
+                "Id": f"movie-{index}",
+                "Name": f"Movie {index}",
+                "Type": "Movie",
+                "ProviderIds": {"Imdb": f"tt{index}"},
+            }
+            for index in range(start, end)
+        ]
+        return httpx.Response(200, json={"Items": page, "TotalRecordCount": total})
+
+    route = respx.get("http://jellyfin/Items").mock(side_effect=handler)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        present = await client.find_items(provider_ids=["imdb.tt500"], include_types=["Movie"])
+        absent = await client.find_items(provider_ids=["imdb.tt1000"], include_types=["Movie"])
+    finally:
+        await client.close()
+
+    assert route.call_count == 6
+    assert [item.id for item in present] == ["movie-500"]
+    assert absent == []
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_provider_lookup_restarts_after_last_page_shrink_before_bounds_guard() -> None:
+    scan = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal scan
+        start = int(request.url.params["StartIndex"])
+        if start == 0:
+            scan += 1
+        if scan == 1:
+            total = 1000
+            end = 500 if start == 0 else 1000
+        else:
+            total = 980
+            end = min(start + 500, total)
+        page = [
+            {
+                "Id": f"movie-{index}",
+                "Name": f"Movie {index}",
+                "Type": "Movie",
+                "ProviderIds": {"Imdb": f"tt{index}"},
+            }
+            for index in range(start, end)
+        ]
+        response_total = 980 if scan == 1 and start > 0 else total
+        return httpx.Response(200, json={"Items": page, "TotalRecordCount": response_total})
+
+    route = respx.get("http://jellyfin/Items").mock(side_effect=handler)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        items = await client.find_items(provider_ids=["imdb.tt979"], include_types=["Movie"])
+    finally:
+        await client.close()
+
+    assert route.call_count == 4
+    assert [item.id for item in items] == ["movie-979"]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_provider_lookup_restarts_when_shrink_moves_below_current_offset() -> None:
+    scan = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal scan
+        start = int(request.url.params["StartIndex"])
+        if start == 0:
+            scan += 1
+        if scan == 1 and start == 0:
+            total = 1001
+        elif scan == 1:
+            total = 400
+        else:
+            total = 400
+        end = min(start + 500, total)
+        page = [
+            {
+                "Id": f"movie-{index}",
+                "Name": f"Movie {index}",
+                "Type": "Movie",
+                "ProviderIds": {"Imdb": f"tt{index}"},
+            }
+            for index in range(start, end)
+        ]
+        return httpx.Response(200, json={"Items": page, "TotalRecordCount": total})
+
+    route = respx.get("http://jellyfin/Items").mock(side_effect=handler)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        items = await client.find_items(provider_ids=["imdb.tt399"], include_types=["Movie"])
+    finally:
+        await client.close()
+
+    assert route.call_count == 3
+    assert [item.id for item in items] == ["movie-399"]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_provider_lookup_rejects_catalogue_churn_after_two_passes() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        start = int(request.url.params["StartIndex"])
+        total = 1001 if start == 0 else 501
+        page = [
+            {"Id": f"movie-{index}", "Name": "Movie", "Type": "Movie", "ProviderIds": {}}
+            for index in range(start, min(start + 500, total))
+        ]
+        return httpx.Response(200, json={"Items": page, "TotalRecordCount": total})
+
+    route = respx.get("http://jellyfin/Items").mock(side_effect=handler)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="changed repeatedly"):
+            await client.find_items(provider_ids=["tmdb.42"], include_types=["Movie"])
+    finally:
+        await client.close()
+
+    assert route.call_count == 4
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_provider_lookup_rejects_expanding_catalogue_churn_after_two_passes() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        start = int(request.url.params["StartIndex"])
+        total = 501 if start == 0 else 1001
+        page = [
+            {"Id": f"movie-{index}", "Name": "Movie", "Type": "Movie", "ProviderIds": {}}
+            for index in range(start, min(start + 500, total))
+        ]
+        return httpx.Response(200, json={"Items": page, "TotalRecordCount": total})
+
+    route = respx.get("http://jellyfin/Items").mock(side_effect=handler)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="changed repeatedly"):
+            await client.find_items(provider_ids=["tmdb.42"], include_types=["Movie"])
+    finally:
+        await client.close()
+
+    assert route.call_count == 4
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_provider_lookup_rejects_incomplete_catalogue_after_first_page() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        start = int(request.url.params["StartIndex"])
+        page = [{"Id": "movie-1", "Name": "Movie", "Type": "Movie", "ProviderIds": {"Tmdb": "1"}}] if start == 0 else []
+        return httpx.Response(200, json={"Items": page, "TotalRecordCount": 501})
+
+    respx.get("http://jellyfin/Items").mock(side_effect=handler)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="incomplete provider catalogue"):
+            await client.find_items(provider_ids=["tmdb.1"], include_types=["Movie"])
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_targeted_lookup_rejects_partial_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "Items": (
+                    [{"Id": "one", "Name": "One", "Type": "Movie", "ProviderIds": {}}]
+                    if request.url.params["StartIndex"] == "0"
+                    else []
+                ),
+                "TotalRecordCount": 2,
+            },
+        )
+
+    respx.get("http://jellyfin/Items").mock(side_effect=handler)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="incomplete provider catalogue"):
+            await client.find_items(provider_ids=["tmdb.42"], include_types=["Movie"])
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_provider_lookup_rejects_large_inventory() -> None:
+    respx.get("http://jellyfin/Items").respond(
+        json={
+            "Items": [],
+            "TotalRecordCount": 20_001,
+        }
+    )
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="safe bounded limit"):
+            await client.find_items(provider_ids=["tmdb.42"], include_types=["Movie"])
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_provider_lookup_rejects_missing_total_count() -> None:
+    respx.get("http://jellyfin/Items").respond(
+        json={"Items": [{"Id": "one", "Name": "One", "Type": "Movie", "ProviderIds": {}}]}
+    )
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="unverifiable provider catalogue metadata"):
+            await client.find_items(provider_ids=["tmdb.42"], include_types=["Movie"])
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_exact_lookup_rejects_out_of_scope_or_duplicate_rows() -> None:
+    respx.get("http://jellyfin/Items").respond(
+        json={
+            "Items": [
+                {"Id": "other", "Name": "Other", "Type": "Movie", "ProviderIds": {}},
+                {"Id": "other", "Name": "Other", "Type": "Movie", "ProviderIds": {}},
+            ],
+            "TotalRecordCount": 2,
+        }
+    )
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="inconsistent targeted lookup items"):
+            await client.find_items(ids=["requested"], include_types=["Movie"])
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_jellyfin_library_rejects_a_premature_empty_page() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         start = int(request.url.params["StartIndex"])
@@ -291,6 +648,147 @@ async def test_radarr_client_parses_movies_and_history() -> None:
 
     assert movies[0].tmdb_id == 10
     assert history[0].download_id == "HASH10"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_radarr_download_history_uses_bounded_download_id_filter() -> None:
+    download_id = "HASH /? encoded"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v3/history"
+        assert request.url.params["downloadId"] == download_id
+        assert request.url.params["page"] == "1"
+        assert request.url.params["pageSize"] == "1000"
+        return httpx.Response(
+            200,
+            json={
+                "page": 1,
+                "pageSize": 1000,
+                "totalRecords": 1,
+                "records": [
+                    {
+                        "id": 100,
+                        "movieId": 1,
+                        "eventType": "grabbed",
+                        "downloadId": download_id,
+                        "data": {},
+                    }
+                ],
+            },
+        )
+
+    route = respx.get("http://radarr/api/v3/history").mock(side_effect=handler)
+    client = RadarrClient(base_url="http://radarr/api/v3", api_key="key", timeout_seconds=5)
+    try:
+        records = await client.list_download_history(download_id)
+    finally:
+        await client.close()
+
+    assert route.call_count == 1
+    assert records[0].download_id == download_id
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_radarr_download_history_accepts_omitted_optional_data() -> None:
+    respx.get("http://radarr/api/v3/history").respond(
+        json={
+            "totalRecords": 1,
+            "records": [{"id": 100, "movieId": 1, "eventType": "grabbed", "downloadId": "HASH10"}],
+        }
+    )
+    client = RadarrClient(base_url="http://radarr/api/v3", api_key="key", timeout_seconds=5)
+    try:
+        records = await client.list_download_history("HASH10")
+    finally:
+        await client.close()
+
+    assert records[0].imported_path is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("record_id", "movie_id"),
+    [(True, 1), (0, 1), (-1, 1), (100, True), (100, 0), (100, -1)],
+)
+@respx.mock
+async def test_radarr_download_history_rejects_nonpositive_or_boolean_ids(record_id: object, movie_id: object) -> None:
+    respx.get("http://radarr/api/v3/history").respond(
+        json={
+            "totalRecords": 1,
+            "records": [
+                {
+                    "id": record_id,
+                    "movieId": movie_id,
+                    "eventType": "grabbed",
+                    "downloadId": "HASH10",
+                }
+            ],
+        }
+    )
+    client = RadarrClient(base_url="http://radarr/api/v3", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="invalid download history records"):
+            await client.list_download_history("HASH10")
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_radarr_download_history_rejects_records_beyond_reported_total() -> None:
+    respx.get("http://radarr/api/v3/history").respond(
+        json={
+            "totalRecords": 1,
+            "records": [
+                {"id": 100, "movieId": 1, "eventType": "grabbed", "downloadId": "HASH10"},
+                {"id": 101, "movieId": 1, "eventType": "imported", "downloadId": "HASH10"},
+            ],
+        }
+    )
+    client = RadarrClient(base_url="http://radarr/api/v3", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="beyond the reported download history"):
+            await client.list_download_history("HASH10")
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_radarr_download_history_rejects_incomplete_or_excessive_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "totalRecords": 10_001,
+                "records": [],
+            },
+        )
+
+    respx.get("http://radarr/api/v3/history").mock(side_effect=handler)
+    client = RadarrClient(base_url="http://radarr/api/v3", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="safe bounded limit"):
+            await client.list_download_history("HASH10")
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_radarr_download_history_rejects_premature_empty_page() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"totalRecords": 2, "records": []})
+
+    respx.get("http://radarr/api/v3/history").mock(side_effect=handler)
+    client = RadarrClient(base_url="http://radarr/api/v3", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="incomplete download history"):
+            await client.list_download_history("HASH10")
+    finally:
+        await client.close()
 
 
 @pytest.mark.asyncio
@@ -616,18 +1114,18 @@ async def test_qbittorrent_client_accepts_no_content_login_response() -> None:
 async def test_qbittorrent_client_marks_absent_hashes() -> None:
     respx.post("http://qbt/api/v2/auth/login").respond(text="Ok.")
     respx.get("http://qbt/api/v2/torrents/info").respond(
-        json=[{"hash": "AA", "name": "Example release", "content_path": "/downloads/Example release"}]
+        json=[{"hash": "A" * 40, "name": "Example release", "content_path": "/downloads/Example release"}]
     )
     delete_route = respx.post("http://qbt/api/v2/torrents/delete").respond(status_code=200)
 
     client = QbittorrentClient(base_url="http://qbt", username="user", password="pass", timeout_seconds=5)
     try:
-        results = await client.delete_hashes(["AA", "BB"], delete_files=True)
+        results = await client.delete_hashes(["A" * 40, "B" * 40], delete_files=True)
     finally:
         await client.close()
 
     assert delete_route.called
-    assert [(result.hash_value, result.existed) for result in results] == [("AA", True), ("BB", False)]
+    assert [(result.hash_value, result.existed) for result in results] == [("A" * 40, True), ("B" * 40, False)]
     assert results[0].torrent_name == "Example release"
     assert results[0].content_path == "/downloads/Example release"
     assert results[0].download_directory is None
@@ -643,13 +1141,13 @@ async def test_qbittorrent_client_marks_absent_hashes() -> None:
 async def test_qbittorrent_dry_run_reports_metadata_without_removing_the_torrent() -> None:
     respx.post("http://qbt/api/v2/auth/login").respond(text="Ok.")
     respx.get("http://qbt/api/v2/torrents/info").respond(
-        json=[{"hash": "AA", "name": "Preview release", "content_path": "/downloads/Preview release"}]
+        json=[{"hash": "A" * 40, "name": "Preview release", "content_path": "/downloads/Preview release"}]
     )
     delete_route = respx.post("http://qbt/api/v2/torrents/delete").respond(status_code=200)
 
     client = QbittorrentClient(base_url="http://qbt", username="user", password="pass", timeout_seconds=5)
     try:
-        result = (await client.delete_hashes(["AA"], delete_files=True, dry_run=True))[0]
+        result = (await client.delete_hashes(["A" * 40], delete_files=True, dry_run=True))[0]
     finally:
         await client.close()
 
@@ -720,11 +1218,12 @@ async def test_qbittorrent_client_maps_hybrid_hashes_to_one_policy_checked_remov
     respx.get("http://qbt/api/v2/torrents/info").respond(
         json=[
             {
-                "hash": "V1HASH",
-                "infohash_v1": "V1HASH",
-                "infohash_v2": "V2HASH",
+                "hash": "A" * 40,
+                "infohash_v1": "A" * 40,
+                "infohash_v2": "B" * 64,
                 "ratio": 2.0,
                 "seeding_time": 7_200,
+                "content_path": "/downloads/hybrid/Release",
             }
         ]
     )
@@ -740,15 +1239,80 @@ async def test_qbittorrent_client_maps_hybrid_hashes_to_one_policy_checked_remov
         min_seed_time_minutes=60,
     )
     try:
-        results = await client.delete_hashes(["v1hash", "v2hash"], delete_files=True)
+        results = await client.delete_hashes(["a" * 40, "b" * 64], delete_files=True)
     finally:
         await client.close()
 
-    assert delete_route.calls[0].request.content == b"hashes=V1HASH&deleteFiles=true"
+    assert delete_route.calls[0].request.content == (b"hashes=" + b"A" * 40 + b"&deleteFiles=true")
     assert [(result.hash_value, result.existed, result.skip_reason) for result in results] == [
-        ("V1HASH", True, None),
-        ("V2HASH", True, None),
+        ("A" * 40, True, None),
+        ("B" * 64, True, None),
     ]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_qbittorrent_content_inventory_rejects_missing_scope() -> None:
+    respx.post("http://qbt/api/v2/auth/login").respond(text="Ok.")
+    respx.get("http://qbt/api/v2/torrents/info").respond(json=[{"hash": "AA"}])
+    client = QbittorrentClient(base_url="http://qbt", username="user", password="pass", timeout_seconds=5)
+    try:
+        inventory = await client.list_content_inventory()
+    finally:
+        await client.close()
+    assert inventory.scopes == ()
+    assert inventory.failures[0].code == "invalid_content_scope"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_qbittorrent_standalone_delete_blocks_shared_content_scope() -> None:
+    respx.post("http://qbt/api/v2/auth/login").respond(text="Ok.")
+    respx.get("http://qbt/api/v2/torrents/info").respond(
+        json=[
+            {
+                "hash": "A" * 40,
+                "infohash_v1": "A" * 40,
+                "infohash_v2": "B" * 64,
+                "name": "Target",
+                "content_path": "/srv/data/torrents/Movie",
+            },
+            {"hash": "B" * 40, "name": "Other", "content_path": "/srv/data/torrents/Movie"},
+        ]
+    )
+    delete_route = respx.post("http://qbt/api/v2/torrents/delete").respond(status_code=200)
+    client = QbittorrentClient(base_url="http://qbt", username="user", password="pass", timeout_seconds=5)
+    try:
+        result = (await client.delete_hashes(["B" * 64], delete_files=True))[0]
+    finally:
+        await client.close()
+    assert delete_route.called is False
+    assert result.skip_reason == "shared_path"
+    assert result.delete_files is False
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_qbittorrent_standalone_delete_blocks_stale_inventory_target() -> None:
+    respx.post("http://qbt/api/v2/auth/login").respond(text="Ok.")
+    respx.get("http://qbt/api/v2/torrents/info").mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json=[{"hash": "A" * 40, "name": "Target", "content_path": "/srv/data/torrents/Movie"}],
+            ),
+            httpx.Response(200, json=[]),
+        ]
+    )
+    delete_route = respx.post("http://qbt/api/v2/torrents/delete").respond(status_code=200)
+    client = QbittorrentClient(base_url="http://qbt", username="user", password="pass", timeout_seconds=5)
+    try:
+        result = (await client.delete_hashes(["A" * 40], delete_files=True))[0]
+    finally:
+        await client.close()
+    assert delete_route.called is False
+    assert result.skip_reason == "ownership_unverifiable"
+    assert result.delete_files is False
 
 
 @pytest.mark.asyncio

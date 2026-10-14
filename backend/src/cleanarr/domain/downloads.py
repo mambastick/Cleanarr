@@ -129,6 +129,43 @@ class DownloaderListing:
 
 
 @dataclass(frozen=True)
+class ContentScopeBlocker:
+    """Safe identity of a sibling torrent that prevents destructive cleanup."""
+
+    client_id: str
+    info_hash: str
+    torrent_name: str | None = None
+
+
+@dataclass(frozen=True)
+class DownloaderContentScope:
+    """Private destructive-safety evidence for one torrent's owned content."""
+
+    info_hash: str
+    paths: tuple[str, ...]
+    hash_aliases: tuple[str, ...] = ()
+    uncertain: bool = False
+    empty_verified: bool = False
+    uncertainty_code: str | None = None
+    torrent_name: str | None = None
+
+
+@dataclass(frozen=True)
+class DownloaderContentInventoryFailure:
+    """A client could not provide complete, validated content evidence."""
+
+    code: str
+
+
+@dataclass(frozen=True)
+class DownloaderContentInventory:
+    """Private fleet evidence; never serialize this into public download APIs."""
+
+    scopes: tuple[DownloaderContentScope, ...] = ()
+    failures: tuple[DownloaderContentInventoryFailure, ...] = ()
+
+
+@dataclass(frozen=True)
 class DownloaderControlResult:
     """The reconciled result of one reversible, single-client operation."""
 

@@ -125,3 +125,14 @@ it("renders latest action evidence and a visible reason when controls are unavai
   expect(screen.getByText(/Attempts: 1\/3/)).toBeInTheDocument()
   expect(screen.getByText(/Unavailable reason: Target is not fresh/)).toBeInTheDocument()
 })
+
+it("shows retained audit evidence without adding a deletion control", async () => {
+  const retained = {
+    ...item,
+    retention: { policy: "keep" as const, retained_at: "2026-01-01T00:00:00Z", correlation_id: "corr-1", min_seed_ratio: null, min_seed_time_minutes: null },
+  }
+  renderPanel(async <T,>() => ({ ...downloads, items: [retained] }) as T)
+  expect(await screen.findByText("Kept for seeding")).toBeInTheDocument()
+  expect(screen.getAllByText(/This torrent was kept by the configured seeding policy/).length).toBeGreaterThan(0)
+  expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument()
+})

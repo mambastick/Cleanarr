@@ -6,7 +6,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from cleanarr.domain import (
+    DownloaderContentInventory,
+    DownloaderContentScope,
     DownloaderRemovalResult,
+    JellyfinItem,
     RadarrHistoryRecord,
     RadarrMovie,
     SeerrIssue,
@@ -20,11 +23,44 @@ from cleanarr.domain import (
 
 
 @dataclass
+class FakeJellyfinLookupClient:
+    """Bounded Jellyfin source lookup fake for cascade scenarios."""
+
+    items: list[JellyfinItem] = field(default_factory=list)
+
+    async def find_items(
+        self,
+        *,
+        ids: tuple[str, ...] = (),
+        provider_ids: tuple[str, ...] = (),
+        include_types: tuple[str, ...] = (),
+        accept_language: str | None = None,
+    ) -> list[JellyfinItem]:
+        candidates = [item for item in self.items if not include_types or item.type in include_types]
+        if ids:
+            return [item for item in candidates if item.id in ids]
+        values = set(provider_ids)
+        return [
+            item
+            for item in candidates
+            if any(
+                value in values
+                for value in (
+                    f"tvdb.{item.tvdb_id}" if item.tvdb_id is not None else "",
+                    f"tmdb.{item.tmdb_id}" if item.tmdb_id is not None else "",
+                    f"imdb.{item.imdb_id.casefold()}" if item.imdb_id else "",
+                )
+            )
+        ]
+
+
+@dataclass
 class FakeRadarrClient:
     """In-memory Radarr fake."""
 
     movies: list[RadarrMovie]
     history_by_movie: dict[int, list[RadarrHistoryRecord]]
+    download_history_by_id: dict[str, list[RadarrHistoryRecord]] = field(default_factory=dict)
     deleted_movie_ids: list[int] = field(default_factory=list)
 
     async def list_movies(self) -> list[RadarrMovie]:
@@ -32,6 +68,16 @@ class FakeRadarrClient:
 
     async def list_movie_history(self, movie_id: int) -> list[RadarrHistoryRecord]:
         return list(self.history_by_movie.get(movie_id, []))
+
+    async def list_download_history(self, download_id: str) -> list[RadarrHistoryRecord]:
+        if download_id in self.download_history_by_id:
+            return list(self.download_history_by_id[download_id])
+        return [
+            record
+            for records in self.history_by_movie.values()
+            for record in records
+            if record.download_id and record.download_id.casefold() == download_id.casefold()
+        ]
 
     async def delete_movie(
         self,
@@ -166,6 +212,14 @@ class FakeDownloaderClient:
 
     existing_hashes: set[str]
     deleted_hashes: list[str] = field(default_factory=list)
+
+    async def list_content_inventory(self) -> DownloaderContentInventory:
+        return DownloaderContentInventory(
+            scopes=tuple(
+                DownloaderContentScope(info_hash=value, paths=(f"/downloads/{value}",))
+                for value in sorted(self.existing_hashes)
+            )
+        )
 
     async def delete_hashes(
         self,

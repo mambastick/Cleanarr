@@ -84,3 +84,22 @@ export function localizedBatchStatus(status: string, language: DeletionLanguage)
 export function isExecutablePlan(preview: ManualDeletePreviewResponse): boolean {
   return preview.plan.status === "success" && !preview.plan.actions.some((action) => actionGroup(action) === "attention")
 }
+
+export function localizedJobError(code: string | null | undefined, language: DeletionLanguage): string | null {
+  const messages: Record<string, readonly [string, string]> = {
+    unsafe_plan: ["Safety evidence blocks this cleanup. Automatic retry is disabled; resolve the blockers and review a new preview.", "Очистка заблокирована проверками безопасности. Автоматический повтор отключён; устраните причины и проверьте новый предпросмотр."],
+    partial_result_not_retryable: ["Some cleanup steps completed. Automatic retry is blocked; inspect the recorded result before continuing.", "Часть очистки выполнена. Автоматический повтор заблокирован; проверьте сохранённый результат перед продолжением."],
+    interrupted_unknown: ["The previous attempt may have changed data. Inspect the result before continuing.", "Предыдущая попытка могла изменить данные. Проверьте результат перед продолжением."],
+    plan_changed: ["The plan changed. Review a new preview before confirming again.", "План изменился. Проверьте новый предпросмотр перед повторным подтверждением."],
+    preflight_failed: ["A connected service could not verify the cleanup plan. Safe retries are limited; check the service and try a new preview if they fail.", "Подключённый сервис не смог проверить план очистки. Число безопасных повторов ограничено; если они не помогли, проверьте сервис и создайте новый предпросмотр."],
+    execution_failed: ["Cleanup could not finish. Inspect the recorded result before planning another attempt.", "Очистка не завершилась. Проверьте сохранённый результат перед новой попыткой."],
+    library_item_changed: ["The library item changed. Review a new preview before confirming again.", "Объект библиотеки изменился. Проверьте новый предпросмотр перед повторным подтверждением."],
+    interrupted_before_mutation: ["The process restarted before cleanup began. The saved plan will be checked again before a safe retry.", "Процесс перезапустился до начала очистки. Перед безопасным повтором сохранённый план будет проверен заново."],
+  }
+  return code ? messages[code]?.[language === "ru" ? 1 : 0] ?? null : null
+}
+
+export const DELETE_SESSION_KEY_UNAVAILABLE_COPY: Record<DeletionLanguage, string> = {
+  en: "Deletion is unavailable because the browser cannot provide secure randomness. Use HTTPS or enable Web Crypto, then try again.",
+  ru: "Удаление недоступно: браузер не предоставляет безопасный источник случайности. Используйте HTTPS или включите Web Crypto и повторите попытку.",
+}

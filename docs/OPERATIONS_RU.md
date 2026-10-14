@@ -54,6 +54,39 @@ Database migration 6 транзакционно добавляет `user_account
 остановить CleanArr и восстановить pre-upgrade database; старую binary нельзя
 запускать с schema 6.
 
+## Удержанные раздачи и database schema 8
+
+Migration 7 добавляет `retained_torrents`, сохраняя configuration, users,
+activity и jobs. Evidence keep/defer сохраняется до зависимой очистки медиа,
+переживает restart/activity pruning и отображается в Downloads. Это исторический
+аудит, а не актуальный ownership или permission; refresh не удаляет такие
+раздачи автоматически. Старые неотслеживаемые раздачи не выводятся из title/path.
+
+Migration 8 добавляет durable `error_code` ручной задачи, сохраняя migration 7.
+Обновление stable schema 6 и candidate schema 7 выполняется последовательно.
+Старые строки без кода читаются с `NULL`; новые переходы failure/recovery
+записывают код напрямую, без вывода из текста сообщения.
+
+Перед upgrade с v2.0.4 (schema 6) экспортируйте SQLite backup через
+`Connection.backup` по installation guide и проверьте `PRAGMA integrity_check`:
+результат должен быть `ok`. Сохраните backup вместе с image/package v2.0.4.
+Для rollback остановите CleanArr, сохраните schema-8 database отдельно,
+восстановите backup schema 6 и запустите v2.0.4; проверьте settings, users и
+history. Старая binary отклоняет schema 8. Пустая replacement configuration или
+удаление новой таблицы не являются поддерживаемым downgrade.
+
+Частичная manual job с выполненной мутацией сообщает
+`partial_result_not_retryable`, сохраняет исходную downstream error и действия
+и не запускается повторно автоматически. Перед планированием остатка проверьте
+сервисы и activity: новый исходный preview может блокироваться из-за уже
+отсутствующей записи Arr. Automatic remaining-steps recovery в change нет.
+
+Manual job с `unsafe_plan` терминальна: проверьте сохранённые причины,
+исправьте ownership/scope evidence и запросите новый предпросмотр.
+Автоматического повтора нет. `preflight_failed` означает bounded retries
+временных ошибок чтения; ошибка retention recording терминальна с
+`execution_failed`.
+
 ## Обновление и rollback
 
 Runtime configuration schema 4 добавляет thresholds свободного места storage:

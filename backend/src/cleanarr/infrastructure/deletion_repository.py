@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
@@ -36,6 +38,15 @@ from cleanarr.redaction import redact_sensitive_text
 _logger = logging.getLogger("cleanarr")
 
 
+@contextmanager
+def _connect(db_path: Path) -> Iterator[sqlite3.Connection]:
+    """Open one short-lived connection and close it after its transaction."""
+
+    with closing(sqlite3.connect(db_path)) as connection:
+        with connection:
+            yield connection
+
+
 class SQLiteDeletionRepository:
     """One cohesive SQLite implementation of all deletion persistence ports."""
 
@@ -46,11 +57,11 @@ class SQLiteDeletionRepository:
         migrate_database(self._db_path)
 
     def load_jobs(self) -> list[DeletionJobRecord]:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             rows = connection.execute(
                 "SELECT id, request_json, event_json, preflight_json, status, phase, progress_percent,"
                 " message, item_name, created_at, started_at, completed_at, next_retry_at,"
-                " attempt_count, max_attempts, result_json, error, idempotency_key, display_name"
+                " attempt_count, max_attempts, result_json, error, error_code, idempotency_key, display_name"
                 " FROM manual_delete_jobs ORDER BY created_at DESC"
             ).fetchall()
         jobs: list[DeletionJobRecord] = []
@@ -62,28 +73,28 @@ class SQLiteDeletionRepository:
         return jobs
 
     def load_job(self, job_id: UUID) -> DeletionJobRecord | None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             row = connection.execute(
                 "SELECT id, request_json, event_json, preflight_json, status, phase, progress_percent,"
                 " message, item_name, created_at, started_at, completed_at, next_retry_at,"
-                " attempt_count, max_attempts, result_json, error, idempotency_key, display_name"
+                " attempt_count, max_attempts, result_json, error, error_code, idempotency_key, display_name"
                 " FROM manual_delete_jobs WHERE id = ?",
                 (str(job_id),),
             ).fetchone()
         return _job_from_row(row) if row is not None else None
 
     def save_job(self, job: DeletionJobRecord) -> None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             _save_job_in_connection(connection, job)
             connection.commit()
 
     def delete_job(self, job_id: UUID) -> None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute("DELETE FROM manual_delete_jobs WHERE id = ?", (str(job_id),))
             connection.commit()
 
     def load_batches(self) -> list[DeletionBatchRecord]:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute("PRAGMA foreign_keys = ON")
             parent_rows = connection.execute(
                 "SELECT id, canonical_request_json, confirmed_batch_hash, status, message, created_at, "
@@ -103,7 +114,7 @@ class SQLiteDeletionRepository:
         return list(batches.values())
 
     def load_batch(self, batch_id: UUID) -> DeletionBatchRecord | None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute("PRAGMA foreign_keys = ON")
             row = connection.execute(
                 "SELECT id, canonical_request_json, confirmed_batch_hash, status, message, created_at, "
@@ -123,19 +134,19 @@ class SQLiteDeletionRepository:
         return batch
 
     def save_batch(self, batch: DeletionBatchRecord) -> None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute("PRAGMA foreign_keys = ON")
             _save_batch_in_connection(connection, batch)
             connection.commit()
 
     def delete_batch(self, batch_id: UUID) -> None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute("PRAGMA foreign_keys = ON")
             connection.execute("DELETE FROM manual_delete_batches WHERE id = ?", (str(batch_id),))
             connection.commit()
 
     def lookup_destructive_idempotency(self, key: UUID) -> DestructiveIdempotencyRecord | None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             row = connection.execute(
                 "SELECT request_kind, canonical_request_json, original_request_json, resource_id "
                 "FROM destructive_idempotency_ledger WHERE idempotency_key = ?",
@@ -153,7 +164,7 @@ class SQLiteDeletionRepository:
         """Atomically claim a key and save a visible single job when it is new."""
 
         assert job.idempotency_key is not None
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 "SELECT request_kind, canonical_request_json, original_request_json, resource_id "
@@ -188,7 +199,7 @@ class SQLiteDeletionRepository:
     ) -> BatchCreationResult:
         """Atomically claim a batch key while enforcing the durable queue bound."""
 
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute("PRAGMA foreign_keys = ON")
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
@@ -225,7 +236,7 @@ class SQLiteDeletionRepository:
     def load_completed_webhook(
         self, event_key: str, *, completed_after: datetime
     ) -> tuple[MediaDeletionEvent, ProcessingResultResponse] | None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             row = connection.execute(
                 "SELECT event_json, result_json FROM processed_webhook_events"
                 " WHERE event_key = ? AND completed_at IS NOT NULL AND completed_at >= ?",
@@ -236,7 +247,7 @@ class SQLiteDeletionRepository:
         return decode_persisted_event(str(row[0])), ProcessingResultResponse.model_validate_json(str(row[1]))
 
     def has_incomplete_webhook(self, event_key: str) -> bool:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             row = connection.execute(
                 "SELECT 1 FROM processed_webhook_events WHERE event_key = ? AND completed_at IS NULL",
                 (event_key,),
@@ -245,7 +256,7 @@ class SQLiteDeletionRepository:
 
     def mark_webhook_processing(self, event_key: str, event: MediaDeletionEvent, *, purge_before: datetime) -> None:
         now = datetime.now(UTC).isoformat()
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute(
                 "DELETE FROM processed_webhook_events WHERE completed_at IS NOT NULL AND completed_at < ?",
                 (purge_before.isoformat(),),
@@ -262,7 +273,7 @@ class SQLiteDeletionRepository:
             connection.commit()
 
     def mark_webhook_completed(self, event_key: str, result: ProcessingResultResponse) -> None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute(
                 "UPDATE processed_webhook_events SET completed_at = ?, result_json = ? WHERE event_key = ?",
                 (datetime.now(UTC).isoformat(), result.model_dump_json(), event_key),
@@ -270,12 +281,12 @@ class SQLiteDeletionRepository:
             connection.commit()
 
     def delete_webhook(self, event_key: str) -> None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute("DELETE FROM processed_webhook_events WHERE event_key = ?", (event_key,))
             connection.commit()
 
     def purge_webhooks(self, *, completed_before: datetime) -> None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             connection.execute(
                 "DELETE FROM processed_webhook_events WHERE completed_at IS NOT NULL AND completed_at < ?",
                 (completed_before.isoformat(),),
@@ -286,23 +297,27 @@ class SQLiteDeletionRepository:
 def encode_persisted_event(event: MediaDeletionEvent) -> str:
     """Encode an event with the established webhook JSON key order and shape."""
 
+    payload = {
+        "notification_type": event.notification_type,
+        "item_type": event.item_type.value,
+        "item_id": event.item_id,
+        "name": event.name,
+        "path": event.fingerprint.path,
+        "tmdb_id": event.fingerprint.tmdb_id,
+        "tvdb_id": event.fingerprint.tvdb_id,
+        "imdb_id": event.fingerprint.imdb_id,
+        "series_name": event.series_name,
+        "series_id": event.series_id,
+        "season_number": event.season_number,
+        "episode_number": event.episode_number,
+        "episode_end_number": event.episode_end_number,
+        "occurred_at": _json_datetime(event.occurred_at),
+    }
+    path_namespace = getattr(event.fingerprint, "path_namespace", None)
+    if path_namespace == "arr":
+        payload["path_namespace"] = "arr"
     return json.dumps(
-        {
-            "notification_type": event.notification_type,
-            "item_type": event.item_type.value,
-            "item_id": event.item_id,
-            "name": event.name,
-            "path": event.fingerprint.path,
-            "tmdb_id": event.fingerprint.tmdb_id,
-            "tvdb_id": event.fingerprint.tvdb_id,
-            "imdb_id": event.fingerprint.imdb_id,
-            "series_name": event.series_name,
-            "series_id": event.series_id,
-            "season_number": event.season_number,
-            "episode_number": event.episode_number,
-            "episode_end_number": event.episode_end_number,
-            "occurred_at": _json_datetime(event.occurred_at),
-        },
+        payload,
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -323,6 +338,7 @@ def decode_persisted_event(value: str) -> MediaDeletionEvent:
             tvdb_id=payload.get("tvdb_id"),
             imdb_id=payload.get("imdb_id"),
             path=payload.get("path"),
+            path_namespace="arr" if payload.get("path_namespace") == "arr" else None,
         ),
         series_name=payload.get("series_name"),
         series_id=payload.get("series_id"),
@@ -347,8 +363,8 @@ def _save_job_in_connection(connection: sqlite3.Connection, job: DeletionJobReco
         "INSERT INTO manual_delete_jobs ("
         " id, request_json, event_json, preflight_json, status, phase, progress_percent,"
         " message, item_name, created_at, started_at, completed_at, next_retry_at,"
-        " attempt_count, max_attempts, result_json, error, idempotency_key, display_name"
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        " attempt_count, max_attempts, result_json, error, error_code, idempotency_key, display_name"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         " ON CONFLICT(id) DO UPDATE SET"
         " request_json=excluded.request_json, event_json=excluded.event_json,"
         " preflight_json=excluded.preflight_json, status=excluded.status, phase=excluded.phase,"
@@ -357,6 +373,7 @@ def _save_job_in_connection(connection: sqlite3.Connection, job: DeletionJobReco
         " started_at=excluded.started_at, completed_at=excluded.completed_at,"
         " next_retry_at=excluded.next_retry_at, attempt_count=excluded.attempt_count,"
         " max_attempts=excluded.max_attempts, result_json=excluded.result_json, error=excluded.error,"
+        " error_code=excluded.error_code,"
         " idempotency_key=excluded.idempotency_key, display_name=excluded.display_name",
         (
             str(job.id),
@@ -376,6 +393,7 @@ def _save_job_in_connection(connection: sqlite3.Connection, job: DeletionJobReco
             job.max_attempts,
             job.result.model_dump_json() if job.result is not None else None,
             job.error,
+            job.error_code,
             str(job.idempotency_key) if job.idempotency_key is not None else None,
             job.display_name,
         ),
@@ -395,10 +413,10 @@ def _job_from_row(row: tuple[object, ...]) -> DeletionJobRecord:
         progress_percent=int(str(row[6])),
         message=redact_sensitive_text(str(row[7])),
         item_name=item_name,
-        idempotency_key=UUID(str(row[17])) if row[17] is not None else None,
+        idempotency_key=UUID(str(row[18])) if row[18] is not None else None,
         display_name=(
-            str(row[18])
-            if row[18] is not None
+            str(row[19])
+            if row[19] is not None
             else display_name_fallback(item_name=item_name, result_name=event.name, item_type=event.item_type)
         ),
         created_at=datetime.fromisoformat(str(row[9])),
@@ -409,6 +427,7 @@ def _job_from_row(row: tuple[object, ...]) -> DeletionJobRecord:
         max_attempts=int(str(row[14])),
         result=ProcessingResultResponse.model_validate_json(str(row[15])) if row[15] is not None else None,
         error=redact_sensitive_text(str(row[16])) if row[16] is not None else None,
+        error_code=redact_sensitive_text(str(row[17])) if row[17] is not None else None,
     )
 
 

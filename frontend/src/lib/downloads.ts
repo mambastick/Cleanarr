@@ -21,6 +21,14 @@ export interface DownloadActionProjection {
   result: Record<string, string | null> | null
 }
 
+export interface RetentionProjection {
+  policy: "keep" | "defer"
+  retained_at: string
+  correlation_id: string
+  min_seed_ratio: number | null
+  min_seed_time_minutes: number | null
+}
+
 export interface DownloadItem {
   client_id: string
   client_name: string
@@ -51,6 +59,7 @@ export interface DownloadItem {
   policy_reason_code: string | null
   policy_facts: Record<string, unknown> | null
   latest_action: DownloadActionProjection | null
+  retention?: RetentionProjection | null
 }
 
 export interface DownloadsResponse {

@@ -58,16 +58,18 @@ versions and read contracts used by those scenario flows.
 The candidate rehearsal covers both directions with real released containers:
 `v0.2.11 -> candidate -> restored v0.2.11`,
 `v0.9.0 -> candidate -> restored v0.9.0`,
-`v1.0.0 -> candidate -> restored v1.0.0`, and the latest stable
+`v1.0.0 -> candidate -> restored v1.0.0`, and
 `v1.1.0 -> candidate -> restored v1.1.0`. It checks the verified backup,
 database/config schema migration, retained configuration, and retained activity
 history. The v1.1.0 path additionally restores the automatic schema-v3 sidecar
-created before the candidate writes configuration schema 4 or database schema 6.
+created before the candidate writes configuration schema 4 or database schema 8.
 
-The 2.0.4 release gate also rehearses the latest stable
-`v2.0.3 -> candidate -> restored v2.0.3` using its pinned published image,
-seeded configuration/activity, and a verified backup. This patch retains
-database schema 6 and configuration schema 4.
+The gate also rehearses `v2.0.3 -> candidate -> restored v2.0.3` and the latest
+stable `v2.0.4 -> candidate -> restored v2.0.4` using their digest-pinned
+published images, seeded configuration/activity and a verified backup. The
+candidate must reach database schema 8 with retention and job error-code
+storage, retain configuration schema 4, and restore the matching older database
+for rollback. Older binaries are never run against the upgraded database.
 
 Run the complete gate locally from a clean checkout:
 
@@ -117,3 +119,12 @@ evidence for those flows.
 - Breaking API/configuration changes outside a security exception require a new
   CleanArr major version. A supported dependency version is never removed
   silently.
+
+## Safety follow-up candidate — 2026-10-14
+
+Issues #42–#52 add protocol-tested data-scope checks and SQLite schema 8
+(retention migration 7, structured job errors migration 8).
+The published version matrix above is historical evidence, not certification of
+this candidate. Fresh real-service and latest-stable upgrade rehearsals remain
+required before release. See Safety for POSIX path/alias limitations, rTorrent
+root restrictions and the bounded Jellyfin fingerprint fallback.

@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import hashlib
 import json
 import logging
+from collections import deque
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from cleanarr.application.deletion_models import (
+    ActionResultResponse,
     ManualDeleteJobPhase,
     ManualDeleteJobResponse,
     ManualDeleteJobStatus,
@@ -36,6 +39,90 @@ ManualDeleteRunner = Callable[
     Awaitable[ProcessingResultResponse],
 ]
 
+
+class _OrderedJobWriter:
+    """Serialize async progress snapshots through one worker-thread writer."""
+
+    def __init__(self, repository: DeletionRepositoryPort) -> None:
+        self._repository = repository
+        self._pending: deque[DeletionJobRecord] = deque()
+        self._task: asyncio.Task[None] | None = None
+        self._failure: BaseException | None = None
+
+    def submit(self, job: DeletionJobRecord) -> None:
+        snapshot = copy.deepcopy(job)
+        if self._pending and self._pending[-1].phase is snapshot.phase:
+            self._pending[-1] = snapshot
+        else:
+            self._pending.append(snapshot)
+        if self._task is not None and self._task.done() and self._failure is None:
+            try:
+                self._task.result()
+            except BaseException as exc:  # noqa: BLE001 - preserve the first writer failure for flush()
+                self._failure = exc
+        if self._failure is None and (self._task is None or self._task.done()):
+            self._task = asyncio.create_task(self._drain(), name="cleanarr-manual-deletion-progress-writer")
+
+    async def _drain(self) -> None:
+        while self._pending:
+            snapshot = self._pending.popleft()
+            await asyncio.to_thread(self._repository.save_job, snapshot)
+
+    async def flush(self) -> None:
+        if self._failure is not None:
+            raise self._failure
+        task = self._task
+        if task is not None:
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                # Cancelling the caller must not cancel a worker-thread write.
+                # The owning job drains the still-running writer in its finally block.
+                if task.cancelled() and self._failure is None:
+                    self._failure = asyncio.CancelledError()
+                raise
+            except BaseException as exc:  # noqa: BLE001 - expose persistence failure to the job worker
+                if self._failure is None:
+                    self._failure = exc
+                raise
+        if self._failure is not None:
+            raise self._failure
+
+
+class _JobProgressReporter:
+    """Synchronous callback facade with an awaitable ordered flush."""
+
+    def __init__(self, job: DeletionJobRecord, writer: _OrderedJobWriter) -> None:
+        self._job = job
+        self._writer = writer
+
+    def __call__(self, phase: ManualDeleteJobPhase, progress_percent: int, message: str, item_name: str | None) -> None:
+        self._job.status = ManualDeleteJobStatus.RUNNING
+        self._job.phase = phase
+        self._job.progress_percent = max(self._job.progress_percent, min(progress_percent, 99))
+        self._job.message = message
+        if item_name is not None:
+            self._job.item_name = item_name
+        self._writer.submit(self._job)
+
+    async def flush(self) -> None:
+        await self._writer.flush()
+
+
+async def _flush_writer_before_cancellation(writer: _OrderedJobWriter) -> None:
+    """Drain an in-flight SQLite write before the owning job releases its lock."""
+
+    flush_task = asyncio.create_task(writer.flush(), name="cleanarr-manual-deletion-progress-flush")
+    try:
+        await asyncio.shield(flush_task)
+    except asyncio.CancelledError:
+        # ``to_thread`` cannot cancel an SQLite call already running in the
+        # executor.  Keep awaiting the writer so its close/commit boundary is
+        # reached before the job's execution lock is released.
+        await asyncio.shield(flush_task)
+        raise
+
+
 _logger = logging.getLogger("cleanarr")
 _SAFE_RETAINED_SKIP_REASONS = frozenset(
     {
@@ -46,7 +133,40 @@ _SAFE_RETAINED_SKIP_REASONS = frozenset(
         FailureReason.NO_PARTIAL_REQUEST_CLEANUP,
     }
 )
+_RETRYABLE_EXECUTION_ACTIONS = frozenset({"delete_hash", "delete_hashes"})
+_DEPENDENCY_SKIP_ACTIONS = frozenset(
+    {
+        "delete_movie",
+        "cleanup_movie",
+        "delete_series",
+        "cleanup_series",
+        "cleanup_episode",
+        "delete_season_scope",
+        "cleanup_season",
+        "delete_episode_scope",
+        "delete_item",
+    }
+)
+_SAFE_RETAINED_SKIP_REASON_VALUES = frozenset(reason.value for reason in _SAFE_RETAINED_SKIP_REASONS)
 _VOLATILE_PLAN_ACTION_DETAILS = frozenset({"ratio", "seeding_time_seconds"})
+_TRANSIENT_PREFLIGHT_REASONS = frozenset(
+    {
+        FailureReason.DOWNSTREAM_ERROR.value,
+        FailureReason.AUTHENTICATION_FAILED.value,
+    }
+)
+_READ_PREFLIGHT_ACTIONS = frozenset(
+    {
+        "process_event",
+        "resolve_movie",
+        "resolve_series",
+        "resolve_media",
+        "resolve_request",
+        "verify_download_ownership",
+        "verify_source",
+        "verify_jellyfin_binding",
+    }
+)
 
 
 class DeletionJobNotFoundError(LookupError):
@@ -114,6 +234,8 @@ class ManualDeletionJobService:
         self._worker_task: asyncio.Task[None] | None = None
         self._initialized = False
         self._start_lock = asyncio.Lock()
+        self._dismiss_lock = asyncio.Lock()
+        self._settled: dict[UUID, asyncio.Event] = {}
 
     async def start(self) -> None:
         """Initialize persistence and start the queue worker."""
@@ -126,8 +248,8 @@ class ManualDeletionJobService:
                 self._jobs_by_idempotency_key = {
                     job.idempotency_key: job for job in loaded_jobs if job.idempotency_key is not None
                 }
-                self._recover_interrupted_jobs()
-                self._prune_history()
+                await self._recover_interrupted_jobs()
+                await self._prune_history()
                 self._initialized = True
             if self._worker_task is None or self._worker_task.done():
                 self._worker_task = asyncio.create_task(
@@ -186,7 +308,7 @@ class ManualDeletionJobService:
         event = await self._resolver(payload)
         preflight = with_display_name(await self._previewer(payload, event), display_name(payload, event))
         validate_plan_confirmation(payload, preflight)
-        self._prune_history(reserve=1)
+        await self._prune_history(reserve=1)
         job = DeletionJobRecord(
             id=uuid4(),
             request=payload,
@@ -259,26 +381,35 @@ class ManualDeletionJobService:
         jobs = sorted(self._jobs.values(), key=lambda job: job.created_at, reverse=True)
         return [self._to_response(job) for job in jobs]
 
-    def dismiss(self, job_id: UUID) -> None:
-        job = self._jobs.get(job_id)
-        if job is None:
-            raise DeletionJobNotFoundError(str(job_id))
-        if job.status in self._ACTIVE_STATUSES:
-            raise DeletionJobActiveError(str(job_id))
-        del self._jobs[job_id]
-        if job.idempotency_key is not None:
-            self._jobs_by_idempotency_key.pop(job.idempotency_key, None)
-        self._repository.delete_job(job_id)
+    async def dismiss(self, job_id: UUID) -> None:
+        """Dismiss on the event loop only after the worker's final write settles."""
+        async with self._dismiss_lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                raise DeletionJobNotFoundError(str(job_id))
+            if job.status in self._ACTIVE_STATUSES:
+                raise DeletionJobActiveError(str(job_id))
+            settled = self._settled.get(job_id)
+            if settled is not None:
+                await settled.wait()
+            await asyncio.to_thread(self._repository.delete_job, job_id)
+            self._jobs.pop(job_id, None)
+            self._settled.pop(job_id, None)
+            if job.idempotency_key is not None:
+                self._jobs_by_idempotency_key.pop(job.idempotency_key, None)
 
     async def _worker_loop(self) -> None:
         while True:
             job_id = await self._queue.get()
             self._scheduled.discard(job_id)
+            settled = asyncio.Event()
+            self._settled[job_id] = settled
             try:
                 job = self._jobs.get(job_id)
                 if job is not None and job.status in self._ACTIVE_STATUSES:
                     await self._run_job(job)
             finally:
+                settled.set()
                 self._queue.task_done()
 
     async def _run_job(self, job: DeletionJobRecord) -> None:
@@ -291,15 +422,15 @@ class ManualDeletionJobService:
         job.next_retry_at = None
         job.attempt_count += 1
         job.error = None
-        self._repository.save_job(job)
+        job.error_code = None
+        # Freeze the planning snapshot before handing it to the worker thread.
+        running_snapshot = copy.deepcopy(job)
+        running_snapshot.status = ManualDeleteJobStatus.RUNNING
+        await asyncio.to_thread(self._repository.save_job, running_snapshot)
 
-        def report(phase: ManualDeleteJobPhase, progress_percent: int, message: str, item_name: str | None) -> None:
-            job.phase = phase
-            job.progress_percent = max(job.progress_percent, min(progress_percent, 99))
-            job.message = message
-            if item_name is not None:
-                job.item_name = item_name
-            self._repository.save_job(job)
+        progress_writer = _OrderedJobWriter(self._repository)
+
+        report = _JobProgressReporter(job, progress_writer)
 
         try:
             async with self._execution_lock:
@@ -313,50 +444,118 @@ class ManualDeletionJobService:
                         if getattr(exc, "code", None) == "library_item_changed":
                             self._mark_failed(
                                 job,
-                                "library_item_changed: The library item changed; preview it again before retrying.",
+                                "The library item changed; preview it again before retrying.",
+                                error_code="library_item_changed",
                             )
-                            self._repository.save_job(job)
+                            await asyncio.to_thread(self._repository.save_job, job)
                             return
                         raise
                 current_plan = await self._previewer(job.request, verified_event)
+                preflight_code = _preflight_block_code(current_plan)
+                if preflight_code == "unsafe_plan":
+                    self._mark_failed(
+                        job,
+                        "The deletion preflight contains safety blockers and cannot be executed safely.",
+                        error_code="unsafe_plan",
+                    )
+                    await asyncio.to_thread(self._repository.save_job, job)
+                    return
+                if preflight_code == "preflight_failed":
+                    await self._retry_or_fail(
+                        job,
+                        "The deletion preflight could not be verified safely.",
+                        error_code="preflight_failed",
+                    )
+                    return
                 if plan_hash(current_plan) != plan_hash(job.preflight):
                     self._mark_failed(
                         job,
                         "The deletion plan changed while the job was queued. Preview it and confirm again.",
+                        error_code="plan_changed",
                     )
-                    self._repository.save_job(job)
+                    await asyncio.to_thread(self._repository.save_job, job)
                     return
                 job.progress_percent = max(job.progress_percent, 20)
                 job.message = "Preflight verified; starting cleanup."
-                self._repository.save_job(job)
-                result = await self._runner(job.request, verified_event, report)
+                await asyncio.to_thread(self._repository.save_job, job)
+                try:
+                    result = await self._runner(job.request, verified_event, report)
+                finally:
+                    await _flush_writer_before_cancellation(progress_writer)
         except asyncio.CancelledError:
             raise
         except DeletionExecutionFailure as exc:
-            self._mark_failed(job, exc.message)
-            self._repository.save_job(job)
+            self._mark_failed(job, exc.message, error_code="execution_failed")
+            await asyncio.to_thread(self._repository.save_job, job)
         except Exception as exc:  # noqa: BLE001
             _logger.exception("Manual deletion background job %s attempt %s failed", job.id, job.attempt_count)
-            self._retry_or_fail(job, str(exc) or type(exc).__name__)
+            message = str(exc) or type(exc).__name__
+            if job.phase not in {ManualDeleteJobPhase.PLANNING, ManualDeleteJobPhase.LOCATING}:
+                self._mark_failed(job, message, error_code="interrupted_unknown")
+                await asyncio.to_thread(self._repository.save_job, job)
+            else:
+                await self._retry_or_fail(job, message, error_code="preflight_failed")
         else:
             job.result = with_display_name(result, job.display_name or display_name(job.request, job.event))
-            if result.status is OverallStatus.PARTIAL_FAILURE:
-                self._retry_or_fail(job, "The deletion finished with retryable downstream errors.")
-                return
-            job.status = ManualDeleteJobStatus.COMPLETED
-            job.phase = ManualDeleteJobPhase.COMPLETED
-            job.progress_percent = 100
-            job.message = "Deletion completed."
-            job.completed_at = datetime.now(UTC)
-            job.error = None
-            self._repository.save_job(job)
+            execution_code = _execution_result_block_code(result)
+            failed_action = next((action for action in result.actions if action.status is ActionStatus.FAILED), None)
+            blocked_action = next(
+                (
+                    action
+                    for action in result.actions
+                    if action.status in {ActionStatus.SKIPPED, ActionStatus.IGNORED}
+                    and _action_reason(action) not in _SAFE_RETAINED_SKIP_REASON_VALUES
+                ),
+                None,
+            )
+            error_action = failed_action or blocked_action
+            original_error = (
+                str(error_action.details.get("error") or error_action.message)
+                if error_action is not None
+                else "The deletion finished with downstream errors."
+            )
+            retention_failed = any(
+                action.status is ActionStatus.FAILED and action.action == "record_retention"
+                for action in result.actions
+            )
+            has_deleted = any(action.status is ActionStatus.DELETED for action in result.actions)
+            if has_deleted and (result.status is OverallStatus.PARTIAL_FAILURE or execution_code is not None):
+                self._mark_failed(job, original_error, error_code="partial_result_not_retryable")
+                job.message = "Partial cleanup completed; automatic replay is blocked."
+                await asyncio.to_thread(self._repository.save_job, job)
+            elif retention_failed:
+                self._mark_failed(job, original_error, error_code="execution_failed")
+                job.message = "Durable retention recording failed; dependent cleanup was blocked."
+                await asyncio.to_thread(self._repository.save_job, job)
+            elif execution_code == "unsafe_result":
+                self._mark_failed(job, original_error, error_code="unsafe_plan")
+                job.message = "Cleanup was blocked by safety checks; automatic replay is blocked."
+                await asyncio.to_thread(self._repository.save_job, job)
+            elif result.status is OverallStatus.PARTIAL_FAILURE or execution_code == "execution_failed":
+                if _execution_result_retryable(result):
+                    await self._retry_or_fail(job, original_error, error_code="execution_failed")
+                else:
+                    self._mark_failed(job, original_error, error_code="execution_failed")
+                    job.message = "The downstream mutation failed; automatic replay is blocked."
+                    await asyncio.to_thread(self._repository.save_job, job)
+            else:
+                job.status = ManualDeleteJobStatus.COMPLETED
+                job.phase = ManualDeleteJobPhase.COMPLETED
+                job.progress_percent = 100
+                job.message = "Deletion completed."
+                job.completed_at = datetime.now(UTC)
+                job.error = None
+                job.error_code = None
+                await asyncio.to_thread(self._repository.save_job, job)
+            return
 
-    def _retry_or_fail(self, job: DeletionJobRecord, message: str) -> None:
+    async def _retry_or_fail(self, job: DeletionJobRecord, message: str, *, error_code: str) -> None:
         message = redact_sensitive_text(message)
         job.error = message
+        job.error_code = error_code
         if job.attempt_count >= job.max_attempts:
-            self._mark_failed(job, message)
-            self._repository.save_job(job)
+            self._mark_failed(job, message, error_code=error_code)
+            await asyncio.to_thread(self._repository.save_job, job)
             return
         delay_index = min(job.attempt_count - 1, len(self._retry_delays_seconds) - 1)
         delay_seconds = self._retry_delays_seconds[delay_index]
@@ -367,16 +566,17 @@ class ManualDeletionJobService:
         job.message = (
             f"Attempt {job.attempt_count} of {job.max_attempts} failed; retry scheduled in {delay_seconds:g} seconds."
         )
-        self._repository.save_job(job)
+        await asyncio.to_thread(self._repository.save_job, job)
         self._schedule_job(job)
 
     @staticmethod
-    def _mark_failed(job: DeletionJobRecord, message: str) -> None:
+    def _mark_failed(job: DeletionJobRecord, message: str, *, error_code: str) -> None:
         job.status = ManualDeleteJobStatus.FAILED
         job.phase = ManualDeleteJobPhase.FAILED
         job.progress_percent = 100
         job.message = "Deletion failed after all safe attempts."
         job.error = redact_sensitive_text(message)
+        job.error_code = error_code
         job.completed_at = datetime.now(UTC)
         job.next_retry_at = None
 
@@ -406,7 +606,7 @@ class ManualDeletionJobService:
             name=f"cleanarr-manual-deletion-retry-{job.id}",
         )
 
-    def _recover_interrupted_jobs(self) -> None:
+    async def _recover_interrupted_jobs(self) -> None:
         now = datetime.now(UTC)
         for job in self._jobs.values():
             if job.status is ManualDeleteJobStatus.RUNNING:
@@ -419,6 +619,7 @@ class ManualDeletionJobService:
                     job.next_retry_at = now
                     job.message = "Process restart detected before mutation; rechecking the persisted preflight."
                     job.error = "Previous process stopped before the mutation phase began."
+                    job.error_code = "interrupted_before_mutation"
                 else:
                     job.status = ManualDeleteJobStatus.FAILED
                     job.phase = ManualDeleteJobPhase.FAILED
@@ -429,19 +630,26 @@ class ManualDeletionJobService:
                     job.error = (
                         "interrupted_unknown: The previous process stopped after a potentially mutating phase began."
                     )
-                self._repository.save_job(job)
+                    job.error_code = "interrupted_unknown"
+                await asyncio.to_thread(self._repository.save_job, job)
 
-    def _prune_history(self, *, reserve: int = 0) -> None:
+    async def _prune_history(self, *, reserve: int = 0) -> None:
         terminal_jobs = sorted(
-            (job for job in self._jobs.values() if job.status not in self._ACTIVE_STATUSES),
+            (
+                job
+                for job in self._jobs.values()
+                if job.status not in self._ACTIVE_STATUSES
+                and (job.id not in self._settled or self._settled[job.id].is_set())
+            ),
             key=lambda job: job.created_at,
         )
         overflow = len(terminal_jobs) - self._history_limit + reserve
         for job in terminal_jobs[: max(overflow, 0)]:
             self._jobs.pop(job.id, None)
+            self._settled.pop(job.id, None)
             if job.idempotency_key is not None:
                 self._jobs_by_idempotency_key.pop(job.idempotency_key, None)
-            self._repository.delete_job(job.id)
+            await asyncio.to_thread(self._repository.delete_job, job.id)
 
     @staticmethod
     def _to_response(job: DeletionJobRecord) -> ManualDeleteJobResponse:
@@ -468,6 +676,7 @@ class ManualDeletionJobService:
             preflight=job.preflight,
             result=job.result,
             error=job.error,
+            error_code=job.error_code,
         )
 
 
@@ -499,10 +708,14 @@ def plan_hash(plan: ProcessingResultResponse) -> str:
 def validate_plan_confirmation(request: ManualDeleteRequest, plan: ProcessingResultResponse) -> None:
     """Fail closed unless a caller confirmed this exact canonical plan."""
 
-    if plan.status in {OverallStatus.PARTIAL_FAILURE, OverallStatus.IGNORED} or any(
-        action.status in {ActionStatus.IGNORED, ActionStatus.FAILED}
-        or (action.status is ActionStatus.SKIPPED and action.reason not in _SAFE_RETAINED_SKIP_REASONS)
-        for action in plan.actions
+    if (
+        _preflight_block_code(plan) is not None
+        or plan.status in {OverallStatus.PARTIAL_FAILURE, OverallStatus.IGNORED}
+        or any(
+            action.status in {ActionStatus.IGNORED, ActionStatus.FAILED}
+            or (action.status is ActionStatus.SKIPPED and action.reason not in _SAFE_RETAINED_SKIP_REASONS)
+            for action in plan.actions
+        )
     ):
         raise DeletionPreflightError(
             "unsafe_plan",
@@ -515,6 +728,100 @@ def validate_plan_confirmation(request: ManualDeleteRequest, plan: ProcessingRes
             "plan_changed",
             "The deletion plan changed after it was reviewed. Preview the current plan and confirm again.",
         )
+
+
+def _preflight_failure_code(plan: ProcessingResultResponse) -> str | None:
+    """Classify failed preflight evidence before treating it as plan drift."""
+
+    if any(
+        action.status is ActionStatus.SKIPPED and _action_reason(action) not in _SAFE_RETAINED_SKIP_REASON_VALUES
+        for action in plan.actions
+    ):
+        return "unsafe_plan"
+    failed = [action for action in plan.actions if action.status is ActionStatus.FAILED]
+    if not failed:
+        return None
+    if all(
+        _action_reason(action) in _TRANSIENT_PREFLIGHT_REASONS and _is_read_preflight_action(action.action)
+        for action in failed
+    ):
+        return "preflight_failed"
+    return "unsafe_plan"
+
+
+def _preflight_block_code(plan: ProcessingResultResponse) -> str | None:
+    """Classify a refreshed preflight, including the impossible mutated-plan case."""
+
+    if any(action.status is ActionStatus.DELETED for action in plan.actions):
+        return "unsafe_plan"
+    return _preflight_failure_code(plan)
+
+
+def _execution_result_block_code(plan: ProcessingResultResponse) -> str | None:
+    """Classify execution evidence separately from mutation-free preflight."""
+
+    if plan.status is OverallStatus.IGNORED and (
+        not plan.actions
+        or any(action.status not in {ActionStatus.SKIPPED, ActionStatus.ALREADY_ABSENT} for action in plan.actions)
+    ):
+        return "unsafe_result"
+    dependency_failed = False
+    for action in plan.actions:
+        reason = _action_reason(action)
+        if action.status is ActionStatus.IGNORED:
+            return "unsafe_result"
+        if action.status is ActionStatus.SKIPPED:
+            if reason in _SAFE_RETAINED_SKIP_REASON_VALUES:
+                continue
+            # Strategies add dependent cleanup placeholders after a failed
+            # downloader operation.  They are execution errors rather than
+            # safety blockers, but still prevent a false completed result.
+            if reason == FailureReason.DOWNSTREAM_ERROR.value and action.action in _DEPENDENCY_SKIP_ACTIONS:
+                dependency_failed = True
+                continue
+            return "unsafe_result"
+        if action.status is ActionStatus.FAILED and reason not in _TRANSIENT_PREFLIGHT_REASONS:
+            return "unsafe_result"
+    if dependency_failed or any(action.status is ActionStatus.FAILED for action in plan.actions):
+        return "execution_failed"
+    if plan.status is OverallStatus.PARTIAL_FAILURE:
+        return "execution_failed"
+    return None
+
+
+def _execution_result_retryable(plan: ProcessingResultResponse) -> bool:
+    """Return whether an execution result may be replayed safely."""
+
+    failed = [action for action in plan.actions if action.status is ActionStatus.FAILED]
+    if not failed:
+        if any(
+            action.status is ActionStatus.SKIPPED
+            and action.action in _DEPENDENCY_SKIP_ACTIONS
+            and _action_reason(action) == FailureReason.DOWNSTREAM_ERROR.value
+            for action in plan.actions
+        ):
+            # A dependent skip alone does not prove a retryable upstream failure.
+            return False
+        # Keep recovery for a partial result with no action detail, which can
+        # arise when a downstream adapter returns an incomplete response.
+        return plan.status is OverallStatus.PARTIAL_FAILURE
+    return all(
+        _action_reason(action) in _TRANSIENT_PREFLIGHT_REASONS
+        and (
+            action.action in _RETRYABLE_EXECUTION_ACTIONS
+            or (action.action != "process_event" and _is_read_preflight_action(action.action))
+        )
+        for action in failed
+    )
+
+
+def _action_reason(action: ActionResultResponse) -> str | None:
+    reason = action.reason
+    return getattr(reason, "value", reason) if reason is not None else None
+
+
+def _is_read_preflight_action(action: str) -> bool:
+    return action in _READ_PREFLIGHT_ACTIONS or action.startswith(("resolve_", "verify_", "read_", "list_"))
 
 
 def canonical_submission_request(payload: ManualDeleteRequest) -> str:

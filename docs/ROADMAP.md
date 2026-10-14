@@ -481,6 +481,64 @@ contracts.
 - Preserve the existing release order, ownership rules, dry-run defaults and
   required backend/frontend interaction gates. This is not a release claim.
 
+### Accepted safety and retention follow-up — 2026-10-14
+
+Issues #42–#52 retain the existing release order and destructive scope. A partial
+manual attempt that applied any mutation becomes terminal with its original
+error and recorded actions; only an attempt with no applied mutation can be
+retried automatically. A separate hash-bound plan for remaining cleanup after
+Arr removal is future work, not an automatic replay of the original plan.
+
+Before data removal, complete private downloader inventories must isolate the
+target from every configured client. Shared/unknown scopes block dependent
+Arr, Seerr and Jellyfin cleanup. Movie history must also isolate the hash from
+all other movies across configured Radarr instances. Conflicting identifiers
+and unavailable Jellyfin source evidence fail closed.
+
+For #52 the accepted initial scope is a durable retention record and a Downloads
+badge for keep/defer torrents, persisted before dependent media cleanup. SQLite
+schema 7 stores the client/hash, originating correlation, minimal media scope,
+policy and threshold snapshot. It survives activity pruning and restart, and
+never grants ownership or action permission. Automatic deferred removal remains
+outside this change; a later reconciler requires a separate confirmation,
+fresh safety evidence, bounded retries/recovery and its own acceptance gate.
+
+Acceptance requires all backend/frontend and existing CI gates, four-adapter
+protocol regressions, a populated latest-stable schema-6 upgrade with verified
+backup/restore, and EN/RU desktop/mobile light/dark browser evidence. This
+section records implementation scope, not release or compatibility certification.
+
+PR #53 review correction: ordinary catalogue sizes must not disable cleanup.
+Jellyfin keeps exact-ID lookup and restores complete pagination up to the existing
+20,000-item bound for provider fallback. Radarr ownership uses complete history
+filtered by download ID across every configured instance, without a 1,000-movie
+cap or per-movie request fan-out. Private per-call downloader assessments avoid
+duplicate full inventories; bounded uncertain scopes block overlapping targets,
+while unbounded unknown evidence still fails closed. Closed rTorrent inventory
+may derive a conservative scope; the actual removal target still needs its
+nonempty validated base path. Trusted Arr path provenance is internal to manual
+flows. Transient read failures and downloader downstream/authentication failures
+before any recorded deletion retain bounded retries with a fresh preflight;
+safety blockers are terminal `unsafe_plan`. Ordered migration 8 stores
+structured job error codes; upgrades from schemas 6/7 and backup/restore are
+required. These changes retain the existing scope and release gates.
+
+PR #53 additional review correction: routed negative Radarr identities remain
+valid while raw external IDs must be positive. Jellyfin discards an unstable
+provider pass and restarts once. rTorrent inventories use a bounded multicall;
+unknown sibling scopes and closed targets have distinct EN/RU reasons and
+actionable details. qBittorrent metadata-free magnets accept the documented
+unknown-size sentinel only with strict zero-payload evidence. These are
+regression fixes within the same acceptance gates and destructive scope.
+
+PR #53 live-result correction: every manual execution result is classified;
+blocked `ignored`/skipped cleanup cannot report completion. Downloader dependency
+placeholders retain the original transient failure classification, while applied
+partial deletions remain terminal. rTorrent tolerates stable unrelated membership
+changes through one bounded inventory refresh that preserves fleet evidence and
+the original target path. A fleet barrier shares refreshed evidence with every
+adapter before mutation; overlap, changed targets, and continued churn fail closed.
+
 ## Required 1.0 scope
 
 ### 1. Download clients and routing

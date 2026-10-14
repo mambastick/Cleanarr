@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 from cleanarr.application.authentication import AuthenticationService
 from cleanarr.application.configuration import RuntimeConfigurationService
@@ -36,6 +37,7 @@ from cleanarr.infrastructure.downloaders import (
     MultiDownloaderClient,
 )
 from cleanarr.infrastructure.logging import configure_logging
+from cleanarr.infrastructure.retention_repository import SqliteRetentionRepository
 from cleanarr.infrastructure.routers import MultiRadarrClient, MultiSonarrClient, RadarrTarget, SonarrTarget
 from cleanarr.infrastructure.settings import Settings
 from cleanarr.infrastructure.users import SqliteUserAccountStore
@@ -53,6 +55,7 @@ class ServiceRuntime:
     seerr: SeerrClient | NullSeerrClient
     downloader: DownloaderClient
     jellyfin_server: JellyfinServerClient | NullJellyfinServerClient
+    retention_repository: SqliteRetentionRepository
 
     async def close(self) -> None:
         """Dispose all HTTP clients."""
@@ -144,6 +147,10 @@ class ServiceContainer:
     @property
     def jellyfin_server(self) -> JellyfinServerClient | NullJellyfinServerClient:
         return self._runtime.jellyfin_server
+
+    @property
+    def retention_repository(self) -> SqliteRetentionRepository:
+        return self._runtime.retention_repository
 
     @property
     def strategy_factory(self) -> DeletionStrategyFactory:
@@ -259,6 +266,10 @@ class ServiceContainer:
             if active_jellyfin
             else NullJellyfinServerClient()
         )
+        retention_repository = SqliteRetentionRepository(Path(settings.db_path))
+        retention_thresholds = {
+            service.id: (service.min_seed_ratio, service.min_seed_time_minutes) for service in active_downloaders
+        }
 
         strategy_factory = DeletionStrategyFactory(
             dry_run=general.dry_run,
@@ -267,6 +278,8 @@ class ServiceContainer:
             sonarr=sonarr,
             seerr=seerr,
             downloader=downloader,
+            retention=retention_repository,
+            retention_thresholds=retention_thresholds,
         )
         return ServiceRuntime(
             config=config,
@@ -277,6 +290,7 @@ class ServiceContainer:
             seerr=seerr,
             downloader=downloader,
             jellyfin_server=jellyfin_server,
+            retention_repository=retention_repository,
         )
 
     @staticmethod

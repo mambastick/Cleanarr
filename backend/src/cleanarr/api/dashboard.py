@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from collections import Counter, deque
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -18,6 +19,16 @@ from cleanarr.api.schemas import ProcessingResultResponse
 from cleanarr.domain import ItemType, ProcessingResult
 from cleanarr.domain.config import RuntimeConfig
 from cleanarr.infrastructure.database import migrate_database
+
+
+@contextmanager
+def _connect(db_path: Path) -> Iterator[sqlite3.Connection]:
+    """Open one short-lived connection and close it after its transaction."""
+
+    with closing(sqlite3.connect(db_path)) as connection:
+        with connection:
+            yield connection
+
 
 JELLYFIN_GENERIC_TEMPLATE = """{
   "notification_type": "{{json_encode NotificationType}}",
@@ -78,7 +89,7 @@ class ActivityStore:
 
     def _purge_sync(self) -> None:
         cutoff = (datetime.now(UTC) - timedelta(days=self._retention_days)).isoformat()
-        with sqlite3.connect(self._db_path) as conn:
+        with _connect(self._db_path) as conn:
             conn.execute("DELETE FROM activity WHERE processed_at < ?", (cutoff,))
             conn.commit()
 
@@ -87,7 +98,7 @@ class ActivityStore:
         result_response = ProcessingResultResponse.from_domain(result).model_copy(
             update={"display_name": display_name or result.event.name or result.event.item_type.value}
         )
-        with sqlite3.connect(self._db_path) as conn:
+        with _connect(self._db_path) as conn:
             conn.execute(
                 "INSERT INTO activity (processed_at, result_json) VALUES (?, ?)",
                 (now, result_response.model_dump_json()),
@@ -100,7 +111,7 @@ class ActivityStore:
         await asyncio.to_thread(self._record_sync, result, display_name)
 
     def _snapshot_sync(self, limit: int) -> list[ActivityRecord]:
-        with sqlite3.connect(self._db_path) as conn:
+        with _connect(self._db_path) as conn:
             rows = conn.execute(
                 "SELECT processed_at, result_json FROM activity ORDER BY processed_at DESC LIMIT ?",
                 (limit,),
@@ -122,7 +133,7 @@ class ActivityStore:
         return await asyncio.to_thread(self._snapshot_sync, limit)
 
     def _metric_counts_sync(self) -> Counter[tuple[str, str]]:
-        with sqlite3.connect(self._db_path) as conn:
+        with _connect(self._db_path) as conn:
             rows = conn.execute(
                 "SELECT json_extract(result_json, '$.item_type'),"
                 " json_extract(result_json, '$.status'), COUNT(*)"

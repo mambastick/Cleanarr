@@ -29,7 +29,7 @@ instance and are never treated as globally unique.
 
 The operation fails closed and records a structured skip when, for example:
 
-- provider identifiers or paths conflict;
+- provider identifiers conflict, or trusted Arr-derived paths conflict;
 - multiple Arr instances can own the same event without a unique resolution;
 - Arr history does not prove the download hash;
 - a torrent/file spans material outside the requested movie, series, season,
@@ -37,8 +37,79 @@ The operation fails closed and records a structured skip when, for example:
 - paths are shared, a torrent is a pack, or cross-seeded content cannot be
   isolated safely;
 - the client-supplied data path is empty, relative, traverses a parent, or is a
-  root-level path;
+  filesystem root;
 - a downstream dependency or authentication check fails.
+
+## Source and physical-scope verification
+
+Webhook cascades require a configured, enabled Jellyfin connection. Exact item
+ID lookup is attempted first. Jellyfin 10.11.11 has no supported provider-equality
+filter on this endpoint, so fingerprint fallback uses complete pagination with
+the existing 20,000-item library bound. There is no 1,000-item rejection.
+A changed total discards the entire pass and restarts once; a second changed
+pass fails closed. Missing/invalid totals, partial data, a catalogue above the
+bound or a failed lookup returns `source_unverifiable`
+and blocks the cascade. Manual confirmed flows remain available independently.
+
+Every data-removal preview and execution reads complete private content scopes
+from all configured downloaders. Equal, ancestor or descendant scopes belonging
+to another torrent, including the same hash on another client, return
+`shared_path` when both scopes are known. Incomplete file metadata with a
+validated root produces `sibling_scope_unknown` for overlapping targets. The
+preview identifies the unverified sibling by name, client and hash without
+claiming its files are shared. Unrelated paths remain available. A metadata-less torrent is ignored for overlap
+only when its
+protocol counters prove zero local payload bytes; an empty file list alone is
+not proof. qBittorrent requires `metaDL`, `total_size` of -1 or 0, strict zero
+completed/downloaded counters and finite numeric zero progress.
+Unbounded/invalid/failed inventory returns `ownership_unverifiable`.
+Blocked targets retain all dependent Arr/Seerr/Jellyfin data. Each call reuses one
+fleet assessment, binds fresh target metadata to its recorded scope and keeps
+standalone adapter guards active. Unknown existence is never reported as present
+on every client or used to authorize dependent cleanup. Radarr hashes must also be
+absent from every other movie's complete download-ID-filtered history across
+configured instances. These checks do not fan out once per movie or impose a
+1,000-movie catalogue cap; a shared hash is a pack block, and an unreadable or
+incomplete filtered history fails closed.
+
+Provider identifiers are compared independently from Jellyfin's file/mount
+namespace. A webhook file path cannot veto a matching provider ID because an
+Arr path names a folder in a different namespace. Only trusted manual selections
+derived from Arr carry an internal Arr-path marker for conflict checks; inbound
+webhooks cannot set that marker. Exact-path fallback remains a weak last resort.
+
+These checks compare reported POSIX paths and exact file lists. They do not
+inspect remote inodes or resolve different bind-mount/symlink aliases. Configure
+clients with a consistent path namespace; unresolved physical aliases must be
+kept outside mutation-enabled operation. Hardlinks can retain physical bytes,
+so no reclaimed-space guarantee is made. Windows/UNC and malformed paths are
+unknown. rTorrent reads `d.multicall2` and `download_list` with explicit target
+`""` and view `main`, plus `directory.default`, within the existing 20,000-scope
+bound. Both normalized hash sets must agree, including every sibling; invalid
+IDs, duplicate IDs or mismatches fail closed. A base path equal to the default
+root is retained as a conservative uncertain envelope. Membership is checked again
+before removal. A change triggers at most one inventory refresh, preserving
+other clients' scopes and rechecking both inventory views and final membership.
+In the fleet flow this refresh is a barrier before any adapter mutates; every
+client receives the merged evidence. The rTorrent adapter cannot refresh it
+locally after that barrier and silently leave other clients on an older snapshot.
+Stable unrelated additions or removals may proceed; new overlapping or unknown
+scopes still block affected targets. The target must exist in both snapshots,
+and its fresh deletion path must match both original and refreshed evidence.
+Further membership changes fail closed. A valid absolute base path outside the
+default root remains an
+exact inventory scope: it blocks overlapping targets across the fleet, while
+unrelated paths remain eligible. A malformed row with a readable hash and
+bounded path is retained as uncertain evidence. A row with no recoverable
+identity/path, or an unreadable/oversized response, makes inventory unverifiable.
+Closed rTorrent inventory may derive a conservative scope from its directory,
+name and multi-file flag. A closed target reports `torrent_closed`: open or
+resume it in rTorrent, then refresh the preview. Actual data removal still
+requires a
+nonempty base path strictly below its live
+`directory.default` root; root/no-subdirectory and paths outside that root are
+blocked for that rTorrent target rather than recursively removed by a directory
+fallback. They do not invalidate an otherwise complete outside-root inventory.
 
 ## Preflight and mutation order
 
@@ -78,6 +149,11 @@ A torrent failure blocks those dependent mutations so that ownership evidence
 remains available for a safe retry. Successful earlier actions and the
 remaining retry state are persisted in SQLite.
 
+A preflight containing an already `DELETED` action is invalid. A real execution
+result is classified separately: successful applied deletions complete their
+batch child; unsafe evidence remains failed, and partial applied outcomes are
+recorded without replay.
+
 ## Repetition and concurrency
 
 Completed webhook events are idempotently suppressed for seven days. An
@@ -91,6 +167,25 @@ job is terminal `interrupted_unknown` and is not replayed automatically. A
 webhook exception or cancellation likewise leaves a durable
 `interrupted_unknown` tombstone; automatic reconciliation/replay is blocked
 because the reached downstream stage cannot be proved.
+
+A failed manual preflight retries only transient downstream/authentication
+failures in read actions, within the existing attempt bound. Ownership, shared
+paths, incomplete scopes, closed torrents and other safety blockers are terminal
+`unsafe_plan`; an automatic retry cannot make their evidence valid. Failed
+durable retention recording is also terminal and blocks dependent cleanup.
+
+Every live result is classified, including `ignored` or nominally successful
+results containing safety skips: blocked jobs fail rather than report completion.
+A transient downstream/authentication failure on `delete_hash` or `delete_hashes`
+before any recorded `DELETED` action retains bounded `execution_failed` retries,
+with a fresh preflight on each attempt. Dependent `SKIPPED/downstream_error`
+placeholders, including the Jellyfin `delete_item` kept because downstream
+cleanup was blocked, do not turn that failure into a safety block. A failed
+Jellyfin deletion is a mutation failure and is not automatically replayed.
+The dependency placeholder alone does not authorize retry without a recorded
+failed upstream action. Actual safety blockers, failed retention recording,
+other failed mutations, and partial results with
+applied deletions remain terminal; automatic replay is blocked.
 
 Downloads pause/resume is reversible and distinct from removing a torrent entry
 or data. It requires fresh, managed ownership evidence. Playback/watch and

@@ -14,7 +14,6 @@ from cleanarr.domain import (
     AuthenticationError,
     DownloadControlAction,
     DownloadControlOutcome,
-    ExternalServiceError,
     TorrentState,
 )
 from cleanarr.domain.config import TorrentRemovalPolicy
@@ -67,6 +66,8 @@ async def test_transmission_legacy_rpc_negotiates_session_and_removes_existing_h
         await client.close()
 
     removal = next(call for call in calls if call["method"] == "torrent-remove")
+    torrent_get = next(call for call in calls if call["method"] == "torrent-get")
+    assert torrent_get["arguments"]["ids"] == ["AA", "BB"]
     assert removal["arguments"] == {"ids": [7], "delete-local-data": False}
     assert [(result.hash_value, result.existed) for result in results] == [("AA", True), ("BB", False)]
     assert results[0].torrent_name == "Legacy release"
@@ -95,9 +96,10 @@ async def test_transmission_json_rpc_uses_snake_case_methods() -> None:
                 "torrents": [
                     {
                         "id": 9,
-                        "hash_string": "BB",
+                        "hash_string": "B" * 40,
                         "name": "Modern release",
                         "download_dir": "/downloads/modern",
+                        "files": [{"name": "Movie/file.mkv"}],
                     }
                 ]
             }
@@ -114,17 +116,145 @@ async def test_transmission_json_rpc_uses_snake_case_methods() -> None:
     )
     try:
         assert await client.get_version() == "4.1.0"
-        results = await client.delete_hashes(["BB"], delete_files=True)
+        results = await client.delete_hashes(["B" * 40], delete_files=True)
     finally:
         await client.close()
 
     removal = next(call for call in calls if call["method"] == "torrent_remove")
+    torrent_get = next(call for call in calls if call["method"] == "torrent_get")
+    assert torrent_get["params"]["ids"] == ["B" * 40]
     assert removal["params"] == {"ids": [9], "delete_local_data": True}
     assert results[0].existed is True
     assert results[0].torrent_name == "Modern release"
     assert results[0].content_path is None
     assert results[0].download_directory == "/downloads/modern"
     assert results[0].delete_files is True
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_transmission_content_inventory_uses_exact_file_list() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        if payload["method"] == "session_get":
+            return httpx.Response(200, json={"jsonrpc": "2.0", "result": {"version": "4.1.0"}, "id": payload["id"]})
+        return httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "result": {
+                    "torrents": [
+                        {
+                            "hash_string": "a" * 40,
+                            "download_dir": "/downloads",
+                            "files": [{"name": "Movie/file.mkv"}],
+                        }
+                    ]
+                },
+                "id": payload["id"],
+            },
+        )
+
+    respx.post("http://transmission/transmission/rpc").mock(side_effect=handler)
+    client = TransmissionClient(
+        base_url="http://transmission/transmission/rpc", username="", password="", timeout_seconds=5
+    )
+    try:
+        inventory = await client.list_content_inventory()
+    finally:
+        await client.close()
+    assert inventory.failures == ()
+    assert inventory.scopes[0].paths == ("/downloads/Movie/file.mkv",)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_transmission_content_inventory_rejects_missing_download_root() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        if payload["method"] == "session_get":
+            result: object = {"version": "4.1.0"}
+        else:
+            result = {"torrents": [{"hash_string": "a" * 40, "files": [{"name": "Movie/file.mkv"}]}]}
+        return httpx.Response(200, json={"jsonrpc": "2.0", "result": result, "id": payload["id"]})
+
+    respx.post("http://transmission/transmission/rpc").mock(side_effect=handler)
+    client = TransmissionClient(
+        base_url="http://transmission/transmission/rpc", username="", password="", timeout_seconds=5
+    )
+    try:
+        inventory = await client.list_content_inventory()
+    finally:
+        await client.close()
+    assert inventory.scopes == ()
+    assert inventory.failures[0].code == "invalid_content_scope"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_transmission_malformed_listing_never_mutates() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        if payload["method"] == "session_get":
+            result: object = {"version": "4.1.0"}
+        else:
+            result = {"torrents": [{"id": True, "hash_string": "A" * 40}]}
+        return httpx.Response(200, json={"jsonrpc": "2.0", "result": result, "id": payload["id"]})
+
+    respx.post("http://transmission/transmission/rpc").mock(side_effect=handler)
+    client = TransmissionClient(
+        base_url="http://transmission/transmission/rpc", username="", password="", timeout_seconds=5
+    )
+    try:
+        result = (await client.delete_hashes(["A" * 40], delete_files=False))[0]
+    finally:
+        await client.close()
+
+    assert result.existed is None
+    assert result.skip_reason == "ownership_unverifiable"
+    assert result.delete_files is False
+    assert all(json.loads(call.request.content).get("method") != "torrent_remove" for call in respx.calls)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_transmission_standalone_delete_blocks_shared_content_scope() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        if payload["method"] == "session_get":
+            result: object = {"version": "4.1.0"}
+        elif payload["method"] == "torrent_get":
+            result = {
+                "torrents": [
+                    {
+                        "id": 1,
+                        "hash_string": "A" * 40,
+                        "download_dir": "/srv/data/torrents",
+                        "files": [{"name": "Movie/file.mkv"}],
+                    },
+                    {
+                        "id": 2,
+                        "hash_string": "B" * 40,
+                        "download_dir": "/srv/data/torrents",
+                        "files": [{"name": "Movie/file.mkv"}],
+                    },
+                ]
+            }
+        else:
+            result = {}
+        return httpx.Response(200, json={"jsonrpc": "2.0", "result": result, "id": payload["id"]})
+
+    respx.post("http://transmission/transmission/rpc").mock(side_effect=handler)
+    client = TransmissionClient(
+        base_url="http://transmission/transmission/rpc", username="", password="", timeout_seconds=5
+    )
+    try:
+        result = (await client.delete_hashes(["A" * 40], delete_files=True))[0]
+    finally:
+        await client.close()
+    assert all(json.loads(call.request.content)["method"] != "torrent_remove" for call in respx.calls)
+    assert result.skip_reason == "shared_path"
+    assert result.delete_files is False
 
 
 @pytest.mark.asyncio
@@ -159,11 +289,12 @@ async def test_transmission_defers_removal_until_seed_ratio_is_met() -> None:
                 "torrents": [
                     {
                         "id": 9,
-                        "hash_string": "AA",
+                        "hash_string": "A" * 40,
                         "upload_ratio": 0.5,
                         "seconds_seeding": 7_200,
                         "name": "Retained release",
                         "download_dir": "/downloads/retained",
+                        "files": [{"name": "Movie/file.mkv"}],
                     }
                 ]
             }
@@ -179,7 +310,7 @@ async def test_transmission_defers_removal_until_seed_ratio_is_met() -> None:
         min_seed_ratio=1.0,
     )
     try:
-        results = await client.delete_hashes(["AA"], delete_files=True)
+        results = await client.delete_hashes(["A" * 40], delete_files=True)
     finally:
         await client.close()
 
@@ -205,8 +336,14 @@ async def test_deluge_web_rpc_authenticates_and_uses_batch_removal() -> None:
             "auth.login": "session-id",
             "web.connected": True,
             "daemon.get_version": "2.2.0",
-            "core.get_session_state": ["aa", "cc"],
-            "core.get_torrents_status": {"aa": {"name": "Deluge release", "save_path": "/downloads/deluge"}},
+            "core.get_session_state": ["a" * 40, "c" * 40],
+            "core.get_torrents_status": {
+                "a" * 40: {
+                    "name": "Deluge release",
+                    "save_path": "/downloads/deluge",
+                    "files": [{"path": "Movie/file.mkv"}],
+                }
+            },
             "core.remove_torrents": [],
         }
         return httpx.Response(200, json={"id": payload["id"], "result": results[method], "error": None})
@@ -215,13 +352,13 @@ async def test_deluge_web_rpc_authenticates_and_uses_batch_removal() -> None:
     client = DelugeClient(base_url="http://deluge/json", password="secret", timeout_seconds=5)
     try:
         assert await client.get_version() == "2.2.0"
-        results = await client.delete_hashes(["AA", "BB"], delete_files=True)
+        results = await client.delete_hashes(["A" * 40, "B" * 40], delete_files=True)
     finally:
         await client.close()
 
     removal = next(call for call in calls if call["method"] == "core.remove_torrents")
-    assert removal["params"] == [["aa"], True]
-    assert [(result.hash_value, result.existed) for result in results] == [("AA", True), ("BB", False)]
+    assert removal["params"] == [["a" * 40], True]
+    assert [(result.hash_value, result.existed) for result in results] == [("A" * 40, True), ("B" * 40, False)]
     assert results[0].torrent_name == "Deluge release"
     assert results[0].content_path is None
     assert results[0].download_directory == "/downloads/deluge"
@@ -230,6 +367,75 @@ async def test_deluge_web_rpc_authenticates_and_uses_batch_removal() -> None:
     assert results[1].content_path is None
     assert results[1].download_directory is None
     assert results[1].delete_files is None
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_deluge_content_inventory_uses_exact_file_list() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        results: dict[str, Any] = {
+            "auth.login": True,
+            "core.get_torrents_status": {"a" * 40: {"save_path": "/downloads", "files": [{"path": "Movie/file.mkv"}]}},
+        }
+        return httpx.Response(200, json={"id": payload["id"], "result": results[payload["method"]], "error": None})
+
+    respx.post("http://deluge/json").mock(side_effect=handler)
+    client = DelugeClient(base_url="http://deluge/json", password="secret", timeout_seconds=5)
+    try:
+        inventory = await client.list_content_inventory()
+    finally:
+        await client.close()
+    assert inventory.failures == ()
+    assert inventory.scopes[0].paths == ("/downloads/Movie/file.mkv",)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_deluge_content_inventory_rejects_missing_save_root() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        results: dict[str, Any] = {
+            "auth.login": True,
+            "core.get_torrents_status": {"a" * 40: {"files": [{"path": "Movie/file.mkv"}]}},
+        }
+        return httpx.Response(200, json={"id": payload["id"], "result": results[payload["method"]], "error": None})
+
+    respx.post("http://deluge/json").mock(side_effect=handler)
+    client = DelugeClient(base_url="http://deluge/json", password="secret", timeout_seconds=5)
+    try:
+        inventory = await client.list_content_inventory()
+    finally:
+        await client.close()
+    assert inventory.scopes == ()
+    assert inventory.failures[0].code == "invalid_content_scope"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_deluge_standalone_delete_blocks_shared_content_scope() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        results: dict[str, Any] = {
+            "auth.login": True,
+            "core.get_session_state": ["a" * 40, "b" * 40],
+            "core.get_torrents_status": {
+                "a" * 40: {"save_path": "/srv/data/torrents", "files": [{"path": "Movie/file.mkv"}]},
+                "b" * 40: {"save_path": "/srv/data/torrents", "files": [{"path": "Movie/file.mkv"}]},
+            },
+            "core.remove_torrents": [],
+        }
+        return httpx.Response(200, json={"id": payload["id"], "result": results[payload["method"]], "error": None})
+
+    respx.post("http://deluge/json").mock(side_effect=handler)
+    client = DelugeClient(base_url="http://deluge/json", password="secret", timeout_seconds=5)
+    try:
+        result = (await client.delete_hashes(["A" * 40], delete_files=True))[0]
+    finally:
+        await client.close()
+    assert all(json.loads(call.request.content)["method"] != "core.remove_torrents" for call in respx.calls)
+    assert result.skip_reason == "shared_path"
+    assert result.delete_files is False
 
 
 @pytest.mark.asyncio
@@ -292,9 +498,19 @@ async def test_rtorrent_xmlrpc_removes_data_only_from_validated_absolute_path() 
         calls.append((method, params))
         results: dict[str, Any] = {
             "system.client_version": "0.15.5",
-            "download_list": ["AA"],
+            "download_list": ["A" * 40],
             "d.name": "rTorrent release",
-            "d.base_path": "/downloads/movies/Movie",
+            "d.base_path": "/srv/data/torrents/movies/Movie",
+            "directory.default": "/srv/data/torrents",
+            "d.multicall2": [
+                [
+                    "A" * 40,
+                    "/srv/data/torrents/movies/Movie",
+                    "/srv/data/torrents/movies",
+                    "Movie",
+                    False,
+                ]
+            ],
             "d.stop": 0,
             "d.close": 0,
             "execute.throw": 0,
@@ -312,17 +528,17 @@ async def test_rtorrent_xmlrpc_removes_data_only_from_validated_absolute_path() 
     )
     try:
         assert await client.get_version() == "0.15.5"
-        results = await client.delete_hashes(["AA", "BB"], delete_files=True)
+        results = await client.delete_hashes(["A" * 40, "B" * 40], delete_files=True)
     finally:
         await client.close()
 
-    assert ("execute.throw", ("", "/bin/rm", "-rf", "--", "/downloads/movies/Movie")) in calls
-    assert calls.index(("execute.throw", ("", "/bin/rm", "-rf", "--", "/downloads/movies/Movie"))) < calls.index(
-        ("d.erase", ("AA",))
-    )
-    assert [(result.hash_value, result.existed) for result in results] == [("AA", True), ("BB", False)]
+    assert ("execute.throw", ("", "/bin/rm", "-rf", "--", "/srv/data/torrents/movies/Movie")) in calls
+    assert calls.index(
+        ("execute.throw", ("", "/bin/rm", "-rf", "--", "/srv/data/torrents/movies/Movie"))
+    ) < calls.index(("d.erase", ("A" * 40,)))
+    assert [(result.hash_value, result.existed) for result in results] == [("A" * 40, True), ("B" * 40, False)]
     assert results[0].torrent_name == "rTorrent release"
-    assert results[0].content_path == "/downloads/movies/Movie"
+    assert results[0].content_path == "/srv/data/torrents/movies/Movie"
     assert results[0].download_directory is None
     assert results[0].delete_files is True
     assert results[1].torrent_name is None
@@ -334,9 +550,18 @@ async def test_rtorrent_xmlrpc_removes_data_only_from_validated_absolute_path() 
 @pytest.mark.asyncio
 @respx.mock
 async def test_rtorrent_refuses_unsafe_data_path() -> None:
+    calls: list[str] = []
+
     def handler(request: httpx.Request) -> httpx.Response:
         _, method = loads(request.content)
-        results: dict[str, Any] = {"download_list": ["AA"], "d.name": "unsafe", "d.base_path": "/"}
+        calls.append(method)
+        results: dict[str, Any] = {
+            "download_list": ["A" * 40],
+            "d.name": "unsafe",
+            "d.base_path": "/srv/data/torrents",
+            "directory.default": "/srv/data/torrents",
+            "d.multicall2": [["A" * 40, "/srv/data/torrents", "/srv/data/torrents", "unsafe", False]],
+        }
         return httpx.Response(200, content=dumps((results[method],), methodresponse=True, allow_none=True))
 
     respx.post("http://rtorrent/RPC2").mock(side_effect=handler)
@@ -347,10 +572,181 @@ async def test_rtorrent_refuses_unsafe_data_path() -> None:
         timeout_seconds=5,
     )
     try:
-        with pytest.raises(ExternalServiceError, match="unsafe data path"):
-            await client.delete_hashes(["AA"], delete_files=True)
+        result = (await client.delete_hashes(["A" * 40], delete_files=True))[0]
     finally:
         await client.close()
+    assert result.skip_reason == "ownership_unverifiable"
+    assert result.delete_files is False
+    assert "execute.throw" not in calls
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_rtorrent_content_inventory_rejects_missing_base_path() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        _, method = loads(request.content)
+        results: dict[str, Any] = {
+            "download_list": ["A" * 40],
+            "directory.default": "/srv/data/torrents",
+            "d.multicall2": [["A" * 40, "", "/srv/data/torrents", "Movie", False]],
+        }
+        return httpx.Response(200, content=dumps((results[method],), methodresponse=True, allow_none=True))
+
+    respx.post("http://rtorrent/RPC2").mock(side_effect=handler)
+    client = RTorrentClient(base_url="http://rtorrent/RPC2", username="", password="", timeout_seconds=5)
+    try:
+        inventory = await client.list_content_inventory()
+    finally:
+        await client.close()
+    assert inventory.failures == ()
+    assert inventory.scopes[0].paths == ("/srv/data/torrents/Movie",)
+    assert inventory.scopes[0].uncertain is True
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_rtorrent_closed_target_is_structured_and_never_mutated() -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        _, method = loads(request.content)
+        calls.append(method)
+        results: dict[str, Any] = {
+            "download_list": ["A" * 40],
+            "directory.default": "/srv/data/torrents",
+            "d.multicall2": [["A" * 40, "", "/srv/data/torrents", "Movie", False]],
+            "d.name": "Movie",
+            "d.base_path": "",
+            "d.ratio": 0,
+            "d.timestamp.finished": 1,
+        }
+        return httpx.Response(200, content=dumps((results[method],), methodresponse=True, allow_none=True))
+
+    respx.post("http://rtorrent/RPC2").mock(side_effect=handler)
+    client = RTorrentClient(base_url="http://rtorrent/RPC2", username="", password="", timeout_seconds=5)
+    try:
+        result = (await client.delete_hashes(["A" * 40], delete_files=True))[0]
+    finally:
+        await client.close()
+
+    assert result.skip_reason == "torrent_closed"
+    assert result.delete_files is False
+    assert "execute.throw" not in calls
+    assert "d.erase" not in calls
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_rtorrent_inventory_uses_one_multicall_for_1500_entries() -> None:
+    calls: list[str] = []
+    rows = [
+        [f"{index:040X}", f"/srv/data/torrents/item-{index}", "/srv/data/torrents", f"item-{index}", False]
+        for index in range(1500)
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        _, method = loads(request.content)
+        calls.append(method)
+        result: object = {
+            "directory.default": "/srv/data/torrents",
+            "d.multicall2": rows,
+            "download_list": [row[0] for row in rows],
+        }[method]
+        return httpx.Response(200, content=dumps((result,), methodresponse=True, allow_none=True))
+
+    respx.post("http://rtorrent/RPC2").mock(side_effect=handler)
+    client = RTorrentClient(base_url="http://rtorrent/RPC2", username="", password="", timeout_seconds=5)
+    try:
+        inventory = await client.list_content_inventory()
+    finally:
+        await client.close()
+
+    assert inventory.failures == ()
+    assert len(inventory.scopes) == 1500
+    assert calls.count("d.multicall2") == 1
+    assert calls.count("directory.default") == 1
+    assert calls.count("download_list") == 1
+    assert all(method not in calls for method in ("d.base_path", "d.directory", "d.name", "d.is_multi_file"))
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_rtorrent_inventory_keeps_bounded_malformed_multicall_row() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        _, method = loads(request.content)
+        result: object = {
+            "directory.default": "/srv/data/torrents",
+            "download_list": ["A" * 40],
+            "d.multicall2": [["A" * 40, "/srv/data/torrents/Movie", "/srv/data/torrents", "Movie"]],
+        }[method]
+        return httpx.Response(200, content=dumps((result,), methodresponse=True, allow_none=True))
+
+    respx.post("http://rtorrent/RPC2").mock(side_effect=handler)
+    client = RTorrentClient(base_url="http://rtorrent/RPC2", username="", password="", timeout_seconds=5)
+    try:
+        inventory = await client.list_content_inventory()
+    finally:
+        await client.close()
+
+    assert inventory.failures == ()
+    assert inventory.scopes[0].paths == ("/srv/data/torrents/Movie",)
+    assert inventory.scopes[0].uncertain is True
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_rtorrent_outside_base_path_is_preserved_as_exact_inventory_scope() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        _, method = loads(request.content)
+        results: dict[str, Any] = {
+            "download_list": ["A" * 40],
+            "directory.default": "/srv/data/torrents",
+            "d.multicall2": [["A" * 40, "/other/data/Movie", "/srv/data/torrents", "Movie", False]],
+        }
+        return httpx.Response(200, content=dumps((results[method],), methodresponse=True, allow_none=True))
+
+    respx.post("http://rtorrent/RPC2").mock(side_effect=handler)
+    client = RTorrentClient(base_url="http://rtorrent/RPC2", username="", password="", timeout_seconds=5)
+    try:
+        inventory = await client.list_content_inventory()
+    finally:
+        await client.close()
+
+    assert inventory.failures == ()
+    assert inventory.scopes[0].paths == ("/other/data/Movie",)
+    assert inventory.scopes[0].uncertain is False
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_rtorrent_standalone_delete_blocks_shared_content_scope() -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        _, method = loads(request.content)
+        calls.append(method)
+        results: dict[str, Any] = {
+            "download_list": ["A" * 40, "B" * 40],
+            "directory.default": "/srv/data/torrents",
+            "d.base_path": "/srv/data/torrents/Movie",
+            "d.name": "Movie",
+            "d.multicall2": [
+                ["A" * 40, "/srv/data/torrents/Movie", "/srv/data/torrents", "Movie", False],
+                ["B" * 40, "/srv/data/torrents/Movie", "/srv/data/torrents", "Movie", False],
+            ],
+        }
+        return httpx.Response(200, content=dumps((results[method],), methodresponse=True, allow_none=True))
+
+    respx.post("http://rtorrent/RPC2").mock(side_effect=handler)
+    client = RTorrentClient(base_url="http://rtorrent/RPC2", username="", password="", timeout_seconds=5)
+    try:
+        result = (await client.delete_hashes(["A" * 40], delete_files=True))[0]
+    finally:
+        await client.close()
+    assert "execute.throw" not in calls
+    assert "d.erase" not in calls
+    assert result.skip_reason == "shared_path"
+    assert result.delete_files is False
 
 
 @pytest.mark.asyncio
@@ -363,9 +759,11 @@ async def test_rtorrent_defers_removal_using_scaled_ratio() -> None:
         assert method is not None
         calls.append((method, params))
         results: dict[str, Any] = {
-            "download_list": ["AA"],
+            "download_list": ["A" * 40],
             "d.name": "Deferred release",
-            "d.base_path": "/downloads/deferred",
+            "d.base_path": "/srv/data/torrents/deferred",
+            "directory.default": "/srv/data/torrents",
+            "d.multicall2": [["A" * 40, "/srv/data/torrents/deferred", "/srv/data/torrents", "deferred", False]],
             "d.ratio": 750,
             "d.timestamp.finished": 1,
         }
@@ -384,11 +782,11 @@ async def test_rtorrent_defers_removal_using_scaled_ratio() -> None:
         min_seed_ratio=1.0,
     )
     try:
-        results = await client.delete_hashes(["AA"], delete_files=True)
+        results = await client.delete_hashes(["A" * 40], delete_files=True)
     finally:
         await client.close()
 
-    assert ("d.erase", ("AA",)) not in calls
+    assert ("d.erase", ("A" * 40,)) not in calls
     assert results[0].ratio == 0.75
     assert results[0].skip_reason == "Torrent removal deferred: seed ratio is 0.75 (required 1)."
 

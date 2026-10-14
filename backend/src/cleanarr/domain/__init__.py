@@ -1,10 +1,14 @@
 """Domain exports."""
 
 from .downloads import (
+    ContentScopeBlocker,
     DownloadActionClaim,
     DownloadActionStatus,
     DownloadControlAction,
     DownloadControlOutcome,
+    DownloaderContentInventory,
+    DownloaderContentInventoryFailure,
+    DownloaderContentScope,
     DownloaderControlResult,
     DownloaderListing,
     DownloaderReadFailure,
@@ -72,6 +76,7 @@ from .playback import (
     reduce_playback,
     unknown_playback,
 )
+from .retention import RetainedTorrent
 
 __all__ = [
     "ActionResult",
@@ -79,9 +84,13 @@ __all__ = [
     "AuthenticationError",
     "DownloadControlAction",
     "DownloadControlOutcome",
+    "ContentScopeBlocker",
     "DownloadActionStatus",
     "DownloadActionClaim",
     "DownloaderControlResult",
+    "DownloaderContentInventory",
+    "DownloaderContentInventoryFailure",
+    "DownloaderContentScope",
     "DownloaderListing",
     "DownloaderRemovalResult",
     "DownloaderReadFailure",
@@ -117,6 +126,7 @@ __all__ = [
     "PlaybackReadResult",
     "PlaybackStatus",
     "SeedingSummary",
+    "RetainedTorrent",
     "RadarrHistoryRecord",
     "RadarrMovie",
     "ResourceNotFoundError",

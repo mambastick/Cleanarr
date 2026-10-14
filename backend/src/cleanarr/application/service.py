@@ -75,29 +75,33 @@ class CascadeDeletionService:
             )
 
     async def _confirm_source_absent(self, event: MediaDeletionEvent) -> ProcessingResult | None:
-        """Fail closed when Jellyfin still exposes the supposedly deleted item."""
+        """Fail closed unless Jellyfin verifies the source item is absent."""
 
         if self._jellyfin is None:
-            return None
+            return self._source_unverifiable(event, "Jellyfin is not configured; source absence cannot be verified.")
 
         try:
-            items = await self._jellyfin.list_items(include_types=[event.item_type.value])
-        except Exception as exc:  # noqa: BLE001
-            collector = ActionCollector(event)
-            collector.add(
-                "jellyfin",
-                "confirm_deletion",
-                ActionStatus.FAILED,
-                "Could not confirm that the item is absent from Jellyfin; cascade deletion was blocked.",
-                reason=FailureReason.DOWNSTREAM_ERROR,
-                error=str(exc),
+            items = await self._jellyfin.find_items(
+                ids=[event.item_id],
+                include_types=[event.item_type.value],
             )
-            result = collector.build()
-            return ProcessingResult(
-                event=result.event,
-                status=OverallStatus.PARTIAL_FAILURE,
-                actions=result.actions,
-                correlation_id=result.correlation_id,
+            if not any(self._matches_event(event, item) for item in items):
+                provider_ids = self._provider_ids(event)
+                if provider_ids:
+                    items = await self._jellyfin.find_items(
+                        provider_ids=provider_ids,
+                        include_types=[event.item_type.value],
+                    )
+                    if items and not any(self._matches_event(event, item) for item in items):
+                        return self._source_unverifiable(
+                            event,
+                            "Jellyfin returned provider lookup data that did not match the deletion event.",
+                        )
+        except Exception as exc:  # noqa: BLE001
+            return self._source_unverifiable(
+                event,
+                "Could not confirm that the item is absent from Jellyfin; cascade deletion was blocked.",
+                error=str(exc),
             )
 
         current_item = next((item for item in items if self._matches_event(event, item)), None)
@@ -118,6 +122,42 @@ class CascadeDeletionService:
         return ProcessingResult(
             event=result.event,
             status=OverallStatus.IGNORED,
+            actions=result.actions,
+            correlation_id=result.correlation_id,
+        )
+
+    @staticmethod
+    def _provider_ids(event: MediaDeletionEvent) -> tuple[str, ...]:
+        fingerprint = event.fingerprint
+        provider_ids: list[str] = []
+        if fingerprint.tvdb_id is not None:
+            provider_ids.append(f"tvdb.{fingerprint.tvdb_id}")
+        if fingerprint.tmdb_id is not None:
+            provider_ids.append(f"tmdb.{fingerprint.tmdb_id}")
+        if fingerprint.imdb_id:
+            provider_ids.append(f"imdb.{fingerprint.imdb_id.casefold()}")
+        return tuple(provider_ids)
+
+    @staticmethod
+    def _source_unverifiable(
+        event: MediaDeletionEvent,
+        message: str,
+        *,
+        error: str | None = None,
+    ) -> ProcessingResult:
+        collector = ActionCollector(event)
+        collector.add(
+            "jellyfin",
+            "confirm_deletion",
+            ActionStatus.FAILED,
+            message,
+            reason=FailureReason.SOURCE_UNVERIFIABLE,
+            **({"error": error} if error is not None else {}),
+        )
+        result = collector.build()
+        return ProcessingResult(
+            event=result.event,
+            status=OverallStatus.PARTIAL_FAILURE,
             actions=result.actions,
             correlation_id=result.correlation_id,
         )

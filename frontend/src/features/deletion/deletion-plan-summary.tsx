@@ -4,7 +4,7 @@ import type { DashboardAction } from "@/lib/dashboard"
 import type { ManualDeletePreviewResponse } from "@/lib/library"
 import type { DeleteDialogCopy } from "./delete-confirmation-dialog"
 import { isExecutablePlan, actionGroup, localizedActionLabel, localizedSystemLabel, type DeletionLanguage } from "./deletion-copy"
-import { actionEffect, actionFacts, actionLink, actionTarget, displayText, planCopy, planScope, providerLinks, type InspectionLink, type InspectionService } from "./plan-presentation"
+import { actionEffect, actionFacts, actionLink, actionTarget, blockingTorrents, displayText, planCopy, planScope, providerLinks, type InspectionLink, type InspectionService } from "./plan-presentation"
 
 export function DeletionPlanSummary({ preview, language, copy, services = [] }: { preview: ManualDeletePreviewResponse; language: DeletionLanguage; copy: DeleteDialogCopy; services?: InspectionService[] }) {
   const { plan } = preview
@@ -74,6 +74,7 @@ function ActionTarget({ action, preview, language, services }: { action: Dashboa
   const serviceLabel = profile?.toLowerCase().startsWith(system.toLowerCase()) ? profile : `${system}${profile ? ` · ${profile}` : ""}`
   const path = displayText(action.details.content_path ?? action.details.path ?? action.details.download_directory)
   const link = actionLink(action, plan, services)
+  const blockers = blockingTorrents(action)
   return <li className="min-w-0 space-y-2 p-3 sm:p-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <p className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">{serviceLabel}</p>
@@ -81,6 +82,10 @@ function ActionTarget({ action, preview, language, services }: { action: Dashboa
     </div>
     <p className="text-sm font-semibold leading-snug [overflow-wrap:anywhere]">{actionTarget(action, plan, language)}</p>
     <p className="text-sm leading-relaxed text-muted-foreground">{actionEffect(action, language)}</p>
+    {blockers.length ? <dl className="space-y-1 rounded-md bg-muted/50 px-2.5 py-2 text-xs">
+      <dt className="text-muted-foreground">{c.blockingTorrent}</dt>
+      {blockers.map((torrent, index) => <dd key={`${torrent.clientId}-${torrent.hash}-${index}`} className="[overflow-wrap:anywhere]">{torrent.name ?? torrent.hash} · {c.client} {torrent.clientId}</dd>)}
+    </dl> : null}
     {action.action === "delete_hash" && !displayText(action.details.torrent_name) ? <p className="text-xs text-muted-foreground">{c.noName}</p> : null}
     {path ? <dl className="space-y-1 rounded-md bg-muted/50 px-2.5 py-2 text-xs"><dt className="text-muted-foreground">{action.details.content_path ? c.dataPath : action.details.path ? c.mediaPath : c.downloadDirectory}</dt><dd className="font-mono [overflow-wrap:anywhere]">{path}</dd></dl> : action.action === "delete_hash" ? <p className="text-xs text-muted-foreground">{c.noPath}</p> : null}
     {link ? <InspectLink link={link} language={language} /> : null}

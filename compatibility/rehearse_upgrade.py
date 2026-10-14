@@ -20,7 +20,8 @@ V090_IMAGE = "ghcr.io/mambastick/cleanarr:0.9.0@sha256:c77bffd72ca49279b95a5c1b8
 V100_IMAGE = "ghcr.io/mambastick/cleanarr:1.0.0@sha256:fd039528eed3326ad0c16d8f36630a4dc5b67962e3c93d3687a768e206979dc5"
 V110_IMAGE = "ghcr.io/mambastick/cleanarr:1.1.0@sha256:67cadfe8caa795ec5c6a5d9daaf61df25260ffce1f54bf72199aec47f5e37336"
 V203_IMAGE = "ghcr.io/mambastick/cleanarr:2.0.3@sha256:0e174f17d163ba46edbe82b5875a07a94b0df330c30e0fb2ee3bec7e45ae8864"
-CANDIDATE_DATABASE_SCHEMA_VERSION = 6
+V204_IMAGE = "ghcr.io/mambastick/cleanarr:2.0.4@sha256:41b91d9e629974068ec6ca76e5dbcb6c346a4c79a2a8f90222a77aa67cc0ccec"
+CANDIDATE_DATABASE_SCHEMA_VERSION = 8
 CANDIDATE_CONFIG_SCHEMA_VERSION = 4
 AUTOMATIC_V3_BACKUP_NAME = "cleanarr.config-v3.backup.db"
 
@@ -184,6 +185,37 @@ SOURCES = (
             "jellyfin": [],
         },
     ),
+    SourceRelease(
+        version="2.0.4",
+        image=V204_IMAGE,
+        schema_version=6,
+        config={
+            "config_schema_version": 4,
+            "admin": {
+                "username": "upgrade-admin",
+                "password_salt": "upgrade-salt",
+                "password_hash": "upgrade-hash",
+            },
+            "general": {
+                "dry_run": False,
+                "log_level": "WARNING",
+                "webhook_shared_token": "upgrade-marker-2.0.4",
+                "ui_language": "ru",
+                "sso_mode": "password_only",
+                "sso_allowed_users": [],
+                "sso_allowed_groups": [],
+                "sso_group_claim": "groups",
+                "seeding_stop_policy": {},
+                "storage_warning_free_percent": 15.0,
+                "storage_critical_free_percent": 5.0,
+            },
+            "radarr": [],
+            "sonarr": [],
+            "seerr": [],
+            "downloaders": [],
+            "jellyfin": [],
+        },
+    ),
 )
 
 
@@ -264,6 +296,7 @@ def _seed_source_data(container_name: str, source: SourceRelease) -> None:
     }
     script = (
         "import os,sqlite3,sys;"
+        "from datetime import datetime,timezone;"
         "database='/config/cleanarr.db';"
         "connection=sqlite3.connect(database);"
         "connection.execute("
@@ -272,7 +305,7 @@ def _seed_source_data(container_name: str, source: SourceRelease) -> None:
         "(sys.argv[1],));"
         "connection.execute("
         '"INSERT INTO activity (processed_at, result_json) VALUES (?, ?)",'
-        "('2026-08-12T00:00:00+00:00',sys.argv[2]));"
+        "(datetime.now(timezone.utc).isoformat(),sys.argv[2]));"
         "connection.commit();"
         "connection.close();"
         "os.chmod(database,0o666)"
@@ -352,7 +385,13 @@ def _assert_candidate_state(
             "download_actions",
             "policy_evaluations",
             "user_accounts",
+            "retained_torrents",
         } <= tables
+        job_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(manual_delete_jobs)")
+        }
+        assert "error_code" in job_columns
         config = json.loads(
             connection.execute(
                 "SELECT config_json FROM config WHERE id = 1"

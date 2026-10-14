@@ -489,6 +489,67 @@ dry-run contracts.
 - Сохранить порядок релизов, ownership rules, dry-run по умолчанию и обязательные
   backend/frontend interaction gates. Это не заявление о выпуске.
 
+### Принятое дополнение по безопасности и удержанным раздачам — 2026-10-14
+
+Issues #42–#52 сохраняют порядок релизов и область destructive operations.
+Частичная ручная попытка с хотя бы одной выполненной мутацией становится
+terminal: исходная ошибка и действия сохраняются. Автоматический retry допустим
+только без выполненных мутаций. Отдельный hash-bound план оставшейся очистки
+после удаления Arr — будущая работа, а не replay исходного плана.
+
+До удаления данных полные приватные inventories всех настроенных клиентов
+должны изолировать цель. Общая или неизвестная область блокирует зависимую
+очистку Arr, Seerr и Jellyfin. История всех фильмов во всех Radarr также должна
+подтвердить исключительный hash. Конфликтующие identifiers и недоступная
+проверка источника Jellyfin приводят к fail-closed.
+
+Первый принятый этап #52 — durable retention record и отметка Downloads для
+keep/defer, сохранённые до зависимой очистки медиа. SQLite schema 7 хранит
+client/hash, исходный correlation, минимальную область медиа, policy и snapshot
+thresholds. Запись переживает очистку activity и restart, но не подтверждает
+ownership и не разрешает команды. Автоматическое удаление отложенной раздачи
+не входит в change: будущему reconciler нужны отдельное подтверждение, свежие
+safety evidence, bounded retries/recovery и собственный acceptance gate.
+
+Acceptance требует backend/frontend и существующие CI gates, protocol
+regressions всех четырёх adapters, заполненный upgrade последней stable schema 6
+с проверенным backup/restore и browser evidence EN/RU desktop/mobile light/dark.
+Это запись scope реализации, а не заявление о релизе или сертификации.
+
+Уточнение после ревью PR #53: обычный размер каталога не должен блокировать
+очистку. Jellyfin сохраняет точный ID lookup и возвращает полную pagination
+до существующего лимита 20 000 items для provider fallback. Ownership Radarr
+проверяется через полную историю по download ID во всех настроенных instances,
+без лимита 1 000 movies и запроса истории каждого фильма. Приватный assessment
+на один вызов исключает повторное полное чтение downloader inventories.
+Ограниченная известными путями неопределённость блокирует пересекающиеся цели;
+полностью неизвестная область по-прежнему даёт fail-closed. Inventory закрытой
+раздачи rTorrent может вывести консервативную область, но само удаление требует
+непустого проверенного base path. Доверенный маркер пути Arr остаётся внутренним
+для manual flow. Временные ошибки чтения и downstream/authentication ошибки
+загрузчика до любого записанного удаления сохраняют bounded retries со свежим preflight;
+safety blockers дают terminal `unsafe_plan`. Ordered migration 8
+хранит structured job error codes; обязательны upgrade с schemas 6/7 и
+backup/restore. Scope и release gates сохраняются.
+
+Дополнительное уточнение ревью PR #53: отрицательные routed ID Radarr остаются
+допустимыми; raw ID внешнего сервиса должны быть положительными. Jellyfin
+отменяет нестабильный provider pass и повторяет его один раз. Inventory rTorrent
+использует bounded multicall; неизвестная область соседней раздачи и закрытая
+цель получают отдельные EN/RU причины и понятные сведения для исправления.
+Magnet без metadata в qBittorrent допускает документированный unknown-size
+sentinel только со строгими доказательствами нулевого payload. Это regression
+fixes в рамках прежних acceptance gates и destructive scope.
+
+Уточнение live-results PR #53: каждый результат ручного выполнения проверяется;
+заблокированная `ignored`/skipped очистка не может сообщить успех. Зависимые
+заглушки загрузчика сохраняют исходную классификацию временной ошибки, а
+частичные выполненные удаления остаются terminal. rTorrent допускает стабильное
+изменение несвязанных раздач через одно bounded перечитывание inventory,
+сохраняющее fleet evidence и исходный путь цели. Общий барьер передаёт свежие
+доказательства всем adapters до мутаций; пересечения, изменившиеся цели
+и дальнейший churn дают fail-closed.
+
 ## Обязательный scope 1.0
 
 ### 1. Torrent-клиенты и маршрутизация

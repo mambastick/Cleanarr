@@ -247,6 +247,7 @@ class ManualDeleteJobResponse(BaseModel):
     preflight: ProcessingResultResponse
     result: ProcessingResultResponse | None = None
     error: str | None = None
+    error_code: str | None = None
 
 
 class ManualDeleteJobListResponse(BaseModel):

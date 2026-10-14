@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
@@ -10,6 +12,15 @@ from threading import Lock
 from cleanarr.application.users import LastAdministratorError, UserNotFoundError
 from cleanarr.domain.users import UserAccount, UserAuthSource, UserRole
 from cleanarr.infrastructure.database import migrate_database
+
+
+@contextmanager
+def _connect(db_path: Path) -> Iterator[sqlite3.Connection]:
+    """Open one short-lived connection and close it after its transaction."""
+
+    with closing(sqlite3.connect(db_path)) as connection:
+        with connection:
+            yield connection
 
 
 def _now() -> str:
@@ -33,7 +44,7 @@ class SqliteUserAccountStore:
         if not normalized:
             raise ValueError("Username cannot be empty.")
         now = _now()
-        with self._lock, sqlite3.connect(self._db_path) as connection:
+        with self._lock, _connect(self._db_path) as connection:
             connection.execute(
                 "INSERT INTO user_accounts(username_key,username,role,auth_source,created_at,last_seen_at,updated_at) "
                 "VALUES(?,?,?,?,?,?,?) ON CONFLICT(username_key) DO UPDATE SET "
@@ -55,7 +66,7 @@ class SqliteUserAccountStore:
         if not normalized:
             raise ValueError("Username cannot be empty.")
         now = _now()
-        with self._lock, sqlite3.connect(self._db_path) as connection:
+        with self._lock, _connect(self._db_path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
                 "SELECT 1 FROM user_accounts WHERE username_key=?", (_key(normalized),)
@@ -85,7 +96,7 @@ class SqliteUserAccountStore:
 
     def touch_user(self, username: str) -> UserAccount | None:
         now = _now()
-        with self._lock, sqlite3.connect(self._db_path) as connection:
+        with self._lock, _connect(self._db_path) as connection:
             cursor = connection.execute(
                 "UPDATE user_accounts SET last_seen_at=?,updated_at=? WHERE username_key=?",
                 (now, now, _key(username)),
@@ -101,19 +112,19 @@ class SqliteUserAccountStore:
         return _account(row)
 
     def get_role(self, username: str) -> UserRole | None:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             row = connection.execute(
                 "SELECT role FROM user_accounts WHERE username_key=?", (_key(username),)
             ).fetchone()
         return UserRole(str(row[0])) if row else None
 
     def has_administrator(self) -> bool:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             row = connection.execute("SELECT 1 FROM user_accounts WHERE role='admin' LIMIT 1").fetchone()
         return row is not None
 
     def list_users(self) -> tuple[UserAccount, ...]:
-        with sqlite3.connect(self._db_path) as connection:
+        with _connect(self._db_path) as connection:
             rows = connection.execute(
                 "SELECT username,role,auth_source,created_at,last_seen_at,updated_at FROM user_accounts "
                 "ORDER BY last_seen_at IS NULL,last_seen_at DESC,username_key"
@@ -122,7 +133,7 @@ class SqliteUserAccountStore:
 
     def update_role(self, username: str, role: UserRole) -> UserAccount:
         now = _now()
-        with self._lock, sqlite3.connect(self._db_path) as connection:
+        with self._lock, _connect(self._db_path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 "SELECT username,role FROM user_accounts WHERE username_key=?",

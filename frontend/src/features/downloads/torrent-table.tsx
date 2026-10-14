@@ -6,7 +6,7 @@ import { Progress } from "@/components/ui/progress"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import type { DownloadAction, DownloadItem } from "@/lib/downloads"
 import { cn } from "@/lib/utils"
-import { actionForItem, actionResultCopy, enumLabel, reasonLabel, type DownloadsCopy, type DownloadsLanguage } from "./downloads-copy"
+import { actionForItem, actionResultCopy, enumLabel, reasonLabel, retentionLabel, type DownloadsCopy, type DownloadsLanguage } from "./downloads-copy"
 import { bytes, duration, knownNumber } from "./downloads-format"
 import type { DownloadActionState } from "./torrent-card"
 
@@ -31,7 +31,7 @@ function TorrentControl({ item, text, language, actionStates, onControl, canMuta
     : status?.phase === "completed" ? actionResultCopy(text, status.status as never)
       : status?.phase === "retry" ? status.status === "reconcile_required" ? text.reconcile : status.status === "queued" || status.status === "running" ? text.inProgress : text.ambiguous
         : status?.phase === "conflict" ? text.conflict
-          : status?.phase === "failed" ? text.actionFailed
+          : status?.phase === "failed" ? status.code === "idempotency_key_unavailable" ? text.idempotencyUnavailable : text.actionFailed
             : null
 
   return (
@@ -74,6 +74,7 @@ export function TorrentTable({ items, language, text, actionStates, onControl, c
               <TableCell className="max-w-80 px-4 whitespace-normal">
                 <p className="line-clamp-2 font-medium leading-5">{item.display_name ?? text.nameUnavailable}</p>
                 <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">{item.info_hash}</p>
+                {item.retention ? <p className="mt-1"><Badge variant="outline" title={text.retentionHelp}>{retentionLabel(language, item.retention.policy)}</Badge></p> : null}
               </TableCell>
               <TableCell>
                 <p className="font-medium">{item.client_name}</p>

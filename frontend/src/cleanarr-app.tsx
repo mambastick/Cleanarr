@@ -15,7 +15,7 @@ import { inspectionServices } from "@/features/deletion/plan-presentation"
 import { buildConfirmedDeleteRequest, deleteSessionReducer, initialDeleteSession } from "@/features/deletion/delete-session"
 import { BatchDeleteConfirmationDialog } from "@/features/deletion/batch-delete-confirmation-dialog"
 import { batchChildRequests, batchDeleteSessionReducer, buildBatchRequest, initialBatchDeleteSession } from "@/features/deletion/batch-delete-session"
-import { DELETION_NOTICES, localizedDeletionError, submissionRecovery } from "@/features/deletion/deletion-copy"
+import { DELETE_SESSION_KEY_UNAVAILABLE_COPY, DELETION_NOTICES, localizedDeletionError, submissionRecovery } from "@/features/deletion/deletion-copy"
 import { JobsSheet } from "@/features/jobs/jobs-sheet"
 import { batchTransitionAnnouncement, isTerminalBatchStatus } from "@/features/jobs/batch-status"
 import { simulationBatchCompletionNotice, simulationJobCompletionNotice } from "@/features/jobs/simulation-outcome"
@@ -29,7 +29,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import type { AuthSessionPayload, AuthStatusPayload, SSOLoginPayload } from "@/lib/auth"
 import type { DashboardActivity, DashboardPayload, DashboardWebhookAttempt } from "@/lib/dashboard"
 import { getUiText, resolveUiLanguage, type UiLanguage, type UiTextMap } from "@/lib/i18n"
-import { createClientIdempotencyKey } from "@/lib/idempotency"
+import { ClientIdempotencyKeyError, createClientIdempotencyKey } from "@/lib/idempotency"
 import type { LibraryItem, ManualDeleteBatch, ManualDeleteBatchListResponse, ManualDeleteJob, ManualDeleteJobListResponse, ManualDeletePreviewResponse } from "@/lib/library"
 import type { ConnectionTestResponse, GeneralConfig, RuntimeConfigPayload } from "@/lib/runtime-config"
 import { buildServicePayload, DASHBOARD_NAME_TO_FAMILY, EMPTY_DRAFTS, getDownloaderLabel, getServiceEndpoint, getServiceTitle, getServices, isSetupStepConfigured, resolveActiveService, SERVICE_META, SETUP_STEPS, toDraft, type DownloaderKind, type ServiceDraft, type ServiceFamily, type ServiceModalState } from "@/lib/service-config"
@@ -98,6 +98,15 @@ function CleanArrApp() {
     [authStatus?.ui_language, config?.general.ui_language],
   )
   const uiText = useMemo(() => getUiText(uiLanguage), [uiLanguage])
+  const createDeleteSessionKey = useCallback(() => {
+    try {
+      return createClientIdempotencyKey()
+    } catch (error) {
+      if (!(error instanceof ClientIdempotencyKeyError)) throw error
+      toast.error(DELETE_SESSION_KEY_UNAVAILABLE_COPY[uiLanguage === "ru" ? "ru" : "en"])
+      return null
+    }
+  }, [uiLanguage])
   const runtimeMode: RuntimeMode = config != null
     ? config.general.dry_run ? "dry_run" : "live"
     : dashboard != null
@@ -618,8 +627,10 @@ function CleanArrApp() {
   const shellStorage = toShellStorage(storage.data, STORAGE_COPY[shellLanguage])
   const libraryCopy = LIBRARY_COPY[shellLanguage]
   const openDeletePreview = (target: LibraryDeleteTarget, trigger: HTMLElement) => {
+    const idempotencyKey = createDeleteSessionKey()
+    if (!idempotencyKey) return
     deleteReturnFocusRef.current = trigger
-    dispatchDeleteSession({ type: "open", target, displayName: getDeleteTargetLabel(target, uiText), idempotencyKey: createDeleteSessionKey() })
+    dispatchDeleteSession({ type: "open", target, displayName: getDeleteTargetLabel(target, uiText), idempotencyKey })
   }
   const openLibraryDeletePreview = (item: LibraryItem, trigger: HTMLElement) => {
     const target = libraryDeleteTargetFromItem(item)
@@ -639,8 +650,10 @@ function CleanArrApp() {
       }
       selected.push(candidate)
     }
+    const idempotencyKey = createDeleteSessionKey()
+    if (!idempotencyKey) return
     batchDeleteReturnFocusRef.current = trigger
-    dispatchBatchDeleteSession({ type: "open", items: selected, idempotencyKey: createDeleteSessionKey() })
+    dispatchBatchDeleteSession({ type: "open", items: selected, idempotencyKey })
   }
 
   return (
@@ -745,8 +758,10 @@ function CleanArrApp() {
                 onActiveCountChange={setDownloadsActiveCount}
                 onDelete={openDeletePreview}
                 onBatchPreview={(items, trigger) => {
+                  const idempotencyKey = createDeleteSessionKey()
+                  if (!idempotencyKey) return
                   batchDeleteReturnFocusRef.current = trigger
-                  dispatchBatchDeleteSession({ type: "open", items, idempotencyKey: createDeleteSessionKey() })
+                  dispatchBatchDeleteSession({ type: "open", items, idempotencyKey })
                 }}
               />
             </Suspense>
@@ -846,7 +861,8 @@ function CleanArrApp() {
           if (deleteSession.phase === "submission_failed" && deleteSession.recovery === "resend_exact") {
             void executeDelete()
           } else if (deleteSession.phase === "submission_failed" && deleteSession.recovery === "rotate_session" && deleteSession.target && deleteSession.displayName) {
-            dispatchDeleteSession({ type: "open", target: deleteSession.target, displayName: deleteSession.displayName, idempotencyKey: createDeleteSessionKey() })
+            const idempotencyKey = createDeleteSessionKey()
+            if (idempotencyKey) dispatchDeleteSession({ type: "open", target: deleteSession.target, displayName: deleteSession.displayName, idempotencyKey })
           } else {
             dispatchDeleteSession({ type: "retry_preflight" })
           }
@@ -866,7 +882,10 @@ function CleanArrApp() {
         onConfirm={() => void executeBatchDelete()}
         onRetry={() => {
           if (batchDeleteSession.phase === "submission_failed" && batchDeleteSession.recovery === "resend_exact") void executeBatchDelete()
-          else if (batchDeleteSession.phase === "submission_failed" && batchDeleteSession.recovery === "rotate_session") dispatchBatchDeleteSession({ type: "open", items: batchDeleteSession.items, idempotencyKey: createDeleteSessionKey() })
+          else if (batchDeleteSession.phase === "submission_failed" && batchDeleteSession.recovery === "rotate_session") {
+            const idempotencyKey = createDeleteSessionKey()
+            if (idempotencyKey) dispatchBatchDeleteSession({ type: "open", items: batchDeleteSession.items, idempotencyKey })
+          }
           else dispatchBatchDeleteSession({ type: "retry_preflight" })
         }}
         onClose={() => {
@@ -888,8 +907,6 @@ function CleanArrApp() {
 // ─── Small UI components ──────────────────────────────────────────────────────
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
-
-const createDeleteSessionKey = createClientIdempotencyKey
 
 function getDeleteTargetLabel(target: LibraryDeleteTarget, text: UiTextMap): string {
   if (target.kind === "movie" || target.kind === "jellyfin_movie") return target.movie_title

@@ -371,3 +371,53 @@ def test_populated_v5_upgrades_to_user_registry_and_backup_restores(tmp_path: Pa
         assert restored.execute("PRAGMA user_version").fetchone() == (5,)
         assert restored.execute("SELECT config_json FROM config").fetchone() == ('{"general":{"dry_run":true}}',)
         assert "user_accounts" not in _table_names(restored_path)
+
+
+def test_v6_upgrade_adds_retention_idempotently_and_backup_stays_v6(tmp_path: Path) -> None:
+    db_path = tmp_path / "v6.db"
+    backup_path = tmp_path / "v6.backup.db"
+    restored_path = tmp_path / "v6.restored.db"
+    with sqlite3.connect(db_path) as connection:
+        for migration in MIGRATIONS[:6]:
+            for statement in migration.statements:
+                connection.execute(statement)
+        connection.execute("PRAGMA user_version = 6")
+        connection.execute("INSERT INTO config(id,config_json) VALUES(1,?)", ('{"general":{"dry_run":true}}',))
+        connection.execute(
+            "INSERT INTO activity(processed_at,result_json) VALUES(?,?)",
+            ("2026-10-14T00:00:00Z", '{"name":"preserved"}'),
+        )
+        connection.execute(
+            "INSERT INTO user_accounts(username_key,username,role,auth_source,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+            ("fixture-admin", "fixture-admin", "admin", "local", "2026-10-14", "2026-10-14"),
+        )
+        connection.commit()
+    with sqlite3.connect(db_path) as source, sqlite3.connect(backup_path) as backup:
+        source.backup(backup)
+
+    assert migrate_database(db_path) == LATEST_SCHEMA_VERSION
+    assert migrate_database(db_path) == LATEST_SCHEMA_VERSION
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone() == (LATEST_SCHEMA_VERSION,)
+        assert connection.execute("SELECT config_json FROM config").fetchone() == ('{"general":{"dry_run":true}}',)
+        assert connection.execute("SELECT result_json FROM activity").fetchone() == ('{"name":"preserved"}',)
+        assert connection.execute("SELECT role FROM user_accounts").fetchone() == ("admin",)
+        assert {
+            "client_id",
+            "info_hash",
+            "policy",
+            "correlation_id",
+            "provider_ids_json",
+            "item_scope",
+            "retained_at",
+        } <= {row[1] for row in connection.execute("PRAGMA table_info(retained_torrents)").fetchall()}
+
+    with sqlite3.connect(backup_path) as backup, sqlite3.connect(restored_path) as restored:
+        backup.backup(restored)
+    with sqlite3.connect(restored_path) as restored:
+        assert restored.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        assert restored.execute("PRAGMA user_version").fetchone() == (6,)
+        assert restored.execute("SELECT config_json FROM config").fetchone() == ('{"general":{"dry_run":true}}',)
+        assert restored.execute("SELECT result_json FROM activity").fetchone() == ('{"name":"preserved"}',)
+        assert restored.execute("SELECT role FROM user_accounts").fetchone() == ("admin",)
+        assert "retained_torrents" not in _table_names(restored_path)

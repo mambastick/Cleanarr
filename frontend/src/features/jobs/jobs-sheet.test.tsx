@@ -73,3 +73,15 @@ it("localizes the completed dry-run outcome in Russian", async () => {
   view.rerender(<JobsSheet jobs={[simulatedJob]} title="Фоновые задачи" activeLabel="активных" dismissLabel="Скрыть" closeLabel="Закрыть" progressLabel="Прогресс" language="ru" announcement={null} announcementTone="polite" onDismiss={() => {}} />)
   expect(screen.getAllByText("Симуляция завершена — изменения не внесены.")).toHaveLength(2)
 })
+
+it("explains blocked partial replay in both languages without exposing raw errors", async () => {
+  const user = userEvent.setup()
+  const view = render(<JobsSheet jobs={jobs} title="Background tasks" activeLabel="active" dismissLabel="Dismiss" closeLabel="Close jobs" progressLabel="Progress" language="en" announcement={null} announcementTone="polite" onDismiss={() => {}} />)
+  await user.click(screen.getByRole("button", { name: "Background tasks" }))
+  const partial = { ...jobs[0], status: "failed" as const, phase: "failed" as const, error_code: "partial_result_not_retryable", error: "PRIVATE DOWNSTREAM ERROR" }
+  view.rerender(<JobsSheet jobs={[partial]} title="Background tasks" activeLabel="active" dismissLabel="Dismiss" closeLabel="Close jobs" progressLabel="Progress" language="en" announcement={null} announcementTone="polite" onDismiss={() => {}} />)
+  expect(screen.getByText(/Some cleanup steps completed. Automatic retry is blocked/)).toBeInTheDocument()
+  view.rerender(<JobsSheet jobs={[partial]} title="Фоновые задачи" activeLabel="активных" dismissLabel="Скрыть" closeLabel="Закрыть" progressLabel="Прогресс" language="ru" announcement={null} announcementTone="polite" onDismiss={() => {}} />)
+  expect(screen.getByText(/Часть очистки выполнена. Автоматический повтор заблокирован/)).toBeInTheDocument()
+  expect(screen.queryByText("PRIVATE DOWNSTREAM ERROR")).not.toBeInTheDocument()
+})

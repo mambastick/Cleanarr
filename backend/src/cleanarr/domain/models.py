@@ -6,8 +6,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
+
+from .downloads import ContentScopeBlocker
 
 
 class ItemType(StrEnum):
@@ -43,6 +45,11 @@ class FailureReason(StrEnum):
 
     AMBIGUOUS_MATCH = "ambiguous_match"
     NO_MATCH = "no_match"
+    CONFLICTING_IDENTIFIERS = "conflicting_identifiers"
+    SHARED_PATH = "shared_path"
+    SIBLING_SCOPE_UNKNOWN = "sibling_scope_unknown"
+    TORRENT_CLOSED = "torrent_closed"
+    OWNERSHIP_UNVERIFIABLE = "ownership_unverifiable"
     PACK_TORRENT = "pack_torrent"
     SHARED_FILE = "shared_file"
     NO_PARTIAL_REQUEST_CLEANUP = "no_partial_request_cleanup"
@@ -51,6 +58,7 @@ class FailureReason(StrEnum):
     AUTHENTICATION_FAILED = "authentication_failed"
     UNSUPPORTED_EVENT = "unsupported_event"
     SOURCE_STILL_PRESENT = "source_still_present"
+    SOURCE_UNVERIFIABLE = "source_unverifiable"
     SEEDING_POLICY = "seeding_policy"
 
 
@@ -62,6 +70,7 @@ class MediaFingerprint:
     tvdb_id: int | None = None
     imdb_id: str | None = None
     path: str | None = None
+    path_namespace: Literal["arr"] | None = None
 
     @property
     def normalized_path(self) -> str | None:
@@ -285,7 +294,7 @@ class DownloaderRemovalResult:
     """Download-client removal outcome and observed presentation metadata for one hash."""
 
     hash_value: str
-    existed: bool
+    existed: bool | None
     client_id: str | None = None
     client_name: str | None = None
     client_kind: str | None = None
@@ -298,3 +307,4 @@ class DownloaderRemovalResult:
     content_path: str | None = None
     download_directory: str | None = None
     delete_files: bool | None = None
+    blocking_torrents: tuple[ContentScopeBlocker, ...] = ()

@@ -108,6 +108,7 @@ def create_downloads_router() -> APIRouter:
         policy = service.repository.latest_policy_evaluations()
         page_keys = {(item.client_id, item.info_hash) for item in page}
         actions = service.repository.latest_action_projections(page_keys)
+        retention = service.retention.latest_retention_projections(page_keys) if service.retention else {}
         next_cursor = encode_cursor(filters, (page[-1].client_id, page[-1].info_hash)) if len(items) > limit else None
         active = sum(
             item.state not in {TorrentState.STOPPED, TorrentState.ERROR, TorrentState.UNKNOWN}
@@ -119,6 +120,7 @@ def create_downloads_router() -> APIRouter:
                     item,
                     policy.get((item.client_id, item.info_hash)),
                     actions.get((item.client_id, item.info_hash)),
+                    retention.get((item.client_id, item.info_hash)),
                 )
                 for item in page
             ],
@@ -144,12 +146,13 @@ def create_downloads_router() -> APIRouter:
         item = _service(request).repository.get_snapshot(client_id, info_hash.upper())
         if item is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="download_not_found")
+        key = (client_id, info_hash.upper())
+        service = _service(request)
         return DownloadItemResponse.from_domain(
             item,
-            _service(request).repository.latest_policy_evaluations().get((client_id, info_hash.upper())),
-            _service(request)
-            .repository.latest_action_projections({(client_id, info_hash.upper())})
-            .get((client_id, info_hash.upper())),
+            service.repository.latest_policy_evaluations().get(key),
+            service.repository.latest_action_projections({key}).get(key),
+            service.retention.latest_retention_projections({key}).get(key) if service.retention else None,
         )
 
     @router.post("/refresh", response_model=DownloadRefreshResponse, dependencies=[Depends(_require_admin_token)])
@@ -180,6 +183,13 @@ def create_downloads_router() -> APIRouter:
         actions = service.repository.latest_action_projections(
             {(item.client_id, item.info_hash) for item in response_items}
         )
+        retention = (
+            service.retention.latest_retention_projections(
+                {(item.client_id, item.info_hash) for item in response_items}
+            )
+            if service.retention
+            else {}
+        )
         active = sum(
             item.state not in {TorrentState.STOPPED, TorrentState.ERROR, TorrentState.UNKNOWN} for item in items
         )
@@ -189,6 +199,7 @@ def create_downloads_router() -> APIRouter:
                     item,
                     policy.get((item.client_id, item.info_hash)),
                     actions.get((item.client_id, item.info_hash)),
+                    retention.get((item.client_id, item.info_hash)),
                 )
                 for item in response_items
             ],

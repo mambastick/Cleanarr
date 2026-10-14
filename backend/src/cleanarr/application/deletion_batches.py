@@ -18,6 +18,8 @@ from cleanarr.application.deletion_jobs import (
     DeletionPreviewer,
     ManualDeleteResolver,
     ManualDeleteRunner,
+    _execution_result_block_code,
+    _preflight_block_code,
     plan_hash,
 )
 from cleanarr.application.deletion_models import (
@@ -121,8 +123,8 @@ class ManualDeletionBatchService:
                 await asyncio.to_thread(self._repository.initialize)
                 loaded = await asyncio.to_thread(self._repository.load_batches)
                 self._batches = {batch.id: batch for batch in loaded}
-                self._recover_interrupted()
-                self._prune_history()
+                await self._recover_interrupted()
+                await self._prune_history()
                 self._initialized = True
             if self._worker_task is None or self._worker_task.done():
                 self._worker_task = asyncio.create_task(self._worker_loop(), name="cleanarr-manual-batch-worker")
@@ -187,6 +189,8 @@ class ManualDeletionBatchService:
             changed_code = (
                 "library_item_changed"
                 if any(child.blocked_code == "library_item_changed" for child in preview.children)
+                else "preflight_failed"
+                if any(child.blocked_code == "preflight_failed" for child in preview.children)
                 else "batch_plan_changed"
             )
             raise BatchPlanChangedError(
@@ -216,11 +220,11 @@ class ManualDeletionBatchService:
             return self._to_response(existing)
 
         self._batches[batch.id] = batch
-        self._prune_history()
+        await self._prune_history()
         if any(child.status is BatchChildStatus.QUEUED for child in batch.children):
             self._schedule(batch)
         else:
-            self._finalize(batch)
+            await self._finalize(batch)
         return self._to_response(batch)
 
     def get(self, batch_id: UUID) -> ManualDeleteBatchResponse:
@@ -355,7 +359,7 @@ class ManualDeletionBatchService:
             except Exception:  # noqa: BLE001 - do not let one malformed parent kill the worker
                 _logger.warning("Batch worker isolated an unexpected parent failure without logging downstream details")
                 if batch is not None:
-                    self._fail_unexpected_batch(batch)
+                    await self._fail_unexpected_batch(batch)
             finally:
                 self._queue.task_done()
 
@@ -363,14 +367,14 @@ class ManualDeletionBatchService:
         batch.status = ManualDeleteBatchStatus.RUNNING
         batch.started_at = batch.started_at or datetime.now(UTC)
         batch.message = "Executing safe child plans sequentially."
-        self._repository.save_batch(batch)
+        await asyncio.to_thread(self._repository.save_batch, batch)
         for child in batch.children:
             if child.status is not BatchChildStatus.QUEUED:
                 continue
             child.status = BatchChildStatus.RUNNING
             child.started_at = datetime.now(UTC)
             child.message = "Refreshing the confirmed child plan before execution."
-            self._repository.save_batch(batch)
+            await asyncio.to_thread(self._repository.save_batch, batch)
             try:
                 async with self._execution_lock:
                     fresh, verified_event = await self._resolve_preview_child(child.request, child.mutation_identity)
@@ -387,7 +391,7 @@ class ManualDeletionBatchService:
                             else "The child plan changed or is no longer safe; no mutation was made."
                         )
                         child.completed_at = datetime.now(UTC)
-                        self._repository.save_batch(batch)
+                        await asyncio.to_thread(self._repository.save_batch, batch)
                         continue
                     result = await self._runner(child.request, verified_event, ignore_progress)
             except asyncio.CancelledError:
@@ -408,23 +412,31 @@ class ManualDeletionBatchService:
             else:
                 child.result = with_display_name(result, child.display_name)
                 child.completed_at = datetime.now(UTC)
-                if result.status is OverallStatus.PARTIAL_FAILURE:
+                execution_code = _execution_result_block_code(result)
+                if result.status is OverallStatus.PARTIAL_FAILURE and (
+                    execution_code != "unsafe_result"
+                    or any(action.status is ActionStatus.DELETED for action in result.actions)
+                ):
                     child.status = BatchChildStatus.FAILED
                     child.error_code = "partial_result"
                     child.error_message = "The child reported a partial downstream outcome."
                     child.message = "The child was only partially completed; later safe children will continue."
-                elif plan_blocked_code(result) is not None:
+                elif execution_code is not None:
                     child.status = BatchChildStatus.FAILED
-                    child.error_code = "unsafe_result"
-                    child.error_message = "The child reported a safety-attention outcome."
+                    child.error_code = execution_code
+                    child.error_message = (
+                        "The child reported a safety-attention outcome."
+                        if execution_code == "unsafe_result"
+                        else "The child reported a downstream execution failure."
+                    )
                     child.message = "The child was not treated as completed; later safe children will continue."
                 else:
                     child.status = BatchChildStatus.COMPLETED
                     child.message = "Child deletion completed."
-            self._repository.save_batch(batch)
-        self._finalize(batch)
+            await asyncio.to_thread(self._repository.save_batch, batch)
+        await self._finalize(batch)
 
-    def _fail_unexpected_batch(self, batch: DeletionBatchRecord) -> None:
+    async def _fail_unexpected_batch(self, batch: DeletionBatchRecord) -> None:
         for child in batch.children:
             if child.status is BatchChildStatus.RUNNING:
                 child.status = BatchChildStatus.FAILED
@@ -442,11 +454,11 @@ class ManualDeletionBatchService:
         batch.error_message = "The batch worker stopped unexpectedly."
         batch.completed_at = datetime.now(UTC)
         try:
-            self._repository.save_batch(batch)
+            await asyncio.to_thread(self._repository.save_batch, batch)
         except Exception:  # noqa: BLE001 - cannot safely recover a failed SQLite write in this process
             _logger.warning("Could not persist isolated batch-worker failure")
 
-    def _finalize(self, batch: DeletionBatchRecord) -> None:
+    async def _finalize(self, batch: DeletionBatchRecord) -> None:
         completed = sum(child.status is BatchChildStatus.COMPLETED for child in batch.children)
         terminal = all(child.status in self._CHILD_TERMINAL for child in batch.children)
         if not terminal:
@@ -461,15 +473,15 @@ class ManualDeletionBatchService:
             batch.status = ManualDeleteBatchStatus.FAILED
             batch.message = "No child deletion completed safely."
         batch.completed_at = datetime.now(UTC)
-        self._repository.save_batch(batch)
-        self._prune_history()
+        await asyncio.to_thread(self._repository.save_batch, batch)
+        await self._prune_history()
 
     def _schedule(self, batch: DeletionBatchRecord) -> None:
         if batch.id not in self._scheduled:
             self._scheduled.add(batch.id)
             self._queue.put_nowait(batch.id)
 
-    def _recover_interrupted(self) -> None:
+    async def _recover_interrupted(self) -> None:
         for batch in list(self._batches.values()):
             changed = False
             for child in batch.children:
@@ -489,17 +501,17 @@ class ManualDeletionBatchService:
                 batch.message = "Process restart detected; untouched queued children will resume."
                 changed = True
             if changed:
-                self._repository.save_batch(batch)
+                await asyncio.to_thread(self._repository.save_batch, batch)
             if batch.status in self._ACTIVE:
-                self._finalize(batch)
+                await self._finalize(batch)
 
-    def _prune_history(self, *, reserve: int = 0) -> None:
+    async def _prune_history(self, *, reserve: int = 0) -> None:
         terminal = sorted(
             (batch for batch in self._batches.values() if batch.status not in self._ACTIVE),
             key=lambda batch: (batch.created_at, str(batch.id)),
         )
         for batch in terminal[: max(0, len(terminal) - self._history_limit + reserve)]:
-            self._repository.delete_batch(batch.id)
+            await asyncio.to_thread(self._repository.delete_batch, batch.id)
             self._batches.pop(batch.id, None)
 
     @staticmethod
@@ -740,6 +752,9 @@ def blocked_artifact(child: ManualDeleteBatchChildPreviewResponse) -> str:
 
 
 def plan_blocked_code(plan: ProcessingResultResponse) -> str | None:
+    preflight_code = _preflight_block_code(plan)
+    if preflight_code is not None:
+        return preflight_code
     if plan.status in {OverallStatus.PARTIAL_FAILURE, OverallStatus.IGNORED}:
         return "unsafe_plan"
     if any(

@@ -451,6 +451,7 @@ export interface ManualDeleteJob {
   preflight: ManualDeleteResponse
   result: ManualDeleteResponse | null
   error: string | null
+  error_code?: string | null
 }
 
 export interface ManualDeleteJobListResponse {

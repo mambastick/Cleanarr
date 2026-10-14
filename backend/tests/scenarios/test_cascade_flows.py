@@ -23,7 +23,13 @@ from cleanarr.domain import (
     SonarrHistoryRecord,
     SonarrSeries,
 )
-from tests.fakes import FakeDownloaderClient, FakeRadarrClient, FakeSeerrClient, FakeSonarrClient
+from tests.fakes import (
+    FakeDownloaderClient,
+    FakeJellyfinLookupClient,
+    FakeRadarrClient,
+    FakeSeerrClient,
+    FakeSonarrClient,
+)
 
 
 def build_service(
@@ -42,7 +48,7 @@ def build_service(
         seerr=seerr or FakeSeerrClient(media=[], requests=[], issues=[]),
         downloader=downloader or FakeDownloaderClient(existing_hashes=set()),
     )
-    return CascadeDeletionService(factory)
+    return CascadeDeletionService(factory, jellyfin=FakeJellyfinLookupClient())
 
 
 @pytest.mark.asyncio
