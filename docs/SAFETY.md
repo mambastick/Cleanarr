@@ -83,15 +83,24 @@ inspect remote inodes or resolve different bind-mount/symlink aliases. Configure
 clients with a consistent path namespace; unresolved physical aliases must be
 kept outside mutation-enabled operation. Hardlinks can retain physical bytes,
 so no reclaimed-space guarantee is made. Windows/UNC and malformed paths are
-unknown. rTorrent reads inventory through one `d.multicall2` plus
-`directory.default`, with validated rows and the existing 20,000-scope bound.
+unknown. rTorrent reads `d.multicall2` and `download_list` with explicit target
+`""` and view `main`, plus `directory.default`, within the existing 20,000-scope
+bound. Both normalized hash sets must agree, including every sibling; invalid
+IDs, duplicate IDs or mismatches fail closed. A base path equal to the default
+root is retained as a conservative uncertain envelope. Membership is checked again
+before removal. A valid absolute base path outside the default root remains an
+exact inventory scope: it blocks overlapping targets across the fleet, while
+unrelated paths remain eligible. A malformed row with a readable hash and
+bounded path is retained as uncertain evidence. A row with no recoverable
+identity/path, or an unreadable/oversized response, makes inventory unverifiable.
 Closed rTorrent inventory may derive a conservative scope from its directory,
 name and multi-file flag. A closed target reports `torrent_closed`: open or
 resume it in rTorrent, then refresh the preview. Actual data removal still
 requires a
 nonempty base path strictly below its live
 `directory.default` root; root/no-subdirectory and paths outside that root are
-blocked rather than recursively removed by a directory fallback.
+blocked for that rTorrent target rather than recursively removed by a directory
+fallback. They do not invalidate an otherwise complete outside-root inventory.
 
 ## Preflight and mutation order
 
@@ -130,6 +139,11 @@ Torrent removal is attempted before dependent Arr, Seerr, or Jellyfin removal.
 A torrent failure blocks those dependent mutations so that ownership evidence
 remains available for a safe retry. Successful earlier actions and the
 remaining retry state are persisted in SQLite.
+
+A preflight containing an already `DELETED` action is invalid. A real execution
+result is classified separately: successful applied deletions complete their
+batch child; unsafe evidence remains failed, and partial applied outcomes are
+recorded without replay.
 
 ## Repetition and concurrency
 

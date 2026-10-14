@@ -1299,11 +1299,9 @@ class RTorrentClient:
         if not normalized:
             return []
 
-        torrent_ids = await self._rpc("download_list")
-        listing_valid = isinstance(torrent_ids, (list, tuple))
-        torrent_ids = torrent_ids if listing_valid else []
-        if listing_valid and any(not isinstance(torrent_id, str) for torrent_id in torrent_ids):
-            listing_valid = False
+        torrent_ids = _rtorrent_inventory_hashes(await self._rpc("download_list", "", "main"))
+        listing_valid = torrent_ids is not None
+        torrent_ids = torrent_ids or ()
         if not listing_valid:
             return [
                 self._result(
@@ -1323,6 +1321,18 @@ class RTorrentClient:
                 normalized,
                 known_existing={self._system: tuple(existing)},
             )
+        if delete_files and assessment is not None:
+            snapshot_hashes = {value for client_id, value in assessment.observed if client_id == safety_client_id}
+            if not assessment.complete or set(torrent_ids) != snapshot_hashes:
+                return [
+                    self._result(
+                        hash_value,
+                        existed=True if hash_value in existing else None,
+                        skip_reason="ownership_unverifiable",
+                        delete_files=False,
+                    )
+                    for hash_value in normalized
+                ]
         statuses: dict[str, TorrentSeedingStatus] = {}
         decisions: dict[str, str | None] = {}
         metadata: dict[str, tuple[str | None, str | None]] = {}
@@ -1376,89 +1386,62 @@ class RTorrentClient:
         ]
 
     async def list_content_inventory(self) -> DownloaderContentInventory:
-        """Read every rTorrent content scope in one bounded multicall."""
+        """Read bounded scopes and verify that both explicit main snapshots agree."""
 
         try:
-            default_root, raw_rows = await asyncio.gather(
+            default_root, raw_rows, raw_ids = await asyncio.gather(
                 self._rpc("directory.default"),
                 self._rpc(
                     "d.multicall2",
                     "",
-                    "default",
+                    "main",
                     "d.hash=",
                     "d.base_path=",
                     "d.directory=",
                     "d.name=",
                     "d.is_multi_file=",
                 ),
+                self._rpc("download_list", "", "main"),
             )
         except (AuthenticationError, ExternalServiceError):
             return DownloaderContentInventory(
                 failures=(DownloaderContentInventoryFailure("invalid_content_inventory"),)
             )
         root = validate_scope_path(default_root, minimum_parts=2)
-        if root is None:
+        if root is None or not isinstance(raw_rows, (list, tuple)):
             return DownloaderContentInventory(
                 failures=(DownloaderContentInventoryFailure("invalid_content_inventory"),)
             )
-        if not isinstance(raw_rows, (list, tuple)):
-            return DownloaderContentInventory(failures=(DownloaderContentInventoryFailure("malformed_content_scope"),))
         if len(raw_rows) > MAX_CONTENT_INVENTORY_SCOPES:
             return DownloaderContentInventory(failures=(DownloaderContentInventoryFailure("inventory_limit_exceeded"),))
+        listed_hashes = _rtorrent_inventory_hashes(raw_ids)
+        if listed_hashes is None:
+            return DownloaderContentInventory(
+                failures=(DownloaderContentInventoryFailure("invalid_content_inventory"),)
+            )
 
         scopes: list[DownloaderContentScope] = []
         seen_hashes: set[str] = set()
         for row in raw_rows:
-            if not isinstance(row, (list, tuple)) or len(row) != 5:
+            scope = _rtorrent_inventory_scope(row, default_root=root)
+            if scope is None:
+                # An unidentifiable/unbounded sibling cannot be silently dropped.
                 return DownloaderContentInventory(
-                    failures=(DownloaderContentInventoryFailure("malformed_content_scope"),)
+                    failures=(DownloaderContentInventoryFailure("unbounded_content_scope"),)
                 )
-            raw_hash, base_path, directory, name, is_multi_file = row
-            info_hash = _normalize_single_hash(raw_hash) if isinstance(raw_hash, str) else ""
-            torrent_name = _safe_text(name)
-            if not info_hash or info_hash in seen_hashes:
+            if scope.info_hash in seen_hashes:
                 return DownloaderContentInventory(
                     failures=(DownloaderContentInventoryFailure("invalid_content_scope"),)
                 )
-            seen_hashes.add(info_hash)
-            path = _rtorrent_child_path(base_path, root)
-            if path is not None:
-                scopes.append(DownloaderContentScope(info_hash=info_hash, paths=(path,), torrent_name=torrent_name))
-                continue
-            if base_path not in (None, ""):
-                return DownloaderContentInventory(
-                    failures=(DownloaderContentInventoryFailure("unbounded_content_scope"),)
-                )
-            if isinstance(is_multi_file, bool):
-                is_multi = is_multi_file
-            elif isinstance(is_multi_file, int) and is_multi_file in {0, 1}:
-                is_multi = bool(is_multi_file)
-            else:
-                return DownloaderContentInventory(
-                    failures=(DownloaderContentInventoryFailure("unbounded_content_scope"),)
-                )
-            if is_multi:
-                derived_path = _rtorrent_child_path(directory, root)
-            else:
-                derived_path = _rtorrent_child_path(join_scope_path(directory, name, minimum_root_parts=2), root)
-            if derived_path is None:
-                return DownloaderContentInventory(
-                    failures=(DownloaderContentInventoryFailure("unbounded_content_scope"),)
-                )
-            scopes.append(
-                DownloaderContentScope(
-                    info_hash=info_hash,
-                    paths=(derived_path,),
-                    uncertain=True,
-                    uncertainty_code="torrent_closed",
-                    torrent_name=torrent_name,
-                )
-            )
+            seen_hashes.add(scope.info_hash)
+            scopes.append(scope)
+        if seen_hashes != set(listed_hashes):
+            return DownloaderContentInventory(failures=(DownloaderContentInventoryFailure("inventory_hash_mismatch"),))
         return DownloaderContentInventory(scopes=tuple(scopes))
 
     async def list_torrents(self) -> DownloaderListing:
-        raw_ids = await self._rpc("download_list")
-        torrent_ids = raw_ids if isinstance(raw_ids, (list, tuple)) else None
+        raw_ids = await self._rpc("download_list", "", "main")
+        torrent_ids = _rtorrent_inventory_hashes(raw_ids)
         if torrent_ids is None:
             return DownloaderListing(failures=(_local_failure(self, "invalid_torrent_list"),))
         semaphore = asyncio.Semaphore(4)
@@ -2089,6 +2072,63 @@ def _safe_content_path(value: object) -> str | None:
     if not any(path.is_absolute() and ".." not in path.parts and len(path.parts) >= 3 for path in paths):
         return None
     return text
+
+
+def _rtorrent_inventory_hashes(value: object) -> tuple[str, ...] | None:
+    """Validate every identity, including siblings outside a requested target set."""
+
+    if not isinstance(value, (list, tuple)) or len(value) > MAX_CONTENT_INVENTORY_SCOPES:
+        return None
+    hashes = tuple(_normalize_single_hash(item) if isinstance(item, str) else "" for item in value)
+    return hashes if all(hashes) and len(set(hashes)) == len(hashes) else None
+
+
+def _rtorrent_inventory_scope(row: object, *, default_root: str) -> DownloaderContentScope | None:
+    """Recover bounded evidence without confusing inventory with rm authorization."""
+
+    if not isinstance(row, (list, tuple)) or len(row) < 2:
+        return None
+    info_hash = _normalize_single_hash(row[0]) if isinstance(row[0], str) else ""
+    if not info_hash:
+        return None
+    base_path = validate_scope_path(row[1], minimum_parts=2)
+    name = _safe_text(row[3]) if len(row) > 3 else None
+    if base_path is not None:
+        return DownloaderContentScope(
+            info_hash=info_hash,
+            paths=(base_path,),
+            torrent_name=name,
+            uncertain=len(row) != 5 or base_path == default_root,
+            uncertainty_code="malformed_content_scope"
+            if len(row) != 5
+            else "ownership_unverifiable"
+            if base_path == default_root
+            else None,
+        )
+    if row[1] not in (None, ""):
+        return None
+    directory = validate_scope_path(row[2], minimum_parts=2) if len(row) > 2 else None
+    if directory is None:
+        return None
+    is_multi = row[4] if len(row) == 5 else None
+    if isinstance(is_multi, (int, bool)) and is_multi in (0, 1):
+        derived = directory if is_multi else join_scope_path(directory, row[3], minimum_root_parts=2)
+        if derived is not None:
+            return DownloaderContentScope(
+                info_hash=info_hash,
+                paths=(derived,),
+                uncertain=True,
+                uncertainty_code="torrent_closed",
+                torrent_name=name,
+            )
+    # The reported per-torrent directory bounds an unreadable file-shape field.
+    return DownloaderContentScope(
+        info_hash=info_hash,
+        paths=(directory,),
+        uncertain=True,
+        uncertainty_code="malformed_content_scope",
+        torrent_name=name,
+    )
 
 
 def _rtorrent_child_path(value: object, root: str | None) -> str | None:

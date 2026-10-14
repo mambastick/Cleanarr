@@ -14,9 +14,14 @@ import pytest
 
 from cleanarr.application.deletion_batches import ManualDeletionBatchService
 from cleanarr.application.deletion_jobs import (
+    DeletionPreflightError,
     ManualDeletionJobService,
+    _execution_result_block_code,
     _OrderedJobWriter,
+    _preflight_block_code,
     _preflight_failure_code,
+    plan_hash,
+    validate_plan_confirmation,
 )
 from cleanarr.application.deletion_models import (
     ActionResultResponse,
@@ -303,7 +308,25 @@ def test_mixed_transient_and_safety_preflight_prefers_unsafe_plan() -> None:
         reason=None,
         details={},
     )
-    assert _preflight_failure_code(_plan(event).model_copy(update={"actions": (deleted,)})) == "unsafe_plan"
+    assert _preflight_block_code(_plan(event).model_copy(update={"actions": (deleted,)})) == "unsafe_plan"
+    assert _execution_result_block_code(_plan(event).model_copy(update={"actions": (deleted,)})) is None
+    assert _execution_result_block_code(_plan(event, failed=True)) == "execution_failed"
+    assert _execution_result_block_code(_plan(event, failed=True, action="delete_hash")) == "unsafe_result"
+    mutated_plan = _plan(event).model_copy(update={"actions": [deleted]})
+    with pytest.raises(DeletionPreflightError) as error:
+        validate_plan_confirmation(
+            ManualDeleteRequest(
+                item_type=ItemType.MOVIE, radarr_movie_id=1, confirmed_plan_hash=plan_hash(mutated_plan)
+            ),
+            mutated_plan,
+        )
+    assert error.value.code == "unsafe_plan"
+    assert (
+        _execution_result_block_code(
+            _plan(event).model_copy(update={"actions": (safety.model_copy(update={"status": ActionStatus.SKIPPED}),)})
+        )
+        == "unsafe_result"
+    )
     skipped_safety = safety.model_copy(update={"status": ActionStatus.SKIPPED})
     assert (
         _preflight_failure_code(_plan(event).model_copy(update={"actions": (transient, skipped_safety)}))
@@ -320,7 +343,12 @@ def test_read_preflight_transient_reasons_are_retryable(reason: FailureReason) -
 
 
 @pytest.mark.asyncio
-async def test_record_retention_failure_is_terminal_and_not_retried(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "failed_action,expected_code", [("record_retention", "execution_failed"), ("delete_hash", "unsafe_plan")]
+)
+async def test_durable_or_mutation_failure_is_terminal_and_not_retried(
+    tmp_path: Path, failed_action: str, expected_code: str
+) -> None:
     event = _event()
     runner_calls = 0
 
@@ -341,7 +369,7 @@ async def test_record_retention_failure_is_terminal_and_not_retried(tmp_path: Pa
             actions=(
                 ActionResultResponse(
                     system="cleanarr",
-                    action="record_retention",
+                    action=failed_action,
                     status=ActionStatus.FAILED,
                     message="retention write failed",
                     reason=FailureReason.DOWNSTREAM_ERROR,
@@ -376,7 +404,7 @@ async def test_record_retention_failure_is_terminal_and_not_retried(tmp_path: Pa
         result = service.get(queued.id)
         assert result.status is ManualDeleteJobStatus.FAILED
         assert result.attempt_count == 1
-        assert result.error_code == "execution_failed"
+        assert result.error_code == expected_code
         assert runner_calls == 1
     finally:
         await service.stop()

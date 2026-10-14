@@ -335,6 +335,45 @@ async def test_jellyfin_provider_lookup_restarts_after_catalogue_shrinks_and_req
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_jellyfin_provider_lookup_restarts_after_last_page_shrink_before_bounds_guard() -> None:
+    scan = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal scan
+        start = int(request.url.params["StartIndex"])
+        if start == 0:
+            scan += 1
+        if scan == 1:
+            total = 1000
+            end = 500 if start == 0 else 1000
+        else:
+            total = 980
+            end = min(start + 500, total)
+        page = [
+            {
+                "Id": f"movie-{index}",
+                "Name": f"Movie {index}",
+                "Type": "Movie",
+                "ProviderIds": {"Imdb": f"tt{index}"},
+            }
+            for index in range(start, end)
+        ]
+        response_total = 980 if scan == 1 and start > 0 else total
+        return httpx.Response(200, json={"Items": page, "TotalRecordCount": response_total})
+
+    route = respx.get("http://jellyfin/Items").mock(side_effect=handler)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        items = await client.find_items(provider_ids=["imdb.tt979"], include_types=["Movie"])
+    finally:
+        await client.close()
+
+    assert route.call_count == 4
+    assert [item.id for item in items] == ["movie-979"]
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_jellyfin_provider_lookup_restarts_when_shrink_moves_below_current_offset() -> None:
     scan = 0
 

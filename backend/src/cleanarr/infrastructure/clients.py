@@ -1747,10 +1747,10 @@ class JellyfinServerClient(JsonServiceClient):
                 seen_ids.add(parsed.id)
                 result.append(parsed)
             start_index += len(raw_items)
-            if start_index > total:
-                raise ExternalServiceError("jellyfin", "Jellyfin returned inconsistent provider catalogue metadata.")
             if changed:
                 return [], True
+            if start_index > total:
+                raise ExternalServiceError("jellyfin", "Jellyfin returned inconsistent provider catalogue metadata.")
             if start_index == total:
                 return result, False
             if not raw_items:

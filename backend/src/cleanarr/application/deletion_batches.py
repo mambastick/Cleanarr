@@ -18,7 +18,8 @@ from cleanarr.application.deletion_jobs import (
     DeletionPreviewer,
     ManualDeleteResolver,
     ManualDeleteRunner,
-    _preflight_failure_code,
+    _execution_result_block_code,
+    _preflight_block_code,
     plan_hash,
 )
 from cleanarr.application.deletion_models import (
@@ -411,16 +412,23 @@ class ManualDeletionBatchService:
             else:
                 child.result = with_display_name(result, child.display_name)
                 child.completed_at = datetime.now(UTC)
-                if result.status is OverallStatus.PARTIAL_FAILURE:
+                execution_code = _execution_result_block_code(result)
+                if result.status is OverallStatus.PARTIAL_FAILURE and (
+                    execution_code != "unsafe_result"
+                    or any(action.status is ActionStatus.DELETED for action in result.actions)
+                ):
                     child.status = BatchChildStatus.FAILED
                     child.error_code = "partial_result"
                     child.error_message = "The child reported a partial downstream outcome."
                     child.message = "The child was only partially completed; later safe children will continue."
-                elif plan_blocked_code(result) is not None:
+                elif execution_code is not None:
                     child.status = BatchChildStatus.FAILED
-                    blocked_code = plan_blocked_code(result)
-                    child.error_code = blocked_code if blocked_code == "preflight_failed" else "unsafe_result"
-                    child.error_message = "The child reported a safety-attention outcome."
+                    child.error_code = execution_code
+                    child.error_message = (
+                        "The child reported a safety-attention outcome."
+                        if execution_code == "unsafe_result"
+                        else "The child reported a downstream execution failure."
+                    )
                     child.message = "The child was not treated as completed; later safe children will continue."
                 else:
                     child.status = BatchChildStatus.COMPLETED
@@ -744,7 +752,7 @@ def blocked_artifact(child: ManualDeleteBatchChildPreviewResponse) -> str:
 
 
 def plan_blocked_code(plan: ProcessingResultResponse) -> str | None:
-    preflight_code = _preflight_failure_code(plan)
+    preflight_code = _preflight_block_code(plan)
     if preflight_code is not None:
         return preflight_code
     if plan.status in {OverallStatus.PARTIAL_FAILURE, OverallStatus.IGNORED}:

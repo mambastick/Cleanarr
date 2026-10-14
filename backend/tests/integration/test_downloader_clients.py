@@ -647,7 +647,11 @@ async def test_rtorrent_inventory_uses_one_multicall_for_1500_entries() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         _, method = loads(request.content)
         calls.append(method)
-        result: object = "/srv/data/torrents" if method == "directory.default" else rows
+        result: object = {
+            "directory.default": "/srv/data/torrents",
+            "d.multicall2": rows,
+            "download_list": [row[0] for row in rows],
+        }[method]
         return httpx.Response(200, content=dumps((result,), methodresponse=True, allow_none=True))
 
     respx.post("http://rtorrent/RPC2").mock(side_effect=handler)
@@ -661,19 +665,20 @@ async def test_rtorrent_inventory_uses_one_multicall_for_1500_entries() -> None:
     assert len(inventory.scopes) == 1500
     assert calls.count("d.multicall2") == 1
     assert calls.count("directory.default") == 1
+    assert calls.count("download_list") == 1
     assert all(method not in calls for method in ("d.base_path", "d.directory", "d.name", "d.is_multi_file"))
 
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_rtorrent_inventory_rejects_malformed_multicall_row() -> None:
+async def test_rtorrent_inventory_keeps_bounded_malformed_multicall_row() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         _, method = loads(request.content)
-        result: object = (
-            "/srv/data/torrents"
-            if method == "directory.default"
-            else [["A" * 40, "/srv/data/torrents/Movie", "/srv/data/torrents", "Movie"]]
-        )
+        result: object = {
+            "directory.default": "/srv/data/torrents",
+            "download_list": ["A" * 40],
+            "d.multicall2": [["A" * 40, "/srv/data/torrents/Movie", "/srv/data/torrents", "Movie"]],
+        }[method]
         return httpx.Response(200, content=dumps((result,), methodresponse=True, allow_none=True))
 
     respx.post("http://rtorrent/RPC2").mock(side_effect=handler)
@@ -683,13 +688,14 @@ async def test_rtorrent_inventory_rejects_malformed_multicall_row() -> None:
     finally:
         await client.close()
 
-    assert inventory.scopes == ()
-    assert inventory.failures[0].code == "malformed_content_scope"
+    assert inventory.failures == ()
+    assert inventory.scopes[0].paths == ("/srv/data/torrents/Movie",)
+    assert inventory.scopes[0].uncertain is True
 
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_rtorrent_outside_base_path_is_unbounded_unknown() -> None:
+async def test_rtorrent_outside_base_path_is_preserved_as_exact_inventory_scope() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         _, method = loads(request.content)
         results: dict[str, Any] = {
@@ -706,8 +712,9 @@ async def test_rtorrent_outside_base_path_is_unbounded_unknown() -> None:
     finally:
         await client.close()
 
-    assert inventory.scopes == ()
-    assert inventory.failures[0].code == "unbounded_content_scope"
+    assert inventory.failures == ()
+    assert inventory.scopes[0].paths == ("/other/data/Movie",)
+    assert inventory.scopes[0].uncertain is False
 
 
 @pytest.mark.asyncio

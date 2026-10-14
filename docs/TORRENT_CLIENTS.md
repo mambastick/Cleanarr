@@ -86,8 +86,11 @@ Use a dedicated RPC endpoint with authentication and a restricted filesystem
 account. If the path check or command fails, CleanArr does not erase the torrent
 entry and records a failed action.
 
-Inventory uses `d.multicall2` and `directory.default` rather than per-torrent
-RPC reads. A closed torrent with an empty base path remains blocked as
+Inventory uses `d.multicall2("", "main", ...)`, `download_list("", "main")`
+and `directory.default` rather than per-torrent RPC reads. Both hash sets must
+agree. Valid paths outside the default root remain overlap evidence; they do
+not authorize rTorrent data removal.
+A closed torrent with an empty base path remains blocked as
 `torrent_closed`. Open or resume it in rTorrent, then refresh the preview.
 CleanArr does not substitute its download directory as a deletion target.
 

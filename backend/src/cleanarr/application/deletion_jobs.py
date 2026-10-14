@@ -437,7 +437,7 @@ class ManualDeletionJobService:
                             return
                         raise
                 current_plan = await self._previewer(job.request, verified_event)
-                preflight_code = _preflight_failure_code(current_plan)
+                preflight_code = _preflight_block_code(current_plan)
                 if preflight_code == "unsafe_plan":
                     self._mark_failed(
                         job,
@@ -504,7 +504,7 @@ class ManualDeletionJobService:
                     self._mark_failed(job, original_error, error_code="execution_failed")
                     job.message = "Durable retention recording failed; dependent cleanup was blocked."
                     await asyncio.to_thread(self._repository.save_job, job)
-                elif _preflight_failure_code(result) == "unsafe_plan":
+                elif _execution_result_block_code(result) == "unsafe_result":
                     self._mark_failed(job, original_error, error_code="unsafe_plan")
                     job.message = "Partial cleanup contained safety blockers; automatic replay is blocked."
                     await asyncio.to_thread(self._repository.save_job, job)
@@ -679,10 +679,14 @@ def plan_hash(plan: ProcessingResultResponse) -> str:
 def validate_plan_confirmation(request: ManualDeleteRequest, plan: ProcessingResultResponse) -> None:
     """Fail closed unless a caller confirmed this exact canonical plan."""
 
-    if plan.status in {OverallStatus.PARTIAL_FAILURE, OverallStatus.IGNORED} or any(
-        action.status in {ActionStatus.IGNORED, ActionStatus.FAILED}
-        or (action.status is ActionStatus.SKIPPED and action.reason not in _SAFE_RETAINED_SKIP_REASONS)
-        for action in plan.actions
+    if (
+        _preflight_block_code(plan) is not None
+        or plan.status in {OverallStatus.PARTIAL_FAILURE, OverallStatus.IGNORED}
+        or any(
+            action.status in {ActionStatus.IGNORED, ActionStatus.FAILED}
+            or (action.status is ActionStatus.SKIPPED and action.reason not in _SAFE_RETAINED_SKIP_REASONS)
+            for action in plan.actions
+        )
     ):
         raise DeletionPreflightError(
             "unsafe_plan",
@@ -700,8 +704,6 @@ def validate_plan_confirmation(request: ManualDeleteRequest, plan: ProcessingRes
 def _preflight_failure_code(plan: ProcessingResultResponse) -> str | None:
     """Classify failed preflight evidence before treating it as plan drift."""
 
-    if any(action.status is ActionStatus.DELETED for action in plan.actions):
-        return "unsafe_plan"
     if any(
         action.status is ActionStatus.SKIPPED and _action_reason(action) not in _SAFE_RETAINED_SKIP_REASON_VALUES
         for action in plan.actions
@@ -716,6 +718,36 @@ def _preflight_failure_code(plan: ProcessingResultResponse) -> str | None:
     ):
         return "preflight_failed"
     return "unsafe_plan"
+
+
+def _preflight_block_code(plan: ProcessingResultResponse) -> str | None:
+    """Classify a refreshed preflight, including the impossible mutated-plan case."""
+
+    if any(action.status is ActionStatus.DELETED for action in plan.actions):
+        return "unsafe_plan"
+    return _preflight_failure_code(plan)
+
+
+def _execution_result_block_code(plan: ProcessingResultResponse) -> str | None:
+    """Classify execution evidence separately from mutation-free preflight."""
+
+    if plan.status is OverallStatus.IGNORED or any(
+        action.status is ActionStatus.IGNORED
+        or (action.status is ActionStatus.SKIPPED and _action_reason(action) not in _SAFE_RETAINED_SKIP_REASON_VALUES)
+        or (
+            action.status is ActionStatus.FAILED
+            and (
+                _action_reason(action) not in _TRANSIENT_PREFLIGHT_REASONS
+                or not _is_read_preflight_action(action.action)
+                or action.action == "process_event"
+            )
+        )
+        for action in plan.actions
+    ):
+        return "unsafe_result"
+    if any(action.status is ActionStatus.FAILED for action in plan.actions):
+        return "execution_failed"
+    return None
 
 
 def _action_reason(action: ActionResultResponse) -> str | None:
