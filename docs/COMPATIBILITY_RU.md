@@ -117,3 +117,11 @@ evidence совместимости этих flows.
 - Несовместимые изменения API/configuration вне security-исключения требуют
   новой major-версии CleanArr. Поддерживаемая версия зависимости никогда не
   удаляется молча.
+
+## Candidate исправлений безопасности — 2026-10-14
+
+Issues #42–#52 добавляют protocol-tested проверки data scopes и SQLite schema 7.
+Опубликованная выше version matrix — историческое evidence, а не сертификация
+candidate. Перед release нужны свежие real-service и latest-stable upgrade
+rehearsals. Ограничения POSIX path/aliases, root rTorrent и bounded fingerprint
+fallback Jellyfin описаны в Safety.

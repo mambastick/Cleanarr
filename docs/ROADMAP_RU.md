@@ -489,6 +489,33 @@ dry-run contracts.
 - Сохранить порядок релизов, ownership rules, dry-run по умолчанию и обязательные
   backend/frontend interaction gates. Это не заявление о выпуске.
 
+### Принятое дополнение по безопасности и удержанным раздачам — 2026-10-14
+
+Issues #42–#52 сохраняют порядок релизов и область destructive operations.
+Частичная ручная попытка с хотя бы одной выполненной мутацией становится
+terminal: исходная ошибка и действия сохраняются. Автоматический retry допустим
+только без выполненных мутаций. Отдельный hash-bound план оставшейся очистки
+после удаления Arr — будущая работа, а не replay исходного плана.
+
+До удаления данных полные приватные inventories всех настроенных клиентов
+должны изолировать цель. Общая или неизвестная область блокирует зависимую
+очистку Arr, Seerr и Jellyfin. История всех фильмов во всех Radarr также должна
+подтвердить исключительный hash. Конфликтующие identifiers и недоступная
+проверка источника Jellyfin приводят к fail-closed.
+
+Первый принятый этап #52 — durable retention record и отметка Downloads для
+keep/defer, сохранённые до зависимой очистки медиа. SQLite schema 7 хранит
+client/hash, исходный correlation, минимальную область медиа, policy и snapshot
+thresholds. Запись переживает очистку activity и restart, но не подтверждает
+ownership и не разрешает команды. Автоматическое удаление отложенной раздачи
+не входит в change: будущему reconciler нужны отдельное подтверждение, свежие
+safety evidence, bounded retries/recovery и собственный acceptance gate.
+
+Acceptance требует backend/frontend и существующие CI gates, protocol
+regressions всех четырёх adapters, заполненный upgrade последней stable schema 6
+с проверенным backup/restore и browser evidence EN/RU desktop/mobile light/dark.
+Это запись scope реализации, а не заявление о релизе или сертификации.
+
 ## Обязательный scope 1.0
 
 ### 1. Torrent-клиенты и маршрутизация

@@ -53,6 +53,30 @@ create and verify the SQLite backup required by the installation guide. Rollback
 requires stopping CleanArr and restoring that pre-upgrade database; never start
 an older binary against schema 6.
 
+## Retained torrents and database schema 7
+
+Migration 7 adds `retained_torrents` without rewriting configuration, users,
+activity or job data. Keep/defer evidence is saved before dependent media
+cleanup, survives restart/activity pruning and appears in Downloads. It is
+historical audit evidence, never current ownership or deletion permission;
+refresh does not remove these torrents automatically. Older untracked retained
+torrents are not inferred from titles or paths.
+
+Before upgrading from v2.0.4 (schema 6), export a verified SQLite backup using
+the installation guide's `Connection.backup` procedure and require
+`PRAGMA integrity_check` to return `ok`. Retain that backup with the v2.0.4 image
+or package. To roll back, stop CleanArr, preserve the schema-7 database under a
+separate name, restore the schema-6 backup, then start v2.0.4 and verify settings,
+users and history. An older binary rejects schema 7; an empty replacement
+configuration or deleting the new table is not a supported downgrade.
+
+A partial manual job with an applied mutation reports
+`partial_result_not_retryable`, preserves its original downstream error and
+partial actions, and does not auto-replay. Inspect the affected services and
+activity before planning remaining cleanup; a fresh original preview may be
+blocked because the Arr record is already absent. There is no automatic
+remaining-steps recovery flow in this change.
+
 ## Upgrade and rollback
 
 Runtime configuration schema 4 adds the storage warning and critical free-space

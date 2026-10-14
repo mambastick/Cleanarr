@@ -54,6 +54,28 @@ Database migration 6 транзакционно добавляет `user_account
 остановить CleanArr и восстановить pre-upgrade database; старую binary нельзя
 запускать с schema 6.
 
+## Удержанные раздачи и database schema 7
+
+Migration 7 добавляет `retained_torrents`, сохраняя configuration, users,
+activity и jobs. Evidence keep/defer сохраняется до зависимой очистки медиа,
+переживает restart/activity pruning и отображается в Downloads. Это исторический
+аудит, а не актуальный ownership или permission; refresh не удаляет такие
+раздачи автоматически. Старые неотслеживаемые раздачи не выводятся из title/path.
+
+Перед upgrade с v2.0.4 (schema 6) экспортируйте SQLite backup через
+`Connection.backup` по installation guide и проверьте `PRAGMA integrity_check`:
+результат должен быть `ok`. Сохраните backup вместе с image/package v2.0.4.
+Для rollback остановите CleanArr, сохраните schema-7 database отдельно,
+восстановите backup schema 6 и запустите v2.0.4; проверьте settings, users и
+history. Старая binary отклоняет schema 7. Пустая replacement configuration или
+удаление новой таблицы не являются поддерживаемым downgrade.
+
+Частичная manual job с выполненной мутацией сообщает
+`partial_result_not_retryable`, сохраняет исходную downstream error и действия
+и не запускается повторно автоматически. Перед планированием остатка проверьте
+сервисы и activity: новый исходный preview может блокироваться из-за уже
+отсутствующей записи Arr. Automatic remaining-steps recovery в change нет.
+
 ## Обновление и rollback
 
 Runtime configuration schema 4 добавляет thresholds свободного места storage:

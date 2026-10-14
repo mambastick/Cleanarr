@@ -42,6 +42,32 @@ CleanArr использует точные provider identifiers и нормал�
   или указывает на корневой уровень;
 - downstream dependency или проверка аутентификации завершилась ошибкой.
 
+## Проверка источника и физической области
+
+Webhook cascade требует включённого настроенного Jellyfin. Сначала проверяется
+точный item ID. Jellyfin 10.11.11 не поддерживает equality-фильтр provider IDs
+на этом endpoint, поэтому fingerprint fallback читает один полный каталог типа
+с лимитом 1 000 элементов без pagination. Некорректный/отсутствующий total,
+неполные данные, больший каталог или ошибка дают `source_unverifiable` и
+блокируют cascade. Подтверждённые ручные сценарии доступны независимо.
+
+Каждый preview и выполнение удаления данных получает полные приватные content
+scopes всех настроенных downloader. Равные, родительские или дочерние области
+другой раздачи, включая тот же hash в другом клиенте, дают `shared_path`.
+Неполный/ошибочный inventory даёт `ownership_unverifiable`; зависимая очистка
+Arr/Seerr/Jellyfin блокируется. Hash Radarr также не должен встречаться в полной
+истории другого фильма любого настроенного instance: общий hash блокируется
+как pack, а недоступная история даёт fail-closed.
+
+Проверки сравнивают сообщённые POSIX paths и точные file lists. Они не читают
+remote inodes и не разрешают разные bind-mount/symlink aliases. Клиентам нужна
+согласованная система путей; неразрешённые физические aliases нельзя включать
+в mutation-enabled operation. Hardlinks могут сохранять физические байты,
+поэтому гарантии освобождённого места нет. Windows/UNC и некорректные пути —
+unknown. rTorrent требует непустой base path строго внутри текущего
+`directory.default`; сам root, отсутствие отдельной подпапки и пути вне root
+блокируются вместо recursive directory fallback.
+
 ## Preflight и порядок мутаций
 
 Ручное удаление сначала возвращает точный план: media fingerprint, Arr instance,

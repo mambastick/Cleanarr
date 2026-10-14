@@ -481,6 +481,33 @@ contracts.
 - Preserve the existing release order, ownership rules, dry-run defaults and
   required backend/frontend interaction gates. This is not a release claim.
 
+### Accepted safety and retention follow-up — 2026-10-14
+
+Issues #42–#52 retain the existing release order and destructive scope. A partial
+manual attempt that applied any mutation becomes terminal with its original
+error and recorded actions; only an attempt with no applied mutation can be
+retried automatically. A separate hash-bound plan for remaining cleanup after
+Arr removal is future work, not an automatic replay of the original plan.
+
+Before data removal, complete private downloader inventories must isolate the
+target from every configured client. Shared/unknown scopes block dependent
+Arr, Seerr and Jellyfin cleanup. Movie history must also isolate the hash from
+all other movies across configured Radarr instances. Conflicting identifiers
+and unavailable Jellyfin source evidence fail closed.
+
+For #52 the accepted initial scope is a durable retention record and a Downloads
+badge for keep/defer torrents, persisted before dependent media cleanup. SQLite
+schema 7 stores the client/hash, originating correlation, minimal media scope,
+policy and threshold snapshot. It survives activity pruning and restart, and
+never grants ownership or action permission. Automatic deferred removal remains
+outside this change; a later reconciler requires a separate confirmation,
+fresh safety evidence, bounded retries/recovery and its own acceptance gate.
+
+Acceptance requires all backend/frontend and existing CI gates, four-adapter
+protocol regressions, a populated latest-stable schema-6 upgrade with verified
+backup/restore, and EN/RU desktop/mobile light/dark browser evidence. This
+section records implementation scope, not release or compatibility certification.
+
 ## Required 1.0 scope
 
 ### 1. Download clients and routing

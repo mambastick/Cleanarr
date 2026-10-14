@@ -117,3 +117,11 @@ evidence for those flows.
 - Breaking API/configuration changes outside a security exception require a new
   CleanArr major version. A supported dependency version is never removed
   silently.
+
+## Safety follow-up candidate — 2026-10-14
+
+Issues #42–#52 add protocol-tested data-scope checks and SQLite schema 7.
+The published version matrix above is historical evidence, not certification of
+this candidate. Fresh real-service and latest-stable upgrade rehearsals remain
+required before release. See Safety for POSIX path/alias limitations, rTorrent
+root restrictions and the bounded Jellyfin fingerprint fallback.
