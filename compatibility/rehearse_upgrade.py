@@ -296,6 +296,7 @@ def _seed_source_data(container_name: str, source: SourceRelease) -> None:
     }
     script = (
         "import os,sqlite3,sys;"
+        "from datetime import datetime,timezone;"
         "database='/config/cleanarr.db';"
         "connection=sqlite3.connect(database);"
         "connection.execute("
@@ -304,7 +305,7 @@ def _seed_source_data(container_name: str, source: SourceRelease) -> None:
         "(sys.argv[1],));"
         "connection.execute("
         '"INSERT INTO activity (processed_at, result_json) VALUES (?, ?)",'
-        "('2026-08-12T00:00:00+00:00',sys.argv[2]));"
+        "(datetime.now(timezone.utc).isoformat(),sys.argv[2]));"
         "connection.commit();"
         "connection.close();"
         "os.chmod(database,0o666)"
