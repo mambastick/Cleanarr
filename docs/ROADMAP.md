@@ -517,8 +517,9 @@ duplicate full inventories; bounded uncertain scopes block overlapping targets,
 while unbounded unknown evidence still fails closed. Closed rTorrent inventory
 may derive a conservative scope; the actual removal target still needs its
 nonempty validated base path. Trusted Arr path provenance is internal to manual
-flows. Only transient read failures retain bounded retries; safety blockers
-are terminal `unsafe_plan`. Ordered migration 8 stores
+flows. Transient read failures and downloader downstream/authentication failures
+before any recorded deletion retain bounded retries with a fresh preflight;
+safety blockers are terminal `unsafe_plan`. Ordered migration 8 stores
 structured job error codes; upgrades from schemas 6/7 and backup/restore are
 required. These changes retain the existing scope and release gates.
 
@@ -529,6 +530,14 @@ unknown sibling scopes and closed targets have distinct EN/RU reasons and
 actionable details. qBittorrent metadata-free magnets accept the documented
 unknown-size sentinel only with strict zero-payload evidence. These are
 regression fixes within the same acceptance gates and destructive scope.
+
+PR #53 live-result correction: every manual execution result is classified;
+blocked `ignored`/skipped cleanup cannot report completion. Downloader dependency
+placeholders retain the original transient failure classification, while applied
+partial deletions remain terminal. rTorrent tolerates stable unrelated membership
+changes through one bounded inventory refresh that preserves fleet evidence and
+the original target path. A fleet barrier shares refreshed evidence with every
+adapter before mutation; overlap, changed targets, and continued churn fail closed.
 
 ## Required 1.0 scope
 

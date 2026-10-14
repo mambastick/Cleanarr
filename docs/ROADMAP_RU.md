@@ -526,7 +526,8 @@ regressions всех четырёх adapters, заполненный upgrade п�
 полностью неизвестная область по-прежнему даёт fail-closed. Inventory закрытой
 раздачи rTorrent может вывести консервативную область, но само удаление требует
 непустого проверенного base path. Доверенный маркер пути Arr остаётся внутренним
-для manual flow. Только временные ошибки чтения сохраняют bounded retries;
+для manual flow. Временные ошибки чтения и downstream/authentication ошибки
+загрузчика до любого записанного удаления сохраняют bounded retries со свежим preflight;
 safety blockers дают terminal `unsafe_plan`. Ordered migration 8
 хранит structured job error codes; обязательны upgrade с schemas 6/7 и
 backup/restore. Scope и release gates сохраняются.
@@ -539,6 +540,15 @@ backup/restore. Scope и release gates сохраняются.
 Magnet без metadata в qBittorrent допускает документированный unknown-size
 sentinel только со строгими доказательствами нулевого payload. Это regression
 fixes в рамках прежних acceptance gates и destructive scope.
+
+Уточнение live-results PR #53: каждый результат ручного выполнения проверяется;
+заблокированная `ignored`/skipped очистка не может сообщить успех. Зависимые
+заглушки загрузчика сохраняют исходную классификацию временной ошибки, а
+частичные выполненные удаления остаются terminal. rTorrent допускает стабильное
+изменение несвязанных раздач через одно bounded перечитывание inventory,
+сохраняющее fleet evidence и исходный путь цели. Общий барьер передаёт свежие
+доказательства всем adapters до мутаций; пересечения, изменившиеся цели
+и дальнейший churn дают fail-closed.
 
 ## Обязательный scope 1.0
 

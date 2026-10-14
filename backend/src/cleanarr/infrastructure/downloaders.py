@@ -25,6 +25,7 @@ from cleanarr.application.data_safety import (
     content_scope_matches,
     join_scope_path,
     read_content_inventory,
+    refresh_content_inventory,
     validate_scope_path,
 )
 from cleanarr.application.ports import (
@@ -118,6 +119,10 @@ class MultiDownloaderClient:
         assessment: ContentSafetyAssessment | None = None
         if delete_files:
             assessment = await self._content_safety_assessment(normalized)
+            # Reconcile late rTorrent membership before any client receives permission to mutate.
+            for target in self._targets:
+                if isinstance(target.client, RTorrentClient):
+                    assessment = await target.client._recheck_content_assessment(assessment, target.id, normalized)
             if not assessment.complete:
                 return [
                     DownloaderRemovalResult(
@@ -183,6 +188,15 @@ class MultiDownloaderClient:
         dry_run: bool,
         assessment: ContentSafetyAssessment | None,
     ) -> Sequence[DownloaderRemovalResult]:
+        if isinstance(target.client, RTorrentClient):
+            return await target.client._delete_hashes_with_assessment(
+                hashes,
+                delete_files=delete_files,
+                dry_run=dry_run,
+                assessment=assessment,
+                assessment_client_id=target.id,
+                refresh_inventory=False,
+            )
         private = getattr(target.client, "_delete_hashes_with_assessment", None)
         if callable(private):
             return await cast(_SafetyAwareDownloader, target.client)._delete_hashes_with_assessment(
@@ -1286,6 +1300,57 @@ class RTorrentClient:
             hashes, delete_files=delete_files, dry_run=dry_run, assessment=None, assessment_client_id=None
         )
 
+    async def _recheck_content_assessment(
+        self,
+        assessment: ContentSafetyAssessment,
+        client_id: str,
+        hashes: Sequence[str],
+        *,
+        torrent_ids: tuple[str, ...] | None = None,
+    ) -> ContentSafetyAssessment:
+        """Reconcile one snapshot before fleet mutation, preserving confirmed target scopes."""
+
+        if not assessment.complete:
+            return assessment
+        if torrent_ids is None:
+            try:
+                torrent_ids = _rtorrent_inventory_hashes(await self._rpc("download_list", "", "main"))
+            except (AuthenticationError, ExternalServiceError):
+                return ContentSafetyAssessment(complete=False)
+        if torrent_ids is None:
+            return ContentSafetyAssessment(complete=False)
+        snapshot_hashes = {value for key, value in assessment.observed if key == client_id}
+        if set(torrent_ids) == snapshot_hashes:
+            return assessment
+        refreshed = refresh_content_inventory(assessment, client_id, await read_content_inventory(self), hashes)
+        if not refreshed.complete:
+            return refreshed
+        try:
+            final_ids = _rtorrent_inventory_hashes(await self._rpc("download_list", "", "main"))
+        except (AuthenticationError, ExternalServiceError):
+            return ContentSafetyAssessment(complete=False)
+        refreshed_hashes = {value for key, value in refreshed.observed if key == client_id}
+        requested = set(hashes)
+        original_paths = {
+            (value, paths)
+            for key, value, paths, _name in assessment.scope_paths
+            if key == client_id and value in requested
+        }
+        refreshed_paths = {
+            (value, paths)
+            for key, value, paths, _name in refreshed.scope_paths
+            if key == client_id and value in requested
+        }
+        if (
+            final_ids is None
+            or set(torrent_ids) != refreshed_hashes
+            or set(final_ids) != refreshed_hashes
+            or snapshot_hashes.intersection(requested) != refreshed_hashes.intersection(requested)
+            or original_paths != refreshed_paths
+        ):
+            return ContentSafetyAssessment(complete=False)
+        return refreshed
+
     async def _delete_hashes_with_assessment(
         self,
         hashes: Sequence[str],
@@ -1294,6 +1359,7 @@ class RTorrentClient:
         dry_run: bool = False,
         assessment: ContentSafetyAssessment | None = None,
         assessment_client_id: str | None = None,
+        refresh_inventory: bool = True,
     ) -> Sequence[DownloaderRemovalResult]:
         normalized = _normalize_hashes(hashes)
         if not normalized:
@@ -1321,8 +1387,14 @@ class RTorrentClient:
                 normalized,
                 known_existing={self._system: tuple(existing)},
             )
+        original_assessment = assessment
         if delete_files and assessment is not None:
             snapshot_hashes = {value for client_id, value in assessment.observed if client_id == safety_client_id}
+            if refresh_inventory and assessment.complete and set(torrent_ids) != snapshot_hashes:
+                assessment = await self._recheck_content_assessment(
+                    assessment, safety_client_id, normalized, torrent_ids=torrent_ids
+                )
+                snapshot_hashes = {value for client_id, value in assessment.observed if client_id == safety_client_id}
             if not assessment.complete or set(torrent_ids) != snapshot_hashes:
                 return [
                     self._result(
@@ -1340,8 +1412,18 @@ class RTorrentClient:
             status = await self._seeding_status(hash_value)
             statuses[hash_value] = status
             decisions[hash_value] = (
-                content_safety_skip_reason(assessment, safety_client_id, hash_value) if assessment is not None else None
-            ) or self._skip_reason(status)
+                (
+                    content_safety_skip_reason(original_assessment, safety_client_id, hash_value)
+                    if original_assessment is not None
+                    else None
+                )
+                or (
+                    content_safety_skip_reason(assessment, safety_client_id, hash_value)
+                    if assessment is not None
+                    else None
+                )
+                or self._skip_reason(status)
+            )
             metadata[hash_value] = await self._metadata(hash_value)
             if decisions[hash_value] is not None:
                 continue
@@ -1351,8 +1433,13 @@ class RTorrentClient:
                 except ExternalServiceError:
                     decisions[hash_value] = "ownership_unverifiable"
                     continue
-                if assessment is None or not content_scope_matches(
-                    assessment, safety_client_id, hash_value, data_path, exact=True
+                if (
+                    assessment is None
+                    or original_assessment is None
+                    or not all(
+                        content_scope_matches(snapshot, safety_client_id, hash_value, data_path, exact=True)
+                        for snapshot in (original_assessment, assessment)
+                    )
                 ):
                     decisions[hash_value] = "ownership_unverifiable"
                     continue

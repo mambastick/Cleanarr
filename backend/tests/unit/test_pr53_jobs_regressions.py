@@ -311,7 +311,28 @@ def test_mixed_transient_and_safety_preflight_prefers_unsafe_plan() -> None:
     assert _preflight_block_code(_plan(event).model_copy(update={"actions": (deleted,)})) == "unsafe_plan"
     assert _execution_result_block_code(_plan(event).model_copy(update={"actions": (deleted,)})) is None
     assert _execution_result_block_code(_plan(event, failed=True)) == "execution_failed"
-    assert _execution_result_block_code(_plan(event, failed=True, action="delete_hash")) == "unsafe_result"
+    assert _execution_result_block_code(_plan(event, failed=True, action="delete_hash")) == "execution_failed"
+    dependency_skip = ActionResultResponse(
+        system="radarr",
+        action="delete_movie",
+        status=ActionStatus.SKIPPED,
+        message="Blocked dependency",
+        reason=FailureReason.DOWNSTREAM_ERROR,
+        details={},
+    )
+    safety_skip = ActionResultResponse(
+        system="downloader",
+        action="delete_hash",
+        status=ActionStatus.SKIPPED,
+        message="Unknown sibling",
+        reason=FailureReason.SIBLING_SCOPE_UNKNOWN,
+        details={},
+    )
+    for actions in ([dependency_skip, safety_skip], [safety_skip, dependency_skip]):
+        mixed = _plan(event, failed=True, action="delete_hash").model_copy(
+            update={"actions": [*_plan(event, failed=True, action="delete_hash").actions, *actions]}
+        )
+        assert _execution_result_block_code(mixed) == "unsafe_result"
     mutated_plan = _plan(event).model_copy(update={"actions": [deleted]})
     with pytest.raises(DeletionPreflightError) as error:
         validate_plan_confirmation(
@@ -344,7 +365,7 @@ def test_read_preflight_transient_reasons_are_retryable(reason: FailureReason) -
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "failed_action,expected_code", [("record_retention", "execution_failed"), ("delete_hash", "unsafe_plan")]
+    "failed_action,expected_code", [("record_retention", "execution_failed"), ("delete_movie", "execution_failed")]
 )
 async def test_durable_or_mutation_failure_is_terminal_and_not_retried(
     tmp_path: Path, failed_action: str, expected_code: str
@@ -406,6 +427,412 @@ async def test_durable_or_mutation_failure_is_terminal_and_not_retried(
         assert result.attempt_count == 1
         assert result.error_code == expected_code
         assert runner_calls == 1
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", [FailureReason.DOWNSTREAM_ERROR, FailureReason.AUTHENTICATION_FAILED])
+async def test_hash_cleanup_transient_failure_retries_and_recovers(tmp_path: Path, reason: FailureReason) -> None:
+    event = _event()
+    runner_calls = 0
+
+    async def resolver(payload: ManualDeleteRequest) -> MediaDeletionEvent:
+        return event
+
+    async def previewer(payload: ManualDeleteRequest, resolved: MediaDeletionEvent) -> ProcessingResultResponse:
+        return _plan(resolved)
+
+    async def runner(payload, resolved, report):  # type: ignore[no-untyped-def]
+        nonlocal runner_calls
+        runner_calls += 1
+        if runner_calls == 1:
+            return ProcessingResultResponse(
+                item_type=resolved.item_type,
+                item_id=resolved.item_id,
+                name=resolved.name,
+                status=OverallStatus.PARTIAL_FAILURE,
+                actions=[
+                    ActionResultResponse(
+                        system="downloader",
+                        action="delete_hash",
+                        status=ActionStatus.FAILED,
+                        message="transient cleanup failure",
+                        reason=reason,
+                        details={"error": "transient cleanup failure"},
+                    )
+                ],
+            )
+        return _plan(resolved)
+
+    service = ManualDeletionJobService(
+        resolver,
+        previewer,
+        runner,
+        repository=SQLiteDeletionRepository(tmp_path / f"hash-retry-{reason.value}.db"),
+        max_attempts=2,
+        retry_delays_seconds=(0,),
+    )
+    try:
+        preview = await service.preview(ManualDeleteRequest(item_type=ItemType.MOVIE, radarr_movie_id=1))
+        queued = await service.submit(
+            ManualDeleteRequest(
+                item_type=ItemType.MOVIE,
+                radarr_movie_id=1,
+                confirmed_plan_hash=preview.plan_hash,
+                idempotency_key=uuid4(),
+            )
+        )
+        for _ in range(200):
+            if service.get(queued.id).status is ManualDeleteJobStatus.COMPLETED:
+                break
+            await asyncio.sleep(0.01)
+        result = service.get(queued.id)
+        assert result.status is ManualDeleteJobStatus.COMPLETED
+        assert result.attempt_count == 2
+        assert runner_calls == 2
+        assert result.error_code is None
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_hash_failure_after_deleted_action_is_terminal(tmp_path: Path) -> None:
+    event = _event()
+    runner_calls = 0
+
+    async def resolver(payload: ManualDeleteRequest) -> MediaDeletionEvent:
+        return event
+
+    async def previewer(payload: ManualDeleteRequest, resolved: MediaDeletionEvent) -> ProcessingResultResponse:
+        return _plan(resolved)
+
+    async def runner(payload, resolved, report):  # type: ignore[no-untyped-def]
+        nonlocal runner_calls
+        runner_calls += 1
+        return ProcessingResultResponse(
+            item_type=resolved.item_type,
+            item_id=resolved.item_id,
+            name=resolved.name,
+            status=OverallStatus.PARTIAL_FAILURE,
+            actions=[
+                ActionResultResponse(
+                    system="downloader",
+                    action="delete_hash",
+                    status=ActionStatus.DELETED,
+                    message="first hash deleted",
+                    details={},
+                ),
+                ActionResultResponse(
+                    system="downloader",
+                    action="delete_hash",
+                    status=ActionStatus.FAILED,
+                    message="second hash failed",
+                    reason=FailureReason.DOWNSTREAM_ERROR,
+                    details={"error": "second hash failed"},
+                ),
+            ],
+        )
+
+    service = ManualDeletionJobService(
+        resolver,
+        previewer,
+        runner,
+        repository=SQLiteDeletionRepository(tmp_path / "deleted-then-failed.db"),
+        max_attempts=2,
+        retry_delays_seconds=(0,),
+    )
+    try:
+        preview = await service.preview(ManualDeleteRequest(item_type=ItemType.MOVIE, radarr_movie_id=1))
+        queued = await service.submit(
+            ManualDeleteRequest(
+                item_type=ItemType.MOVIE,
+                radarr_movie_id=1,
+                confirmed_plan_hash=preview.plan_hash,
+                idempotency_key=uuid4(),
+            )
+        )
+        for _ in range(200):
+            if service.get(queued.id).status is ManualDeleteJobStatus.FAILED:
+                break
+            await asyncio.sleep(0.01)
+        result = service.get(queued.id)
+        assert result.error_code == "partial_result_not_retryable"
+        assert result.attempt_count == 1
+        assert runner_calls == 1
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_transient_read_execution_failure_retries(tmp_path: Path) -> None:
+    event = _event()
+    runner_calls = 0
+
+    async def resolver(payload: ManualDeleteRequest) -> MediaDeletionEvent:
+        return event
+
+    async def previewer(payload: ManualDeleteRequest, resolved: MediaDeletionEvent) -> ProcessingResultResponse:
+        return _plan(resolved)
+
+    async def runner(payload, resolved, report):  # type: ignore[no-untyped-def]
+        nonlocal runner_calls
+        runner_calls += 1
+        if runner_calls == 1:
+            return ProcessingResultResponse(
+                item_type=resolved.item_type,
+                item_id=resolved.item_id,
+                name=resolved.name,
+                status=OverallStatus.PARTIAL_FAILURE,
+                actions=[
+                    ActionResultResponse(
+                        system="radarr",
+                        action="verify_download_ownership",
+                        status=ActionStatus.FAILED,
+                        message="temporary history read failure",
+                        reason=FailureReason.DOWNSTREAM_ERROR,
+                        details={},
+                    )
+                ],
+            )
+        return _plan(resolved)
+
+    service = ManualDeletionJobService(
+        resolver,
+        previewer,
+        runner,
+        repository=SQLiteDeletionRepository(tmp_path / "read-retry.db"),
+        max_attempts=2,
+        retry_delays_seconds=(0,),
+    )
+    try:
+        preview = await service.preview(ManualDeleteRequest(item_type=ItemType.MOVIE, radarr_movie_id=1))
+        queued = await service.submit(
+            ManualDeleteRequest(
+                item_type=ItemType.MOVIE,
+                radarr_movie_id=1,
+                confirmed_plan_hash=preview.plan_hash,
+                idempotency_key=uuid4(),
+            )
+        )
+        for _ in range(200):
+            if service.get(queued.id).status is ManualDeleteJobStatus.COMPLETED:
+                break
+            await asyncio.sleep(0.01)
+        result = service.get(queued.id)
+        assert result.status is ManualDeleteJobStatus.COMPLETED
+        assert result.attempt_count == 2
+        assert runner_calls == 2
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "overall,action_status,reason,expected_status",
+    [
+        (
+            OverallStatus.SUCCESS,
+            ActionStatus.SKIPPED,
+            FailureReason.SIBLING_SCOPE_UNKNOWN,
+            ManualDeleteJobStatus.FAILED,
+        ),
+        (
+            OverallStatus.IGNORED,
+            ActionStatus.SKIPPED,
+            FailureReason.SIBLING_SCOPE_UNKNOWN,
+            ManualDeleteJobStatus.FAILED,
+        ),
+        (OverallStatus.IGNORED, ActionStatus.SKIPPED, FailureReason.SEEDING_POLICY, ManualDeleteJobStatus.COMPLETED),
+        (OverallStatus.IGNORED, ActionStatus.ALREADY_ABSENT, None, ManualDeleteJobStatus.COMPLETED),
+    ],
+)
+async def test_live_safety_skip_or_safe_noop_after_clean_preflight(
+    tmp_path: Path,
+    overall: OverallStatus,
+    action_status: ActionStatus,
+    reason: FailureReason | None,
+    expected_status: ManualDeleteJobStatus,
+) -> None:
+    event = _event()
+    runner_calls = 0
+
+    async def resolver(payload: ManualDeleteRequest) -> MediaDeletionEvent:
+        return event
+
+    async def previewer(payload: ManualDeleteRequest, resolved: MediaDeletionEvent) -> ProcessingResultResponse:
+        return _plan(resolved)
+
+    async def runner(payload, resolved, report):  # type: ignore[no-untyped-def]
+        nonlocal runner_calls
+        runner_calls += 1
+        return ProcessingResultResponse(
+            item_type=resolved.item_type,
+            item_id=resolved.item_id,
+            name=resolved.name,
+            status=overall,
+            actions=[
+                ActionResultResponse(
+                    system="downloader",
+                    action="delete_hash",
+                    status=action_status,
+                    message="sibling scope could not be verified",
+                    reason=reason,
+                    details={},
+                )
+            ],
+        )
+
+    service = ManualDeletionJobService(
+        resolver,
+        previewer,
+        runner,
+        repository=SQLiteDeletionRepository(tmp_path / "live-safety.db"),
+        max_attempts=2,
+        retry_delays_seconds=(0,),
+    )
+    try:
+        preview = await service.preview(ManualDeleteRequest(item_type=ItemType.MOVIE, radarr_movie_id=1))
+        queued = await service.submit(
+            ManualDeleteRequest(
+                item_type=ItemType.MOVIE,
+                radarr_movie_id=1,
+                confirmed_plan_hash=preview.plan_hash,
+                idempotency_key=uuid4(),
+            )
+        )
+        for _ in range(200):
+            if service.get(queued.id).status in {ManualDeleteJobStatus.FAILED, ManualDeleteJobStatus.COMPLETED}:
+                break
+            await asyncio.sleep(0.01)
+        result = service.get(queued.id)
+        assert result.status is expected_status
+        assert result.error_code == ("unsafe_plan" if expected_status is ManualDeleteJobStatus.FAILED else None)
+        assert result.attempt_count == 1
+        assert runner_calls == 1
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_downstream_dependency_skip_after_deletion_is_terminal(tmp_path: Path) -> None:
+    event = _event()
+
+    async def resolver(payload: ManualDeleteRequest) -> MediaDeletionEvent:
+        return event
+
+    async def previewer(payload: ManualDeleteRequest, resolved: MediaDeletionEvent) -> ProcessingResultResponse:
+        return _plan(resolved)
+
+    async def runner(payload, resolved, report):  # type: ignore[no-untyped-def]
+        return ProcessingResultResponse(
+            item_type=resolved.item_type,
+            item_id=resolved.item_id,
+            name=resolved.name,
+            status=OverallStatus.SUCCESS,
+            actions=[
+                ActionResultResponse(
+                    system="downloader",
+                    action="delete_hash",
+                    status=ActionStatus.DELETED,
+                    message="deleted hash",
+                    details={},
+                ),
+                ActionResultResponse(
+                    system="radarr",
+                    action="delete_movie",
+                    status=ActionStatus.SKIPPED,
+                    message="dependent action was not attempted",
+                    reason=FailureReason.DOWNSTREAM_ERROR,
+                    details={},
+                ),
+            ],
+        )
+
+    service = ManualDeletionJobService(
+        resolver,
+        previewer,
+        runner,
+        repository=SQLiteDeletionRepository(tmp_path / "dependency-skip.db"),
+        max_attempts=2,
+        retry_delays_seconds=(0,),
+    )
+    try:
+        preview = await service.preview(ManualDeleteRequest(item_type=ItemType.MOVIE, radarr_movie_id=1))
+        queued = await service.submit(
+            ManualDeleteRequest(
+                item_type=ItemType.MOVIE,
+                radarr_movie_id=1,
+                confirmed_plan_hash=preview.plan_hash,
+                idempotency_key=uuid4(),
+            )
+        )
+        for _ in range(200):
+            if service.get(queued.id).status is ManualDeleteJobStatus.FAILED:
+                break
+            await asyncio.sleep(0.01)
+        result = service.get(queued.id)
+        assert result.status is ManualDeleteJobStatus.FAILED
+        assert result.error_code == "partial_result_not_retryable"
+        assert result.attempt_count == 1
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_dependency_skip_without_failed_action_is_terminal_execution_error(tmp_path: Path) -> None:
+    event = _event()
+
+    async def resolver(payload: ManualDeleteRequest) -> MediaDeletionEvent:
+        return event
+
+    async def previewer(payload: ManualDeleteRequest, resolved: MediaDeletionEvent) -> ProcessingResultResponse:
+        return _plan(resolved)
+
+    async def runner(payload, resolved, report):  # type: ignore[no-untyped-def]
+        return ProcessingResultResponse(
+            item_type=resolved.item_type,
+            item_id=resolved.item_id,
+            name=resolved.name,
+            status=OverallStatus.SUCCESS,
+            actions=[
+                ActionResultResponse(
+                    system="radarr",
+                    action="delete_movie",
+                    status=ActionStatus.SKIPPED,
+                    message="dependent action was not attempted",
+                    reason=FailureReason.DOWNSTREAM_ERROR,
+                    details={},
+                )
+            ],
+        )
+
+    service = ManualDeletionJobService(
+        resolver,
+        previewer,
+        runner,
+        repository=SQLiteDeletionRepository(tmp_path / "dependency-skip-only.db"),
+        max_attempts=2,
+        retry_delays_seconds=(0,),
+    )
+    try:
+        preview = await service.preview(ManualDeleteRequest(item_type=ItemType.MOVIE, radarr_movie_id=1))
+        queued = await service.submit(
+            ManualDeleteRequest(
+                item_type=ItemType.MOVIE,
+                radarr_movie_id=1,
+                confirmed_plan_hash=preview.plan_hash,
+                idempotency_key=uuid4(),
+            )
+        )
+        for _ in range(200):
+            if service.get(queued.id).status is ManualDeleteJobStatus.FAILED:
+                break
+            await asyncio.sleep(0.01)
+        result = service.get(queued.id)
+        assert result.status is ManualDeleteJobStatus.FAILED
+        assert result.error_code == "execution_failed"
+        assert result.attempt_count == 1
     finally:
         await service.stop()
 

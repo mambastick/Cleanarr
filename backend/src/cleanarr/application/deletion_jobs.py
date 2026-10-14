@@ -133,6 +133,19 @@ _SAFE_RETAINED_SKIP_REASONS = frozenset(
         FailureReason.NO_PARTIAL_REQUEST_CLEANUP,
     }
 )
+_RETRYABLE_EXECUTION_ACTIONS = frozenset({"delete_hash", "delete_hashes"})
+_DEPENDENCY_SKIP_ACTIONS = frozenset(
+    {
+        "delete_movie",
+        "cleanup_movie",
+        "delete_series",
+        "cleanup_series",
+        "cleanup_episode",
+        "delete_season_scope",
+        "cleanup_season",
+        "delete_episode_scope",
+    }
+)
 _SAFE_RETAINED_SKIP_REASON_VALUES = frozenset(reason.value for reason in _SAFE_RETAINED_SKIP_REASONS)
 _VOLATILE_PLAN_ACTION_DETAILS = frozenset({"ratio", "seeding_time_seconds"})
 _TRANSIENT_PREFLIGHT_REASONS = frozenset(
@@ -483,42 +496,57 @@ class ManualDeletionJobService:
                 await self._retry_or_fail(job, message, error_code="preflight_failed")
         else:
             job.result = with_display_name(result, job.display_name or display_name(job.request, job.event))
-            if result.status is OverallStatus.PARTIAL_FAILURE:
-                failed_action = next(
-                    (action for action in result.actions if action.status is ActionStatus.FAILED), None
-                )
-                original_error = (
-                    str(failed_action.details.get("error") or failed_action.message)
-                    if failed_action is not None
-                    else "The deletion finished with downstream errors."
-                )
-                retention_failed = any(
-                    action.status is ActionStatus.FAILED and action.action == "record_retention"
+            execution_code = _execution_result_block_code(result)
+            failed_action = next((action for action in result.actions if action.status is ActionStatus.FAILED), None)
+            blocked_action = next(
+                (
+                    action
                     for action in result.actions
-                )
-                if any(action.status is ActionStatus.DELETED for action in result.actions):
-                    self._mark_failed(job, original_error, error_code="partial_result_not_retryable")
-                    job.message = "Partial cleanup completed; automatic replay is blocked."
-                    await asyncio.to_thread(self._repository.save_job, job)
-                elif retention_failed:
-                    self._mark_failed(job, original_error, error_code="execution_failed")
-                    job.message = "Durable retention recording failed; dependent cleanup was blocked."
-                    await asyncio.to_thread(self._repository.save_job, job)
-                elif _execution_result_block_code(result) == "unsafe_result":
-                    self._mark_failed(job, original_error, error_code="unsafe_plan")
-                    job.message = "Partial cleanup contained safety blockers; automatic replay is blocked."
-                    await asyncio.to_thread(self._repository.save_job, job)
-                else:
+                    if action.status in {ActionStatus.SKIPPED, ActionStatus.IGNORED}
+                    and _action_reason(action) not in _SAFE_RETAINED_SKIP_REASON_VALUES
+                ),
+                None,
+            )
+            error_action = failed_action or blocked_action
+            original_error = (
+                str(error_action.details.get("error") or error_action.message)
+                if error_action is not None
+                else "The deletion finished with downstream errors."
+            )
+            retention_failed = any(
+                action.status is ActionStatus.FAILED and action.action == "record_retention"
+                for action in result.actions
+            )
+            has_deleted = any(action.status is ActionStatus.DELETED for action in result.actions)
+            if has_deleted and (result.status is OverallStatus.PARTIAL_FAILURE or execution_code is not None):
+                self._mark_failed(job, original_error, error_code="partial_result_not_retryable")
+                job.message = "Partial cleanup completed; automatic replay is blocked."
+                await asyncio.to_thread(self._repository.save_job, job)
+            elif retention_failed:
+                self._mark_failed(job, original_error, error_code="execution_failed")
+                job.message = "Durable retention recording failed; dependent cleanup was blocked."
+                await asyncio.to_thread(self._repository.save_job, job)
+            elif execution_code == "unsafe_result":
+                self._mark_failed(job, original_error, error_code="unsafe_plan")
+                job.message = "Cleanup was blocked by safety checks; automatic replay is blocked."
+                await asyncio.to_thread(self._repository.save_job, job)
+            elif result.status is OverallStatus.PARTIAL_FAILURE or execution_code == "execution_failed":
+                if _execution_result_retryable(result):
                     await self._retry_or_fail(job, original_error, error_code="execution_failed")
-                return
-            job.status = ManualDeleteJobStatus.COMPLETED
-            job.phase = ManualDeleteJobPhase.COMPLETED
-            job.progress_percent = 100
-            job.message = "Deletion completed."
-            job.completed_at = datetime.now(UTC)
-            job.error = None
-            job.error_code = None
-            await asyncio.to_thread(self._repository.save_job, job)
+                else:
+                    self._mark_failed(job, original_error, error_code="execution_failed")
+                    job.message = "The downstream mutation failed; automatic replay is blocked."
+                    await asyncio.to_thread(self._repository.save_job, job)
+            else:
+                job.status = ManualDeleteJobStatus.COMPLETED
+                job.phase = ManualDeleteJobPhase.COMPLETED
+                job.progress_percent = 100
+                job.message = "Deletion completed."
+                job.completed_at = datetime.now(UTC)
+                job.error = None
+                job.error_code = None
+                await asyncio.to_thread(self._repository.save_job, job)
+            return
 
     async def _retry_or_fail(self, job: DeletionJobRecord, message: str, *, error_code: str) -> None:
         message = redact_sensitive_text(message)
@@ -731,23 +759,51 @@ def _preflight_block_code(plan: ProcessingResultResponse) -> str | None:
 def _execution_result_block_code(plan: ProcessingResultResponse) -> str | None:
     """Classify execution evidence separately from mutation-free preflight."""
 
-    if plan.status is OverallStatus.IGNORED or any(
-        action.status is ActionStatus.IGNORED
-        or (action.status is ActionStatus.SKIPPED and _action_reason(action) not in _SAFE_RETAINED_SKIP_REASON_VALUES)
-        or (
-            action.status is ActionStatus.FAILED
-            and (
-                _action_reason(action) not in _TRANSIENT_PREFLIGHT_REASONS
-                or not _is_read_preflight_action(action.action)
-                or action.action == "process_event"
-            )
-        )
-        for action in plan.actions
+    if plan.status is OverallStatus.IGNORED and (
+        not plan.actions
+        or any(action.status not in {ActionStatus.SKIPPED, ActionStatus.ALREADY_ABSENT} for action in plan.actions)
     ):
         return "unsafe_result"
-    if any(action.status is ActionStatus.FAILED for action in plan.actions):
+    dependency_failed = False
+    for action in plan.actions:
+        reason = _action_reason(action)
+        if action.status is ActionStatus.IGNORED:
+            return "unsafe_result"
+        if action.status is ActionStatus.SKIPPED:
+            if reason in _SAFE_RETAINED_SKIP_REASON_VALUES:
+                continue
+            # Strategies add dependent cleanup placeholders after a failed
+            # downloader operation.  They are execution errors rather than
+            # safety blockers, but still prevent a false completed result.
+            if reason == FailureReason.DOWNSTREAM_ERROR.value and action.action in _DEPENDENCY_SKIP_ACTIONS:
+                dependency_failed = True
+                continue
+            return "unsafe_result"
+        if action.status is ActionStatus.FAILED and reason not in _TRANSIENT_PREFLIGHT_REASONS:
+            return "unsafe_result"
+    if dependency_failed or any(action.status is ActionStatus.FAILED for action in plan.actions):
+        return "execution_failed"
+    if plan.status is OverallStatus.PARTIAL_FAILURE:
         return "execution_failed"
     return None
+
+
+def _execution_result_retryable(plan: ProcessingResultResponse) -> bool:
+    """Return whether an execution result may be replayed safely."""
+
+    failed = [action for action in plan.actions if action.status is ActionStatus.FAILED]
+    if not failed:
+        # Keep recovery for a partial result with no action detail, which can
+        # arise when a downstream adapter returns an incomplete response.
+        return plan.status is OverallStatus.PARTIAL_FAILURE
+    return all(
+        _action_reason(action) in _TRANSIENT_PREFLIGHT_REASONS
+        and (
+            action.action in _RETRYABLE_EXECUTION_ACTIONS
+            or (action.action != "process_event" and _is_read_preflight_action(action.action))
+        )
+        for action in failed
+    )
 
 
 def _action_reason(action: ActionResultResponse) -> str | None:

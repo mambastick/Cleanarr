@@ -88,7 +88,16 @@ unknown. rTorrent reads `d.multicall2` and `download_list` with explicit target
 bound. Both normalized hash sets must agree, including every sibling; invalid
 IDs, duplicate IDs or mismatches fail closed. A base path equal to the default
 root is retained as a conservative uncertain envelope. Membership is checked again
-before removal. A valid absolute base path outside the default root remains an
+before removal. A change triggers at most one inventory refresh, preserving
+other clients' scopes and rechecking both inventory views and final membership.
+In the fleet flow this refresh is a barrier before any adapter mutates; every
+client receives the merged evidence. The rTorrent adapter cannot refresh it
+locally after that barrier and silently leave other clients on an older snapshot.
+Stable unrelated additions or removals may proceed; new overlapping or unknown
+scopes still block affected targets. The target must exist in both snapshots,
+and its fresh deletion path must match both original and refreshed evidence.
+Further membership changes fail closed. A valid absolute base path outside the
+default root remains an
 exact inventory scope: it blocks overlapping targets across the fleet, while
 unrelated paths remain eligible. A malformed row with a readable hash and
 bounded path is retained as uncertain evidence. A row with no recoverable
@@ -164,6 +173,15 @@ failures in read actions, within the existing attempt bound. Ownership, shared
 paths, incomplete scopes, closed torrents and other safety blockers are terminal
 `unsafe_plan`; an automatic retry cannot make their evidence valid. Failed
 durable retention recording is also terminal and blocks dependent cleanup.
+
+Every live result is classified, including `ignored` or nominally successful
+results containing safety skips: blocked jobs fail rather than report completion.
+A transient downstream/authentication failure on `delete_hash` or `delete_hashes`
+before any recorded `DELETED` action retains bounded `execution_failed` retries,
+with a fresh preflight on each attempt. Dependent `SKIPPED/downstream_error`
+placeholders do not turn that failure into a safety block. Actual safety blockers,
+failed retention recording, other failed mutations, and partial results with
+applied deletions remain terminal; automatic replay is blocked.
 
 Downloads pause/resume is reversible and distinct from removing a torrent entry
 or data. It requires fresh, managed ownership evidence. Playback/watch and

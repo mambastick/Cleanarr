@@ -43,7 +43,7 @@ async def _wait_for_terminal(service: ManualDeletionBatchService, batch_id) -> N
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("outcome", ["success", "late_error", "safety_skip", "safety_failed"])
+@pytest.mark.parametrize("outcome", ["success", "late_error", "safety_skip", "safety_failed", "retained", "absent"])
 async def test_live_movie_strategy_preserves_deleted_batch_outcome(tmp_path: Path, outcome: str) -> None:
     target_hash = "A" * 40
     radarr = FakeRadarrClient(
@@ -81,6 +81,22 @@ async def test_live_movie_strategy_preserves_deleted_batch_outcome(tmp_path: Pat
         return ProcessingResultResponse.from_domain(await preview_strategy.handle(resolved))
 
     async def runner(payload, resolved, report):  # type: ignore[no-untyped-def]
+        if outcome in {"retained", "absent"}:
+            return (await previewer(payload, resolved)).model_copy(
+                update={
+                    "status": OverallStatus.IGNORED,
+                    "actions": [
+                        ActionResultResponse(
+                            system="qbittorrent",
+                            action="delete_hash",
+                            status=ActionStatus.SKIPPED if outcome == "retained" else ActionStatus.ALREADY_ABSENT,
+                            reason=FailureReason.SEEDING_POLICY if outcome == "retained" else None,
+                            message="Intentionally retained or already absent",
+                            details={},
+                        )
+                    ],
+                }
+            )
         if outcome.startswith("safety_"):
             return (await previewer(payload, resolved)).model_copy(
                 update={
@@ -126,14 +142,15 @@ async def test_live_movie_strategy_preserves_deleted_batch_outcome(tmp_path: Pat
         )
         await _wait_for_terminal(service, submitted.id)
         result = service.get(submitted.id)
-        assert result.status.value == ("completed" if outcome == "success" else "failed")
+        completed = outcome in {"success", "retained", "absent"}
+        assert result.status.value == ("completed" if completed else "failed")
         child = result.children[0]
-        assert child.status is (BatchChildStatus.COMPLETED if outcome == "success" else BatchChildStatus.FAILED)
+        assert child.status is (BatchChildStatus.COMPLETED if completed else BatchChildStatus.FAILED)
         assert child.error_code == (
             "partial_result" if outcome == "late_error" else "unsafe_result" if outcome.startswith("safety_") else None
         )
         assert child.result is not None
-        if outcome.startswith("safety_"):
+        if outcome.startswith("safety_") or outcome in {"retained", "absent"}:
             assert radarr.deleted_movie_ids == downloader.deleted_hashes == []
             return
         assert {action.action for action in child.result.actions if action.status is ActionStatus.DELETED} >= {

@@ -6,7 +6,7 @@ import asyncio
 import posixpath
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import PurePosixPath
 from typing import Protocol, cast
 
@@ -34,6 +34,7 @@ class ContentSafetyAssessment:
     scope_paths: tuple[tuple[str, str, tuple[str, ...], str | None], ...] = ()
     uncertainty_codes: tuple[tuple[str, str, str], ...] = ()
     sibling_scope_blockers: tuple[tuple[str, str, tuple[ContentScopeBlocker, ...]], ...] = ()
+    inventories: tuple[tuple[str, DownloaderContentInventory], ...] = field(default=(), repr=False)
 
 
 def validate_scope_path(value: object, *, minimum_parts: int = 3) -> str | None:
@@ -220,6 +221,50 @@ def assess_content_inventory(
                 )
                 for (client_id, hash_value), blockers in sibling_scope_blockers.items()
             )
+        ),
+        inventories=tuple(
+            (client_id, cast(DownloaderContentInventory, inventory)) for client_id, inventory in inventories
+        ),
+    )
+
+
+def refresh_content_inventory(
+    assessment: ContentSafetyAssessment,
+    client_id: str,
+    inventory: DownloaderContentInventory | None,
+    hashes: Sequence[str],
+) -> ContentSafetyAssessment:
+    """Replace one private snapshot without dropping other clients' ownership evidence."""
+
+    if not assessment.complete or sum(key == client_id for key, _value in assessment.inventories) != 1:
+        return ContentSafetyAssessment(complete=False)
+    known_existing: dict[str, list[str]] = {}
+    requested = set(hashes)
+    for key, value in assessment.missing_known | frozenset(
+        (key, value) for key, value in assessment.observed if value in requested
+    ):
+        known_existing.setdefault(key, []).append(value)
+    refreshed = assess_content_inventory(
+        tuple((key, inventory if key == client_id else original) for key, original in assessment.inventories),
+        hashes,
+        known_existing=known_existing,
+    )
+    blockers: dict[tuple[str, str], set[ContentScopeBlocker]] = {}
+    for key, value, scopes in (*assessment.sibling_scope_blockers, *refreshed.sibling_scope_blockers):
+        blockers.setdefault((key, value), set()).update(scopes)
+    return replace(
+        refreshed,
+        conflicts=refreshed.conflicts | assessment.conflicts,
+        missing_known=refreshed.missing_known | assessment.missing_known,
+        uncertain=refreshed.uncertain | assessment.uncertain,
+        uncertainty_codes=tuple(sorted(set((*assessment.uncertainty_codes, *refreshed.uncertainty_codes)))),
+        sibling_scope_blockers=tuple(
+            (
+                key,
+                value,
+                tuple(sorted(scopes, key=lambda scope: (scope.client_id, scope.info_hash, scope.torrent_name or ""))),
+            )
+            for (key, value), scopes in sorted(blockers.items())
         ),
     )
 

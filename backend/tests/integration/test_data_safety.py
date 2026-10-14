@@ -10,6 +10,7 @@ from cleanarr.application.data_safety import (
     assess_content_inventory,
     content_safety_blockers,
     content_safety_skip_reason,
+    refresh_content_inventory,
 )
 from cleanarr.domain import (
     ContentScopeBlocker,
@@ -195,6 +196,139 @@ async def test_hybrid_alias_requested_v2_detects_canonical_v1_shared_path() -> N
     assert result[0].hash_value == v2_hash
     assert result[0].skip_reason == "shared_path"
     assert result[0].delete_files is False
+
+
+def test_refresh_preserves_qbt_aliases_empty_scope_and_reassesses_rt_path() -> None:
+    qbt_v1 = "A" * 40
+    qbt_v2 = "B" * 64
+    verified_empty = "C" * 40
+    rt_hash = "D" * 40
+    qbt_inventory = DownloaderContentInventory(
+        scopes=(
+            DownloaderContentScope(
+                info_hash=qbt_v1,
+                hash_aliases=(qbt_v2,),
+                paths=("/data/shared",),
+            ),
+            DownloaderContentScope(info_hash=verified_empty, paths=(), empty_verified=True),
+        )
+    )
+    rt_inventory = DownloaderContentInventory(scopes=(_scope(rt_hash, "/data/rt"),))
+    assessment = assess_content_inventory(
+        [("qbt", qbt_inventory), ("rt", rt_inventory)],
+        [qbt_v1, qbt_v2, verified_empty, rt_hash],
+    )
+
+    assert assessment.complete is True
+    assert assessment.inventories == (("qbt", qbt_inventory), ("rt", rt_inventory))
+    assert "inventories=" not in repr(assessment)
+
+    refreshed_rt = DownloaderContentInventory(scopes=(_scope(rt_hash, "/data/shared"),))
+    refreshed = refresh_content_inventory(assessment, "rt", refreshed_rt, [qbt_v2, verified_empty, rt_hash])
+
+    assert refreshed.complete is True
+    assert ("qbt", qbt_v1) in refreshed.observed
+    assert ("qbt", qbt_v2) in refreshed.observed
+    assert content_safety_skip_reason(refreshed, "qbt", qbt_v2) == "shared_path"
+    assert content_safety_skip_reason(refreshed, "rt", rt_hash) == "shared_path"
+    assert content_safety_skip_reason(refreshed, "qbt", verified_empty) is None
+
+
+def test_refresh_marks_new_uncertain_rt_overlap_as_sibling_unknown_for_qbt_alias() -> None:
+    qbt_v1 = "A" * 40
+    qbt_v2 = "B" * 64
+    rt_hash = "D" * 40
+    qbt_inventory = DownloaderContentInventory(
+        scopes=(DownloaderContentScope(info_hash=qbt_v1, hash_aliases=(qbt_v2,), paths=("/data/shared",)),)
+    )
+    assessment = assess_content_inventory(
+        [("qbt", qbt_inventory), ("rt", DownloaderContentInventory())], [qbt_v2, rt_hash]
+    )
+
+    refreshed = refresh_content_inventory(
+        assessment,
+        "rt",
+        DownloaderContentInventory(
+            scopes=(
+                DownloaderContentScope(
+                    info_hash=rt_hash,
+                    paths=("/data/shared/new",),
+                    uncertain=True,
+                    torrent_name="RT uncertain",
+                ),
+            )
+        ),
+        [qbt_v2, rt_hash],
+    )
+
+    assert refreshed.complete is True
+    assert content_safety_skip_reason(refreshed, "rt", rt_hash) == "ownership_unverifiable"
+    assert content_safety_skip_reason(refreshed, "qbt", qbt_v2) == "sibling_scope_unknown"
+    assert content_safety_blockers(refreshed, "qbt", qbt_v2) == (ContentScopeBlocker("rt", rt_hash, "RT uncertain"),)
+
+
+def test_refresh_preserves_original_known_missing_hash_as_blocked() -> None:
+    target_hash = "A" * 40
+    original = assess_content_inventory(
+        [("qbt", DownloaderContentInventory())],
+        [target_hash],
+        known_existing={"qbt": (target_hash,)},
+    )
+    refreshed = refresh_content_inventory(
+        original,
+        "qbt",
+        DownloaderContentInventory(scopes=(_scope(target_hash, "/data/torrents/Movie"),)),
+        [target_hash],
+    )
+
+    assert refreshed.complete is True
+    assert ("qbt", target_hash) in refreshed.missing_known
+    assert content_safety_skip_reason(refreshed, "qbt", target_hash) == "ownership_unverifiable"
+
+
+def test_refresh_marks_removed_known_requested_target_missing() -> None:
+    target_hash = "A" * 40
+    original_inventory = DownloaderContentInventory(scopes=(_scope(target_hash, "/data/torrents/Movie"),))
+    original = assess_content_inventory(
+        [("qbt", original_inventory)], [target_hash], known_existing={"qbt": (target_hash,)}
+    )
+    refreshed = refresh_content_inventory(original, "qbt", DownloaderContentInventory(), [target_hash])
+
+    assert refreshed.complete is True
+    assert ("qbt", target_hash) in refreshed.missing_known
+    assert ("qbt", target_hash) not in refreshed.observed
+    assert content_safety_skip_reason(refreshed, "qbt", target_hash) == "ownership_unverifiable"
+
+
+@pytest.mark.parametrize(
+    "assessment, client_id, inventory",
+    [
+        (
+            assess_content_inventory([("qbt", None)], ["A" * 40]),
+            "qbt",
+            DownloaderContentInventory(),
+        ),
+        (
+            assess_content_inventory([("rt", DownloaderContentInventory())], ["A" * 40]),
+            "qbt",
+            DownloaderContentInventory(),
+        ),
+        (
+            assess_content_inventory([("qbt", DownloaderContentInventory())], ["A" * 40]),
+            "qbt",
+            DownloaderContentInventory(failures=(DownloaderContentInventoryFailure("read_failed"),)),
+        ),
+    ],
+)
+def test_refresh_invalid_incomplete_or_missing_private_inventory_fails_closed(
+    assessment: ContentSafetyAssessment,
+    client_id: str,
+    inventory: DownloaderContentInventory,
+) -> None:
+    refreshed = refresh_content_inventory(assessment, client_id, inventory, ["A" * 40])
+
+    assert refreshed.complete is False
+    assert content_safety_skip_reason(refreshed, client_id, "A" * 40) == "ownership_unverifiable"
 
 
 @pytest.mark.asyncio
