@@ -9,6 +9,8 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import uuid4
 
+from .downloads import ContentScopeBlocker
+
 
 class ItemType(StrEnum):
     """Supported Jellyfin item types."""
@@ -45,6 +47,8 @@ class FailureReason(StrEnum):
     NO_MATCH = "no_match"
     CONFLICTING_IDENTIFIERS = "conflicting_identifiers"
     SHARED_PATH = "shared_path"
+    SIBLING_SCOPE_UNKNOWN = "sibling_scope_unknown"
+    TORRENT_CLOSED = "torrent_closed"
     OWNERSHIP_UNVERIFIABLE = "ownership_unverifiable"
     PACK_TORRENT = "pack_torrent"
     SHARED_FILE = "shared_file"
@@ -303,3 +307,4 @@ class DownloaderRemovalResult:
     content_path: str | None = None
     download_directory: str | None = None
     delete_files: bool | None = None
+    blocking_torrents: tuple[ContentScopeBlocker, ...] = ()

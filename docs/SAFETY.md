@@ -46,17 +46,23 @@ Webhook cascades require a configured, enabled Jellyfin connection. Exact item
 ID lookup is attempted first. Jellyfin 10.11.11 has no supported provider-equality
 filter on this endpoint, so fingerprint fallback uses complete pagination with
 the existing 20,000-item library bound. There is no 1,000-item rejection.
-Missing/invalid totals, partial data, a catalogue above the bound or a failed lookup returns `source_unverifiable`
+A changed total discards the entire pass and restarts once; a second changed
+pass fails closed. Missing/invalid totals, partial data, a catalogue above the
+bound or a failed lookup returns `source_unverifiable`
 and blocks the cascade. Manual confirmed flows remain available independently.
 
 Every data-removal preview and execution reads complete private content scopes
 from all configured downloaders. Equal, ancestor or descendant scopes belonging
 to another torrent, including the same hash on another client, return
-`shared_path`. Incomplete file metadata with a validated root is represented as
-a conservative uncertain scope: it blocks overlapping targets without disabling
-unrelated paths. A metadata-less torrent is ignored for overlap only when its
+`shared_path` when both scopes are known. Incomplete file metadata with a
+validated root produces `sibling_scope_unknown` for overlapping targets. The
+preview identifies the unverified sibling by name, client and hash without
+claiming its files are shared. Unrelated paths remain available. A metadata-less torrent is ignored for overlap
+only when its
 protocol counters prove zero local payload bytes; an empty file list alone is
-not proof. Unbounded/invalid/failed inventory returns `ownership_unverifiable`.
+not proof. qBittorrent requires `metaDL`, `total_size` of -1 or 0, strict zero
+completed/downloaded counters and finite numeric zero progress.
+Unbounded/invalid/failed inventory returns `ownership_unverifiable`.
 Blocked targets retain all dependent Arr/Seerr/Jellyfin data. Each call reuses one
 fleet assessment, binds fresh target metadata to its recorded scope and keeps
 standalone adapter guards active. Unknown existence is never reported as present
@@ -77,8 +83,12 @@ inspect remote inodes or resolve different bind-mount/symlink aliases. Configure
 clients with a consistent path namespace; unresolved physical aliases must be
 kept outside mutation-enabled operation. Hardlinks can retain physical bytes,
 so no reclaimed-space guarantee is made. Windows/UNC and malformed paths are
-unknown. Closed rTorrent inventory may derive a conservative scope from its
-directory, name and multi-file flag. Actual data removal still requires a
+unknown. rTorrent reads inventory through one `d.multicall2` plus
+`directory.default`, with validated rows and the existing 20,000-scope bound.
+Closed rTorrent inventory may derive a conservative scope from its directory,
+name and multi-file flag. A closed target reports `torrent_closed`: open or
+resume it in rTorrent, then refresh the preview. Actual data removal still
+requires a
 nonempty base path strictly below its live
 `directory.default` root; root/no-subdirectory and paths outside that root are
 blocked rather than recursively removed by a directory fallback.
@@ -134,6 +144,12 @@ job is terminal `interrupted_unknown` and is not replayed automatically. A
 webhook exception or cancellation likewise leaves a durable
 `interrupted_unknown` tombstone; automatic reconciliation/replay is blocked
 because the reached downstream stage cannot be proved.
+
+A failed manual preflight retries only transient downstream/authentication
+failures in read actions, within the existing attempt bound. Ownership, shared
+paths, incomplete scopes, closed torrents and other safety blockers are terminal
+`unsafe_plan`; an automatic retry cannot make their evidence valid. Failed
+durable retention recording is also terminal and blocks dependent cleanup.
 
 Downloads pause/resume is reversible and distinct from removing a torrent entry
 or data. It requires fresh, managed ownership evidence. Playback/watch and

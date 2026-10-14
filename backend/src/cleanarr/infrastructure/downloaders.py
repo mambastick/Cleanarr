@@ -16,8 +16,11 @@ from xmlrpc.client import Fault, dumps, loads
 import httpx
 
 from cleanarr.application.data_safety import (
+    MAX_CONTENT_INVENTORY_PATHS,
+    MAX_CONTENT_INVENTORY_SCOPES,
     ContentSafetyAssessment,
     assess_content_inventory,
+    content_safety_blockers,
     content_safety_skip_reason,
     content_scope_matches,
     join_scope_path,
@@ -32,6 +35,7 @@ from cleanarr.application.ports import (
 )
 from cleanarr.domain import (
     AuthenticationError,
+    ContentScopeBlocker,
     DownloadControlAction,
     DownloadControlOutcome,
     DownloaderContentInventory,
@@ -215,6 +219,7 @@ class MultiDownloaderClient:
                     client_name=target.name,
                     client_kind=target.kind,
                     skip_reason=reason,
+                    blocking_torrents=content_safety_blockers(assessment, target.id, hash_value),
                     delete_files=False,
                 )
         outcomes = (
@@ -514,6 +519,9 @@ class TransmissionClient:
                 existed=(hash_value in matches) if listing_valid else None,
                 status=matches[hash_value][0] if hash_value in matches else None,
                 skip_reason=matches[hash_value][1] if hash_value in matches else None,
+                blocking_torrents=(
+                    content_safety_blockers(assessment, safety_client_id, hash_value) if assessment is not None else ()
+                ),
                 torrent_name=matches[hash_value][2] if hash_value in matches else None,
                 download_directory=matches[hash_value][3] if hash_value in matches else None,
                 delete_files=(
@@ -543,6 +551,7 @@ class TransmissionClient:
             params={
                 "fields": [
                     hash_key,
+                    "name",
                     root_key,
                     "files",
                     total_size_key,
@@ -558,30 +567,51 @@ class TransmissionClient:
             return DownloaderContentInventory(
                 failures=(DownloaderContentInventoryFailure("invalid_content_inventory"),)
             )
+        if len(raw_torrents) > MAX_CONTENT_INVENTORY_SCOPES:
+            return DownloaderContentInventory(failures=(DownloaderContentInventoryFailure("inventory_limit_exceeded"),))
         scopes: list[DownloaderContentScope] = []
         failures: list[DownloaderContentInventoryFailure] = []
+        file_count = 0
         for torrent in raw_torrents:
             if not isinstance(torrent, dict):
                 failures.append(DownloaderContentInventoryFailure("malformed_content_scope"))
                 continue
             info_hash = _normalize_single_hash(str(torrent.get(hash_key, "")))
+            torrent_name = _safe_text(torrent.get("name"))
             root = validate_scope_path(torrent.get(root_key), minimum_parts=2)
             raw_files = torrent.get("files")
             if not info_hash or root is None:
                 failures.append(DownloaderContentInventoryFailure("invalid_content_scope"))
                 continue
             if raw_files is None:
-                scopes.append(DownloaderContentScope(info_hash=info_hash, paths=(root,), uncertain=True))
+                scopes.append(
+                    DownloaderContentScope(
+                        info_hash=info_hash, paths=(root,), uncertain=True, torrent_name=torrent_name
+                    )
+                )
                 continue
             if raw_files == []:
                 if _transmission_empty_verified(torrent, modern=modern):
-                    scopes.append(DownloaderContentScope(info_hash=info_hash, paths=(), empty_verified=True))
+                    scopes.append(
+                        DownloaderContentScope(
+                            info_hash=info_hash, paths=(), empty_verified=True, torrent_name=torrent_name
+                        )
+                    )
                 else:
-                    scopes.append(DownloaderContentScope(info_hash=info_hash, paths=(root,), uncertain=True))
+                    scopes.append(
+                        DownloaderContentScope(
+                            info_hash=info_hash, paths=(root,), uncertain=True, torrent_name=torrent_name
+                        )
+                    )
                 continue
             if not isinstance(raw_files, list):
                 failures.append(DownloaderContentInventoryFailure("unbounded_content_scope"))
                 continue
+            file_count += len(raw_files)
+            if file_count > MAX_CONTENT_INVENTORY_PATHS:
+                return DownloaderContentInventory(
+                    failures=(DownloaderContentInventoryFailure("inventory_limit_exceeded"),)
+                )
             paths = tuple(
                 path
                 for raw_file in raw_files
@@ -592,7 +622,7 @@ class TransmissionClient:
             if len(paths) != len(raw_files):
                 failures.append(DownloaderContentInventoryFailure("unbounded_content_scope"))
             else:
-                scopes.append(DownloaderContentScope(info_hash=info_hash, paths=paths))
+                scopes.append(DownloaderContentScope(info_hash=info_hash, paths=paths, torrent_name=torrent_name))
         return DownloaderContentInventory(scopes=tuple(scopes), failures=tuple(failures))
 
     async def list_torrents(self) -> DownloaderListing:
@@ -777,6 +807,7 @@ class TransmissionClient:
         content_path: str | None = None,
         download_directory: str | None = None,
         delete_files: bool | None = None,
+        blocking_torrents: tuple[ContentScopeBlocker, ...] = (),
     ) -> DownloaderRemovalResult:
         return DownloaderRemovalResult(
             hash_value=hash_value,
@@ -792,6 +823,7 @@ class TransmissionClient:
             content_path=content_path,
             download_directory=download_directory,
             delete_files=delete_files,
+            blocking_torrents=blocking_torrents,
         )
 
 
@@ -962,6 +994,9 @@ class DelugeClient:
                 existed=(hash_value in existing) if listing_valid else None,
                 status=statuses.get(hash_value),
                 skip_reason=decisions.get(hash_value),
+                blocking_torrents=(
+                    content_safety_blockers(assessment, safety_client_id, hash_value) if assessment is not None else ()
+                ),
                 torrent_name=metadata.get(hash_value, (None, None))[0],
                 download_directory=metadata.get(hash_value, (None, None))[1],
                 delete_files=delete_files if hash_value in removable else False if hash_value in existing else None,
@@ -975,36 +1010,57 @@ class DelugeClient:
         await self._login()
         raw_statuses = await self._rpc(
             "core.get_torrents_status",
-            [{}, ["save_path", "files", "total_size", "total_done"]],
+            [{}, ["name", "save_path", "files", "total_size", "total_done"]],
         )
         if not isinstance(raw_statuses, dict):
             return DownloaderContentInventory(
                 failures=(DownloaderContentInventoryFailure("invalid_content_inventory"),)
             )
+        if len(raw_statuses) > MAX_CONTENT_INVENTORY_SCOPES:
+            return DownloaderContentInventory(failures=(DownloaderContentInventoryFailure("inventory_limit_exceeded"),))
         scopes: list[DownloaderContentScope] = []
         failures: list[DownloaderContentInventoryFailure] = []
+        file_count = 0
         for torrent_id, raw_status in raw_statuses.items():
             if not isinstance(raw_status, dict):
                 failures.append(DownloaderContentInventoryFailure("malformed_content_scope"))
                 continue
             info_hash = _normalize_single_hash(str(torrent_id))
+            torrent_name = _safe_text(raw_status.get("name"))
             root = validate_scope_path(raw_status.get("save_path"), minimum_parts=2)
             raw_files = raw_status.get("files")
             if not info_hash or root is None:
                 failures.append(DownloaderContentInventoryFailure("invalid_content_scope"))
                 continue
             if raw_files is None:
-                scopes.append(DownloaderContentScope(info_hash=info_hash, paths=(root,), uncertain=True))
+                scopes.append(
+                    DownloaderContentScope(
+                        info_hash=info_hash, paths=(root,), uncertain=True, torrent_name=torrent_name
+                    )
+                )
                 continue
             if raw_files == []:
                 if _deluge_empty_verified(raw_status):
-                    scopes.append(DownloaderContentScope(info_hash=info_hash, paths=(), empty_verified=True))
+                    scopes.append(
+                        DownloaderContentScope(
+                            info_hash=info_hash, paths=(), empty_verified=True, torrent_name=torrent_name
+                        )
+                    )
                 else:
-                    scopes.append(DownloaderContentScope(info_hash=info_hash, paths=(root,), uncertain=True))
+                    scopes.append(
+                        DownloaderContentScope(
+                            info_hash=info_hash, paths=(root,), uncertain=True, torrent_name=torrent_name
+                        )
+                    )
                 continue
             if not isinstance(raw_files, list):
                 failures.append(DownloaderContentInventoryFailure("unbounded_content_scope"))
                 continue
+            file_count += len(raw_files)
+            if file_count > MAX_CONTENT_INVENTORY_PATHS:
+                return DownloaderContentInventory(
+                    failures=(DownloaderContentInventoryFailure("inventory_limit_exceeded"),)
+                )
             paths = tuple(
                 path
                 for raw_file in raw_files
@@ -1018,7 +1074,7 @@ class DelugeClient:
             if not paths:
                 failures.append(DownloaderContentInventoryFailure("invalid_content_scope"))
                 continue
-            scopes.append(DownloaderContentScope(info_hash=info_hash, paths=paths))
+            scopes.append(DownloaderContentScope(info_hash=info_hash, paths=paths, torrent_name=torrent_name))
         return DownloaderContentInventory(scopes=tuple(scopes), failures=tuple(failures))
 
     async def list_torrents(self) -> DownloaderListing:
@@ -1159,6 +1215,7 @@ class DelugeClient:
         content_path: str | None = None,
         download_directory: str | None = None,
         delete_files: bool | None = None,
+        blocking_torrents: tuple[ContentScopeBlocker, ...] = (),
     ) -> DownloaderRemovalResult:
         return DownloaderRemovalResult(
             hash_value=hash_value,
@@ -1174,6 +1231,7 @@ class DelugeClient:
             content_path=content_path,
             download_directory=download_directory,
             delete_files=delete_files,
+            blocking_torrents=blocking_torrents,
         )
 
 
@@ -1301,6 +1359,9 @@ class RTorrentClient:
                 existed=(hash_value in existing) if listing_valid else None,
                 status=statuses.get(hash_value),
                 skip_reason=decisions.get(hash_value),
+                blocking_torrents=(
+                    content_safety_blockers(assessment, safety_client_id, hash_value) if assessment is not None else ()
+                ),
                 torrent_name=metadata.get(hash_value, (None, None))[0],
                 content_path=metadata.get(hash_value, (None, None))[1],
                 delete_files=(
@@ -1315,65 +1376,85 @@ class RTorrentClient:
         ]
 
     async def list_content_inventory(self) -> DownloaderContentInventory:
-        """Read validated rTorrent scopes, retaining bounded closed-torrent evidence."""
+        """Read every rTorrent content scope in one bounded multicall."""
 
-        raw_ids = await self._rpc("download_list")
-        if not isinstance(raw_ids, (list, tuple)):
+        try:
+            default_root, raw_rows = await asyncio.gather(
+                self._rpc("directory.default"),
+                self._rpc(
+                    "d.multicall2",
+                    "",
+                    "default",
+                    "d.hash=",
+                    "d.base_path=",
+                    "d.directory=",
+                    "d.name=",
+                    "d.is_multi_file=",
+                ),
+            )
+        except (AuthenticationError, ExternalServiceError):
             return DownloaderContentInventory(
                 failures=(DownloaderContentInventoryFailure("invalid_content_inventory"),)
             )
-        default_root = await self._rpc("directory.default")
         root = validate_scope_path(default_root, minimum_parts=2)
         if root is None:
             return DownloaderContentInventory(
                 failures=(DownloaderContentInventoryFailure("invalid_content_inventory"),)
             )
+        if not isinstance(raw_rows, (list, tuple)):
+            return DownloaderContentInventory(failures=(DownloaderContentInventoryFailure("malformed_content_scope"),))
+        if len(raw_rows) > MAX_CONTENT_INVENTORY_SCOPES:
+            return DownloaderContentInventory(failures=(DownloaderContentInventoryFailure("inventory_limit_exceeded"),))
+
         scopes: list[DownloaderContentScope] = []
-        failures: list[DownloaderContentInventoryFailure] = []
-        for torrent_id in raw_ids:
-            info_hash = _normalize_single_hash(str(torrent_id))
-            if not info_hash:
-                failures.append(DownloaderContentInventoryFailure("invalid_content_scope"))
-                continue
-            base_path = await self._rpc("d.base_path", info_hash)
+        seen_hashes: set[str] = set()
+        for row in raw_rows:
+            if not isinstance(row, (list, tuple)) or len(row) != 5:
+                return DownloaderContentInventory(
+                    failures=(DownloaderContentInventoryFailure("malformed_content_scope"),)
+                )
+            raw_hash, base_path, directory, name, is_multi_file = row
+            info_hash = _normalize_single_hash(raw_hash) if isinstance(raw_hash, str) else ""
+            torrent_name = _safe_text(name)
+            if not info_hash or info_hash in seen_hashes:
+                return DownloaderContentInventory(
+                    failures=(DownloaderContentInventoryFailure("invalid_content_scope"),)
+                )
+            seen_hashes.add(info_hash)
             path = _rtorrent_child_path(base_path, root)
             if path is not None:
-                scopes.append(DownloaderContentScope(info_hash=info_hash, paths=(path,)))
+                scopes.append(DownloaderContentScope(info_hash=info_hash, paths=(path,), torrent_name=torrent_name))
                 continue
             if base_path not in (None, ""):
-                failures.append(DownloaderContentInventoryFailure("unbounded_content_scope"))
-                continue
-            try:
-                directory, name, is_multi_file = await asyncio.gather(
-                    self._rpc("d.directory", info_hash),
-                    self._rpc("d.name", info_hash),
-                    self._rpc("d.is_multi_file", info_hash),
+                return DownloaderContentInventory(
+                    failures=(DownloaderContentInventoryFailure("unbounded_content_scope"),)
                 )
-            except (AuthenticationError, ExternalServiceError):
-                failures.append(DownloaderContentInventoryFailure("unbounded_content_scope"))
-                continue
             if isinstance(is_multi_file, bool):
                 is_multi = is_multi_file
-            elif isinstance(is_multi_file, int) and not isinstance(is_multi_file, bool) and is_multi_file in {0, 1}:
+            elif isinstance(is_multi_file, int) and is_multi_file in {0, 1}:
                 is_multi = bool(is_multi_file)
             else:
-                failures.append(DownloaderContentInventoryFailure("unbounded_content_scope"))
-                continue
+                return DownloaderContentInventory(
+                    failures=(DownloaderContentInventoryFailure("unbounded_content_scope"),)
+                )
             if is_multi:
                 derived_path = _rtorrent_child_path(directory, root)
             else:
                 derived_path = _rtorrent_child_path(join_scope_path(directory, name, minimum_root_parts=2), root)
             if derived_path is None:
-                failures.append(DownloaderContentInventoryFailure("unbounded_content_scope"))
-                continue
+                return DownloaderContentInventory(
+                    failures=(DownloaderContentInventoryFailure("unbounded_content_scope"),)
+                )
             scopes.append(
                 DownloaderContentScope(
                     info_hash=info_hash,
                     paths=(derived_path,),
                     uncertain=True,
+                    uncertainty_code="torrent_closed",
+                    torrent_name=torrent_name,
                 )
             )
-        return DownloaderContentInventory(scopes=tuple(scopes), failures=tuple(failures))
+        return DownloaderContentInventory(scopes=tuple(scopes))
 
     async def list_torrents(self) -> DownloaderListing:
         raw_ids = await self._rpc("download_list")
@@ -1544,6 +1625,7 @@ class RTorrentClient:
         content_path: str | None = None,
         download_directory: str | None = None,
         delete_files: bool | None = None,
+        blocking_torrents: tuple[ContentScopeBlocker, ...] = (),
     ) -> DownloaderRemovalResult:
         return DownloaderRemovalResult(
             hash_value=hash_value,
@@ -1559,6 +1641,7 @@ class RTorrentClient:
             content_path=content_path,
             download_directory=download_directory,
             delete_files=delete_files,
+            blocking_torrents=blocking_torrents,
         )
 
 

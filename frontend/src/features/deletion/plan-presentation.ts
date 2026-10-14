@@ -8,6 +8,9 @@ export const planCopy = {
     movie: "Entire movie", series: "Entire series · all seasons", season: "Season", episode: "Episode", scopeUnknown: "Deletion scope unavailable",
     dataPath: "Data path", downloadDirectory: "Download directory", mediaPath: "Media path", client: "Client", instance: "Service instance", hash: "Torrent hash", identifier: "Target ID",
     noName: "The client did not provide a torrent name. Use its hash to find it.", noPath: "The plan does not include a data path.", noDetails: "No additional target details were provided.",
+    blockingTorrent: "Torrent with unverified files",
+    sibling_scope_unknown: "Another torrent in this data location has incomplete file metadata. Cleanup is blocked until its scope can be verified.",
+    torrent_closed: "rTorrent has closed this torrent and cannot verify its removal path. Open or resume it in rTorrent, then refresh the preview.",
     torrentAndData: "Remove the torrent entry and its downloaded files.", torrentOnly: "Remove the torrent entry. This step keeps the downloaded files.", torrentUnknown: "Remove the torrent entry. The plan does not specify whether its files will be removed.",
     movieEffect: "Remove the movie from Radarr and delete its media files.", seriesEffect: "Remove the entire series from Sonarr and delete its media files.", fileEffect: "Delete this episode file from disk through Sonarr.",
     requestEffect: "Delete this request from Seerr. This step does not delete files.", issueEffect: "Delete this issue from Seerr. This step does not delete files.", mediaEffect: "Delete the Seerr availability record. This step does not delete files.",
@@ -27,6 +30,9 @@ export const planCopy = {
     movie: "Фильм целиком", series: "Сериал целиком · все сезоны", season: "Сезон", episode: "Эпизод", scopeUnknown: "Область удаления не указана",
     dataPath: "Путь данных", downloadDirectory: "Папка загрузки", mediaPath: "Путь медиаматериала", client: "Клиент", instance: "Экземпляр сервиса", hash: "Хеш торрента", identifier: "ID объекта",
     noName: "Клиент не передал название торрента. Его можно найти по хешу.", noPath: "Путь данных в плане не указан.", noDetails: "Дополнительные сведения об объекте не переданы.",
+    blockingTorrent: "Раздача с непроверенными файлами",
+    sibling_scope_unknown: "У другой раздачи в этой папке неполные сведения о файлах. Очистка заблокирована до проверки её области данных.",
+    torrent_closed: "Раздача закрыта в rTorrent, поэтому путь удаления не подтверждён. Откройте или возобновите её в rTorrent, затем обновите предпросмотр.",
     torrentAndData: "Удалить торрент из клиента и его скачанные файлы.", torrentOnly: "Удалить торрент из клиента. Этот шаг сохранит скачанные файлы.", torrentUnknown: "Удалить торрент из клиента. В плане не указано, будут ли удалены его файлы.",
     movieEffect: "Удалить фильм из Radarr вместе с его медиафайлами.", seriesEffect: "Удалить сериал целиком из Sonarr вместе с его медиафайлами.", fileEffect: "Удалить этот файл эпизода с диска через Sonarr.",
     requestEffect: "Удалить этот запрос из Seerr. Этот шаг не удаляет файлы.", issueEffect: "Удалить это обращение из Seerr. Этот шаг не удаляет файлы.", mediaEffect: "Удалить запись о доступности из Seerr. Этот шаг не удаляет файлы.",
@@ -81,7 +87,7 @@ export function actionEffect(action: DashboardAction, language: DeletionLanguage
   if (action.status === "already_absent") return c.absent
   if (actionGroup(action) !== "remove") {
     const reason = action.reason
-    const reasons = { shared_path: c.shared_path, ownership_unverifiable: c.ownership_unverifiable, conflicting_identifiers: c.conflicting_identifiers, source_unverifiable: c.source_unverifiable, pack_torrent: c.pack_torrent, shared_file: c.shared_file, seeding_policy: c.seeding_policy, partial_request_retained: c.partial_request_retained, no_partial_request_cleanup: c.no_partial_request_cleanup, no_match: c.no_match, ambiguous_match: c.ambiguous_match, downstream_error: c.downstream_error }
+    const reasons = { shared_path: c.shared_path, sibling_scope_unknown: c.sibling_scope_unknown, torrent_closed: c.torrent_closed, ownership_unverifiable: c.ownership_unverifiable, conflicting_identifiers: c.conflicting_identifiers, source_unverifiable: c.source_unverifiable, pack_torrent: c.pack_torrent, shared_file: c.shared_file, seeding_policy: c.seeding_policy, partial_request_retained: c.partial_request_retained, no_partial_request_cleanup: c.no_partial_request_cleanup, no_match: c.no_match, ambiguous_match: c.ambiguous_match, downstream_error: c.downstream_error }
     return reason && Object.hasOwn(reasons, reason) ? reasons[reason as keyof typeof reasons] : actionGroup(action) === "retain" ? c.retained : c.attention
   }
   if (action.action === "delete_hash") return action.details.delete_files === true ? c.torrentAndData : action.details.delete_files === false ? c.torrentOnly : c.torrentUnknown
@@ -93,6 +99,17 @@ export function actionEffect(action: DashboardAction, language: DeletionLanguage
   return effects[`${action.system}:${action.action}`] ?? c.unknownEffect
 }
 
+export function blockingTorrents(action: DashboardAction): Array<{ clientId: string; hash: string; name: string | null }> {
+  if (action.reason !== "sibling_scope_unknown" || !Array.isArray(action.details.blocking_torrents)) return []
+  return action.details.blocking_torrents.flatMap((value: unknown) => {
+    if (!value || typeof value !== "object") return []
+    const torrent = value as Record<string, unknown>
+    const clientId = identifier(torrent.downloader_id)
+    const hash = typeof torrent.hash === "string" && /^(?:[a-f\d]{40}|[a-f\d]{64})$/i.test(torrent.hash) ? torrent.hash : null
+    return clientId && hash ? [{ clientId, hash, name: displayText(torrent.torrent_name) }] : []
+  })
+}
+
 export function actionFacts(action: DashboardAction, language: DeletionLanguage): Array<{ label: string; value: string }> {
   const c = planCopy[language]
   const labels: Record<string, string> = {
@@ -101,11 +118,12 @@ export function actionFacts(action: DashboardAction, language: DeletionLanguage)
     path: c.mediaPath, content_path: c.dataPath, download_directory: c.downloadDirectory, request_id: c.requestId, issue_id: c.issueId, media_id: c.mediaId, movie_id: c.movieId, series_id: c.seriesId, jellyfin_item_id: c.jellyfinId,
     season_number: c.seasonNumber, episode_numbers: c.episodeNumbers, episode_ids: c.episodeIds, episode_file_id: c.fileId,
   }
-  return Object.entries(labels).flatMap(([key, label]) => {
+  const facts = Object.entries(labels).flatMap(([key, label]) => {
     const value = action.details[key]
     const rendered = Array.isArray(value) ? value.map(identifier).filter((item) => item != null).join(", ") : displayText(value) ?? identifier(value)
     return rendered ? [{ label, value: rendered }] : []
   })
+  return [...facts, ...blockingTorrents(action).map((torrent) => ({ label: c.blockingTorrent, value: `${torrent.name ?? c.torrent} · ${c.client} ${torrent.clientId} · ${torrent.hash}` }))]
 }
 
 export interface InspectionService { id: string; name: string; kind: string; url: string; active: boolean }

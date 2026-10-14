@@ -129,6 +129,15 @@ class DownloaderListing:
 
 
 @dataclass(frozen=True)
+class ContentScopeBlocker:
+    """Safe identity of a sibling torrent that prevents destructive cleanup."""
+
+    client_id: str
+    info_hash: str
+    torrent_name: str | None = None
+
+
+@dataclass(frozen=True)
 class DownloaderContentScope:
     """Private destructive-safety evidence for one torrent's owned content."""
 
@@ -137,6 +146,8 @@ class DownloaderContentScope:
     hash_aliases: tuple[str, ...] = ()
     uncertain: bool = False
     empty_verified: bool = False
+    uncertainty_code: str | None = None
+    torrent_name: str | None = None
 
 
 @dataclass(frozen=True)

@@ -48,6 +48,8 @@ const REASON_COPY: Record<string, readonly [string, string]> = {
     "Подходят несколько записей. CleanArr не стал выбирать одну автоматически.",
   ],
   shared_path: ["Torrent data overlaps another torrent; cleanup was blocked.", "Данные используются другой раздачей; очистка заблокирована."],
+  sibling_scope_unknown: ["Another torrent has incomplete file metadata in this data location; cleanup was blocked until its scope can be verified.", "У другой раздачи в этой папке неполные сведения о файлах; очистка заблокирована до проверки её области данных."],
+  torrent_closed: ["The torrent is closed in rTorrent. Open or resume it there, then refresh the deletion preview.", "Раздача закрыта в rTorrent. Откройте или возобновите её там, затем обновите предпросмотр удаления."],
   ownership_unverifiable: ["Exclusive ownership could not be verified; cleanup was blocked.", "Исключительное владение не подтверждено; очистка заблокирована."],
   conflicting_identifiers: ["Media identifiers disagree; cleanup was blocked.", "Идентификаторы материала противоречат друг другу; очистка заблокирована."],
   source_unverifiable: ["Jellyfin source absence could not be verified; cleanup was blocked.", "Отсутствие объекта Jellyfin не подтверждено; очистка заблокирована."],

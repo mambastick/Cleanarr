@@ -517,9 +517,18 @@ duplicate full inventories; bounded uncertain scopes block overlapping targets,
 while unbounded unknown evidence still fails closed. Closed rTorrent inventory
 may derive a conservative scope; the actual removal target still needs its
 nonempty validated base path. Trusted Arr path provenance is internal to manual
-flows. Pre-mutation failures retain bounded retries. Ordered migration 8 stores
+flows. Only transient read failures retain bounded retries; safety blockers
+are terminal `unsafe_plan`. Ordered migration 8 stores
 structured job error codes; upgrades from schemas 6/7 and backup/restore are
 required. These changes retain the existing scope and release gates.
+
+PR #53 additional review correction: routed negative Radarr identities remain
+valid while raw external IDs must be positive. Jellyfin discards an unstable
+provider pass and restarts once. rTorrent inventories use a bounded multicall;
+unknown sibling scopes and closed targets have distinct EN/RU reasons and
+actionable details. qBittorrent metadata-free magnets accept the documented
+unknown-size sentinel only with strict zero-payload evidence. These are
+regression fixes within the same acceptance gates and destructive scope.
 
 ## Required 1.0 scope
 

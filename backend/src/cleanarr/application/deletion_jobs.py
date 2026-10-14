@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from cleanarr.application.deletion_models import (
+    ActionResultResponse,
     ManualDeleteJobPhase,
     ManualDeleteJobResponse,
     ManualDeleteJobStatus,
@@ -132,7 +133,26 @@ _SAFE_RETAINED_SKIP_REASONS = frozenset(
         FailureReason.NO_PARTIAL_REQUEST_CLEANUP,
     }
 )
+_SAFE_RETAINED_SKIP_REASON_VALUES = frozenset(reason.value for reason in _SAFE_RETAINED_SKIP_REASONS)
 _VOLATILE_PLAN_ACTION_DETAILS = frozenset({"ratio", "seeding_time_seconds"})
+_TRANSIENT_PREFLIGHT_REASONS = frozenset(
+    {
+        FailureReason.DOWNSTREAM_ERROR.value,
+        FailureReason.AUTHENTICATION_FAILED.value,
+    }
+)
+_READ_PREFLIGHT_ACTIONS = frozenset(
+    {
+        "process_event",
+        "resolve_movie",
+        "resolve_series",
+        "resolve_media",
+        "resolve_request",
+        "verify_download_ownership",
+        "verify_source",
+        "verify_jellyfin_binding",
+    }
+)
 
 
 class DeletionJobNotFoundError(LookupError):
@@ -417,7 +437,16 @@ class ManualDeletionJobService:
                             return
                         raise
                 current_plan = await self._previewer(job.request, verified_event)
-                if _preflight_failure_code(current_plan) is not None:
+                preflight_code = _preflight_failure_code(current_plan)
+                if preflight_code == "unsafe_plan":
+                    self._mark_failed(
+                        job,
+                        "The deletion preflight contains safety blockers and cannot be executed safely.",
+                        error_code="unsafe_plan",
+                    )
+                    await asyncio.to_thread(self._repository.save_job, job)
+                    return
+                if preflight_code == "preflight_failed":
                     await self._retry_or_fail(
                         job,
                         "The deletion preflight could not be verified safely.",
@@ -463,9 +492,21 @@ class ManualDeletionJobService:
                     if failed_action is not None
                     else "The deletion finished with downstream errors."
                 )
+                retention_failed = any(
+                    action.status is ActionStatus.FAILED and action.action == "record_retention"
+                    for action in result.actions
+                )
                 if any(action.status is ActionStatus.DELETED for action in result.actions):
                     self._mark_failed(job, original_error, error_code="partial_result_not_retryable")
                     job.message = "Partial cleanup completed; automatic replay is blocked."
+                    await asyncio.to_thread(self._repository.save_job, job)
+                elif retention_failed:
+                    self._mark_failed(job, original_error, error_code="execution_failed")
+                    job.message = "Durable retention recording failed; dependent cleanup was blocked."
+                    await asyncio.to_thread(self._repository.save_job, job)
+                elif _preflight_failure_code(result) == "unsafe_plan":
+                    self._mark_failed(job, original_error, error_code="unsafe_plan")
+                    job.message = "Partial cleanup contained safety blockers; automatic replay is blocked."
                     await asyncio.to_thread(self._repository.save_job, job)
                 else:
                     await self._retry_or_fail(job, original_error, error_code="execution_failed")
@@ -657,9 +698,33 @@ def validate_plan_confirmation(request: ManualDeleteRequest, plan: ProcessingRes
 
 
 def _preflight_failure_code(plan: ProcessingResultResponse) -> str | None:
-    """Classify failed read/preflight evidence before treating it as plan drift."""
+    """Classify failed preflight evidence before treating it as plan drift."""
 
-    return "preflight_failed" if any(action.status is ActionStatus.FAILED for action in plan.actions) else None
+    if any(action.status is ActionStatus.DELETED for action in plan.actions):
+        return "unsafe_plan"
+    if any(
+        action.status is ActionStatus.SKIPPED and _action_reason(action) not in _SAFE_RETAINED_SKIP_REASON_VALUES
+        for action in plan.actions
+    ):
+        return "unsafe_plan"
+    failed = [action for action in plan.actions if action.status is ActionStatus.FAILED]
+    if not failed:
+        return None
+    if all(
+        _action_reason(action) in _TRANSIENT_PREFLIGHT_REASONS and _is_read_preflight_action(action.action)
+        for action in failed
+    ):
+        return "preflight_failed"
+    return "unsafe_plan"
+
+
+def _action_reason(action: ActionResultResponse) -> str | None:
+    reason = action.reason
+    return getattr(reason, "value", reason) if reason is not None else None
+
+
+def _is_read_preflight_action(action: str) -> bool:
+    return action in _READ_PREFLIGHT_ACTIONS or action.startswith(("resolve_", "verify_", "read_", "list_"))
 
 
 def canonical_submission_request(payload: ManualDeleteRequest) -> str:

@@ -1,6 +1,7 @@
 """Domain exports."""
 
 from .downloads import (
+    ContentScopeBlocker,
     DownloadActionClaim,
     DownloadActionStatus,
     DownloadControlAction,
@@ -83,6 +84,7 @@ __all__ = [
     "AuthenticationError",
     "DownloadControlAction",
     "DownloadControlOutcome",
+    "ContentScopeBlocker",
     "DownloadActionStatus",
     "DownloadActionClaim",
     "DownloaderControlResult",

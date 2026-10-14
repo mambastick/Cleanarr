@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from cleanarr.application.data_safety import (
@@ -10,6 +11,8 @@ from cleanarr.application.data_safety import (
     content_scope_matches,
 )
 from cleanarr.domain import DownloaderContentInventory, DownloaderContentScope
+from cleanarr.infrastructure import clients, downloaders
+from cleanarr.infrastructure.clients import QbittorrentClient
 from cleanarr.infrastructure.downloaders import (
     DelugeClient,
     TransmissionClient,
@@ -184,5 +187,56 @@ async def test_deluge_inventory_requests_zero_payload_status_fields() -> None:
 
     assert inventory.failures == ()
     client._rpc.assert_awaited_once_with(
-        "core.get_torrents_status", [{}, ["save_path", "files", "total_size", "total_done"]]
+        "core.get_torrents_status", [{}, ["name", "save_path", "files", "total_size", "total_done"]]
     )
+
+
+@pytest.mark.asyncio
+async def test_qbittorrent_oversized_inventory_is_rejected_before_scope_normalization(monkeypatch) -> None:
+    monkeypatch.setattr(clients, "MAX_CONTENT_INVENTORY_SCOPES", 1)
+    client = QbittorrentClient(base_url="http://qbt", username="", password="", timeout_seconds=5)
+    client._login = AsyncMock()
+    client._client.get = AsyncMock(return_value=httpx.Response(200, json=[{}, {}]))
+    try:
+        inventory = await client.list_content_inventory()
+    finally:
+        await client.close()
+    assert inventory.scopes == ()
+    assert inventory.failures[0].code == "inventory_limit_exceeded"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["transmission", "deluge"])
+@pytest.mark.parametrize("limit", ["scopes", "files"])
+async def test_inventory_limits_block_expansion_before_building_paths(monkeypatch, kind, limit) -> None:
+    monkeypatch.setattr(downloaders, "MAX_CONTENT_INVENTORY_SCOPES", 1 if limit == "scopes" else 20_000)
+    monkeypatch.setattr(downloaders, "MAX_CONTENT_INVENTORY_PATHS", 1)
+
+    def no_path_expansion(*args, **kwargs):
+        raise AssertionError("an oversized inventory must not expand file paths")
+
+    monkeypatch.setattr(downloaders, "join_scope_path", no_path_expansion)
+    record = {
+        "hash_string": "A" * 40,
+        "download_dir": "/downloads",
+        "save_path": "/downloads",
+        "files": [{"name": "a"}, {"name": "b"}],
+    }
+    if kind == "transmission":
+        client = TransmissionClient(base_url="http://transmission/rpc", username="", password="", timeout_seconds=5)
+        client._modern = True
+        client.get_version = AsyncMock(return_value="4.1.0")
+        client._call_generation = AsyncMock(
+            return_value={"torrents": [record, record] if limit == "scopes" else [record]}
+        )
+    else:
+        client = DelugeClient(base_url="http://deluge/json", password="", timeout_seconds=5)
+        client._login = AsyncMock()
+        records = {"A" * 40: record, "B" * 40: record} if limit == "scopes" else {"A" * 40: record}
+        client._rpc = AsyncMock(return_value=records)
+    try:
+        inventory = await client.list_content_inventory()
+    finally:
+        await client.close()
+    assert inventory.scopes == ()
+    assert inventory.failures[0].code == "inventory_limit_exceeded"

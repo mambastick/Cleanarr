@@ -299,6 +299,127 @@ async def test_jellyfin_provider_lookup_paginates_complete_catalogue_over_1000_i
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_jellyfin_provider_lookup_restarts_after_catalogue_shrinks_and_requires_stable_pass() -> None:
+    scan = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal scan
+        start = int(request.url.params["StartIndex"])
+        if start == 0:
+            scan += 1
+        total = 1001 if scan == 1 and start == 0 else 501
+        end = min(start + 500, total)
+        page = [
+            {
+                "Id": f"movie-{index}",
+                "Name": f"Movie {index}",
+                "Type": "Movie",
+                "ProviderIds": {"Imdb": f"tt{index}"},
+            }
+            for index in range(start, end)
+        ]
+        return httpx.Response(200, json={"Items": page, "TotalRecordCount": total})
+
+    route = respx.get("http://jellyfin/Items").mock(side_effect=handler)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        present = await client.find_items(provider_ids=["imdb.tt500"], include_types=["Movie"])
+        absent = await client.find_items(provider_ids=["imdb.tt1000"], include_types=["Movie"])
+    finally:
+        await client.close()
+
+    assert route.call_count == 6
+    assert [item.id for item in present] == ["movie-500"]
+    assert absent == []
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_provider_lookup_restarts_when_shrink_moves_below_current_offset() -> None:
+    scan = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal scan
+        start = int(request.url.params["StartIndex"])
+        if start == 0:
+            scan += 1
+        if scan == 1 and start == 0:
+            total = 1001
+        elif scan == 1:
+            total = 400
+        else:
+            total = 400
+        end = min(start + 500, total)
+        page = [
+            {
+                "Id": f"movie-{index}",
+                "Name": f"Movie {index}",
+                "Type": "Movie",
+                "ProviderIds": {"Imdb": f"tt{index}"},
+            }
+            for index in range(start, end)
+        ]
+        return httpx.Response(200, json={"Items": page, "TotalRecordCount": total})
+
+    route = respx.get("http://jellyfin/Items").mock(side_effect=handler)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        items = await client.find_items(provider_ids=["imdb.tt399"], include_types=["Movie"])
+    finally:
+        await client.close()
+
+    assert route.call_count == 3
+    assert [item.id for item in items] == ["movie-399"]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_provider_lookup_rejects_catalogue_churn_after_two_passes() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        start = int(request.url.params["StartIndex"])
+        total = 1001 if start == 0 else 501
+        page = [
+            {"Id": f"movie-{index}", "Name": "Movie", "Type": "Movie", "ProviderIds": {}}
+            for index in range(start, min(start + 500, total))
+        ]
+        return httpx.Response(200, json={"Items": page, "TotalRecordCount": total})
+
+    route = respx.get("http://jellyfin/Items").mock(side_effect=handler)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="changed repeatedly"):
+            await client.find_items(provider_ids=["tmdb.42"], include_types=["Movie"])
+    finally:
+        await client.close()
+
+    assert route.call_count == 4
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_provider_lookup_rejects_expanding_catalogue_churn_after_two_passes() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        start = int(request.url.params["StartIndex"])
+        total = 501 if start == 0 else 1001
+        page = [
+            {"Id": f"movie-{index}", "Name": "Movie", "Type": "Movie", "ProviderIds": {}}
+            for index in range(start, min(start + 500, total))
+        ]
+        return httpx.Response(200, json={"Items": page, "TotalRecordCount": total})
+
+    route = respx.get("http://jellyfin/Items").mock(side_effect=handler)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="changed repeatedly"):
+            await client.find_items(provider_ids=["tmdb.42"], include_types=["Movie"])
+    finally:
+        await client.close()
+
+    assert route.call_count == 4
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_jellyfin_provider_lookup_rejects_incomplete_catalogue_after_first_page() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         start = int(request.url.params["StartIndex"])

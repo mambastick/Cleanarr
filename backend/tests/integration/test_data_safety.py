@@ -8,9 +8,11 @@ import pytest
 from cleanarr.application.data_safety import (
     ContentSafetyAssessment,
     assess_content_inventory,
+    content_safety_blockers,
     content_safety_skip_reason,
 )
 from cleanarr.domain import (
+    ContentScopeBlocker,
     DownloaderContentInventory,
     DownloaderContentInventoryFailure,
     DownloaderContentScope,
@@ -114,8 +116,8 @@ def _legacy_fleet(*clients: tuple[str, LegacyInventoryDownloader]) -> MultiDownl
     )
 
 
-def _scope(info_hash: str, *paths: str) -> DownloaderContentScope:
-    return DownloaderContentScope(info_hash=info_hash, paths=paths)
+def _scope(info_hash: str, *paths: str, torrent_name: str | None = None) -> DownloaderContentScope:
+    return DownloaderContentScope(info_hash=info_hash, paths=paths, torrent_name=torrent_name)
 
 
 @pytest.mark.asyncio
@@ -384,6 +386,7 @@ def test_uncertain_parent_scope_overlaps_other_client_and_blocks_both() -> None:
                             info_hash=unknown_hash,
                             paths=("/data/torrents",),
                             uncertain=True,
+                            torrent_name="Unknown payload",
                         ),
                     )
                 ),
@@ -395,7 +398,13 @@ def test_uncertain_parent_scope_overlaps_other_client_and_blocks_both() -> None:
 
     assert assessment.complete is True
     assert content_safety_skip_reason(assessment, "unknown", unknown_hash) == "ownership_unverifiable"
-    assert content_safety_skip_reason(assessment, "target", target_hash) == "shared_path"
+    assert content_safety_skip_reason(assessment, "target", target_hash) == "sibling_scope_unknown"
+    assert assessment.sibling_scope_blockers == (
+        ("target", target_hash, (ContentScopeBlocker("unknown", unknown_hash, "Unknown payload"),)),
+    )
+    assert content_safety_blockers(assessment, "target", target_hash) == (
+        ContentScopeBlocker("unknown", unknown_hash, "Unknown payload"),
+    )
 
 
 async def test_intervening_lexical_sibling_does_not_hide_ancestor_conflict() -> None:

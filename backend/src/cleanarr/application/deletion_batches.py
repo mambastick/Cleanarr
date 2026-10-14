@@ -744,8 +744,9 @@ def blocked_artifact(child: ManualDeleteBatchChildPreviewResponse) -> str:
 
 
 def plan_blocked_code(plan: ProcessingResultResponse) -> str | None:
-    if _preflight_failure_code(plan) is not None:
-        return "preflight_failed"
+    preflight_code = _preflight_failure_code(plan)
+    if preflight_code is not None:
+        return preflight_code
     if plan.status in {OverallStatus.PARTIAL_FAILURE, OverallStatus.IGNORED}:
         return "unsafe_plan"
     if any(

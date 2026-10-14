@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import math
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import PurePosixPath, PureWindowsPath
@@ -13,8 +14,10 @@ from urllib.parse import quote, urlparse
 import httpx
 
 from cleanarr.application.data_safety import (
+    MAX_CONTENT_INVENTORY_SCOPES,
     ContentSafetyAssessment,
     assess_content_inventory,
+    content_safety_blockers,
     content_safety_skip_reason,
     content_scope_matches,
     read_content_inventory,
@@ -24,6 +27,7 @@ from cleanarr.domain import (
     ArtworkData,
     AuthenticationError,
     CleanupMediaType,
+    ContentScopeBlocker,
     DownloadControlAction,
     DownloadControlOutcome,
     DownloaderContentInventory,
@@ -201,6 +205,19 @@ def _qbt_nonnegative_int(value: object) -> int | None:
 def _qbt_nonnegative_float(value: object) -> float | None:
     parsed = _optional_float(value)
     return parsed if parsed is not None and parsed >= 0 else None
+
+
+def _qbt_zero_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value == 0
+
+
+def _qbt_zero_progress(value: object) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+        and float(value) == 0
+    )
 
 
 def _qbt_timestamp(value: object) -> datetime | None:
@@ -1299,6 +1316,11 @@ class QbittorrentClient:
                     hash_value,
                     existed=True,
                     skip_reason=skip_reason,
+                    blocking_torrents=(
+                        content_safety_blockers(assessment, safety_client_id, hash_value)
+                        if assessment is not None
+                        else ()
+                    ),
                     status=status,
                     torrent_name=torrent_name,
                     content_path=content_path,
@@ -1316,7 +1338,11 @@ class QbittorrentClient:
         try:
             response = await self._client.get(
                 "/api/v2/torrents/info",
-                params={"fields": "hash,infohash_v1,infohash_v2,content_path"},
+                params={
+                    "fields": (
+                        "hash,infohash_v1,infohash_v2,content_path,state,total_size,completed,downloaded,save_path,progress,name"
+                    )
+                },
             )
         except httpx.HTTPError as exc:
             raise ExternalServiceError(self._system, "qBittorrent content inventory failed.") from exc
@@ -1332,6 +1358,8 @@ class QbittorrentClient:
             return DownloaderContentInventory(
                 failures=(DownloaderContentInventoryFailure("invalid_content_inventory"),)
             )
+        if len(payload) > MAX_CONTENT_INVENTORY_SCOPES:
+            return DownloaderContentInventory(failures=(DownloaderContentInventoryFailure("inventory_limit_exceeded"),))
         scopes: list[DownloaderContentScope] = []
         failures: list[DownloaderContentInventoryFailure] = []
         for item in payload:
@@ -1346,16 +1374,27 @@ class QbittorrentClient:
                 dict.fromkeys(_qbt_hash(raw_value) for raw_value in raw_aliases if raw_value not in (None, ""))
             )
             info_hash = aliases[0] if aliases else ""
+            torrent_name = _safe_metadata_text(item.get("name"))
             raw_path = item.get("content_path")
             path = validate_scope_path(raw_path, minimum_parts=2)
             if info_hash and raw_path in (None, ""):
-                if item.get("state") == "metaDL" and all(
-                    isinstance(item.get(key), int) and not isinstance(item.get(key), bool) and item.get(key) == 0
-                    for key in ("total_size", "completed", "downloaded")
+                total_size = item.get("total_size")
+                if (
+                    item.get("state") == "metaDL"
+                    and isinstance(total_size, int)
+                    and not isinstance(total_size, bool)
+                    and total_size in {-1, 0}
+                    and _qbt_zero_int(item.get("completed"))
+                    and _qbt_zero_int(item.get("downloaded"))
+                    and _qbt_zero_progress(item.get("progress"))
                 ):
                     scopes.append(
                         DownloaderContentScope(
-                            info_hash=info_hash, hash_aliases=aliases[1:], paths=(), empty_verified=True
+                            info_hash=info_hash,
+                            hash_aliases=aliases[1:],
+                            paths=(),
+                            empty_verified=True,
+                            torrent_name=torrent_name,
                         )
                     )
                     continue
@@ -1363,14 +1402,22 @@ class QbittorrentClient:
                 if root is not None:
                     scopes.append(
                         DownloaderContentScope(
-                            info_hash=info_hash, hash_aliases=aliases[1:], paths=(root,), uncertain=True
+                            info_hash=info_hash,
+                            hash_aliases=aliases[1:],
+                            paths=(root,),
+                            uncertain=True,
+                            torrent_name=torrent_name,
                         )
                     )
                     continue
             if not info_hash or path is None:
                 failures.append(DownloaderContentInventoryFailure("invalid_content_scope"))
                 continue
-            scopes.append(DownloaderContentScope(info_hash=info_hash, hash_aliases=aliases[1:], paths=(path,)))
+            scopes.append(
+                DownloaderContentScope(
+                    info_hash=info_hash, hash_aliases=aliases[1:], paths=(path,), torrent_name=torrent_name
+                )
+            )
         return DownloaderContentInventory(scopes=tuple(scopes), failures=tuple(failures))
 
     async def list_torrents(self) -> DownloaderListing:
@@ -1545,6 +1592,7 @@ class QbittorrentClient:
         torrent_name: str | None = None,
         content_path: str | None = None,
         delete_files: bool | None = None,
+        blocking_torrents: tuple[ContentScopeBlocker, ...] = (),
     ) -> DownloaderRemovalResult:
         return DownloaderRemovalResult(
             hash_value=hash_value,
@@ -1559,6 +1607,7 @@ class QbittorrentClient:
             torrent_name=torrent_name,
             content_path=content_path,
             delete_files=delete_files,
+            blocking_torrents=blocking_torrents,
         )
 
 
@@ -1634,7 +1683,22 @@ class JellyfinServerClient(JsonServiceClient):
     async def _list_complete_items(
         self, *, include_types: Sequence[str], request_kwargs: dict[str, Any]
     ) -> list[JellyfinItem]:
-        """Read a complete, bounded Jellyfin catalogue with an authoritative count."""
+        """Read a complete, bounded Jellyfin catalogue with one allowed churn restart."""
+        for attempt in range(2):
+            result, changed = await self._list_complete_items_pass(
+                include_types=include_types,
+                request_kwargs=request_kwargs,
+            )
+            if not changed:
+                return result
+            if attempt == 1:
+                raise ExternalServiceError("jellyfin", "Jellyfin provider catalogue changed repeatedly.")
+        raise AssertionError("unreachable")
+
+    async def _list_complete_items_pass(
+        self, *, include_types: Sequence[str], request_kwargs: dict[str, Any]
+    ) -> tuple[list[JellyfinItem], bool]:
+        """Read one catalogue pass, discarding it when its authoritative total changes."""
         result: list[JellyfinItem] = []
         seen_ids: set[str] = set()
         expected_total: int | None = None
@@ -1664,11 +1728,16 @@ class JellyfinServerClient(JsonServiceClient):
                     raise ExternalServiceError(
                         "jellyfin", "Jellyfin provider catalogue exceeds the safe bounded limit."
                     )
-            elif total != expected_total:
-                raise ExternalServiceError("jellyfin", "Jellyfin returned inconsistent provider catalogue metadata.")
             raw_items = payload["Items"]
             if len(raw_items) > _JELLYFIN_LIBRARY_PAGE_SIZE:
                 raise ExternalServiceError("jellyfin", "Jellyfin returned an oversized provider catalogue page.")
+            changed = expected_total is not None and total != expected_total
+            if changed and start_index > total:
+                if raw_items:
+                    raise ExternalServiceError(
+                        "jellyfin", "Jellyfin returned inconsistent provider catalogue metadata."
+                    )
+                return [], True
             for item in raw_items:
                 parsed = self._library_item(item)
                 if parsed is None or (include_types and parsed.type not in include_types):
@@ -1678,10 +1747,12 @@ class JellyfinServerClient(JsonServiceClient):
                 seen_ids.add(parsed.id)
                 result.append(parsed)
             start_index += len(raw_items)
-            if start_index > expected_total:
+            if start_index > total:
                 raise ExternalServiceError("jellyfin", "Jellyfin returned inconsistent provider catalogue metadata.")
-            if start_index == expected_total:
-                return result
+            if changed:
+                return [], True
+            if start_index == total:
+                return result, False
             if not raw_items:
                 raise ExternalServiceError("jellyfin", "Jellyfin returned incomplete provider catalogue data.")
 

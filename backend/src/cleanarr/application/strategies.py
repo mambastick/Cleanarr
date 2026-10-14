@@ -240,6 +240,8 @@ class BaseDeletionStrategy(ABC):
             if result.skip_reason:
                 skip_reason = {
                     "shared_path": FailureReason.SHARED_PATH,
+                    "sibling_scope_unknown": FailureReason.SIBLING_SCOPE_UNKNOWN,
+                    "torrent_closed": FailureReason.TORRENT_CLOSED,
                     "ownership_unverifiable": FailureReason.OWNERSHIP_UNVERIFIABLE,
                 }.get(result.skip_reason, FailureReason.SEEDING_POLICY)
                 if skip_reason is not FailureReason.SEEDING_POLICY:
@@ -318,6 +320,14 @@ class BaseDeletionStrategy(ABC):
                     content_path=result.content_path,
                     download_directory=result.download_directory,
                     delete_files=result.delete_files,
+                    blocking_torrents=[
+                        {
+                            "downloader_id": blocker.client_id,
+                            "hash": blocker.info_hash,
+                            "torrent_name": blocker.torrent_name,
+                        }
+                        for blocker in result.blocking_torrents
+                    ],
                 )
                 continue
             if self._dry_run and result.existed:
@@ -769,8 +779,9 @@ class MovieDeletionStrategy(BaseDeletionStrategy):
                 for record in records:
                     if (
                         not isinstance(record, RadarrHistoryRecord)
+                        or not isinstance(record.movie_id, int)
                         or isinstance(record.movie_id, bool)
-                        or record.movie_id <= 0
+                        or record.movie_id == 0
                     ):
                         raise TypeError("Radarr returned malformed hash-scoped history records.")
                     if not isinstance(record.download_id, str) or not record.download_id.strip():

@@ -502,6 +502,15 @@ async def test_rtorrent_xmlrpc_removes_data_only_from_validated_absolute_path() 
             "d.name": "rTorrent release",
             "d.base_path": "/srv/data/torrents/movies/Movie",
             "directory.default": "/srv/data/torrents",
+            "d.multicall2": [
+                [
+                    "A" * 40,
+                    "/srv/data/torrents/movies/Movie",
+                    "/srv/data/torrents/movies",
+                    "Movie",
+                    False,
+                ]
+            ],
             "d.stop": 0,
             "d.close": 0,
             "execute.throw": 0,
@@ -551,6 +560,7 @@ async def test_rtorrent_refuses_unsafe_data_path() -> None:
             "d.name": "unsafe",
             "d.base_path": "/srv/data/torrents",
             "directory.default": "/srv/data/torrents",
+            "d.multicall2": [["A" * 40, "/srv/data/torrents", "/srv/data/torrents", "unsafe", False]],
         }
         return httpx.Response(200, content=dumps((results[method],), methodresponse=True, allow_none=True))
 
@@ -577,11 +587,8 @@ async def test_rtorrent_content_inventory_rejects_missing_base_path() -> None:
         _, method = loads(request.content)
         results: dict[str, Any] = {
             "download_list": ["A" * 40],
-            "d.base_path": "",
             "directory.default": "/srv/data/torrents",
-            "d.directory": "/srv/data/torrents",
-            "d.name": "Movie",
-            "d.is_multi_file": False,
+            "d.multicall2": [["A" * 40, "", "/srv/data/torrents", "Movie", False]],
         }
         return httpx.Response(200, content=dumps((results[method],), methodresponse=True, allow_none=True))
 
@@ -598,16 +605,97 @@ async def test_rtorrent_content_inventory_rejects_missing_base_path() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_rtorrent_closed_target_is_structured_and_never_mutated() -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        _, method = loads(request.content)
+        calls.append(method)
+        results: dict[str, Any] = {
+            "download_list": ["A" * 40],
+            "directory.default": "/srv/data/torrents",
+            "d.multicall2": [["A" * 40, "", "/srv/data/torrents", "Movie", False]],
+            "d.name": "Movie",
+            "d.base_path": "",
+            "d.ratio": 0,
+            "d.timestamp.finished": 1,
+        }
+        return httpx.Response(200, content=dumps((results[method],), methodresponse=True, allow_none=True))
+
+    respx.post("http://rtorrent/RPC2").mock(side_effect=handler)
+    client = RTorrentClient(base_url="http://rtorrent/RPC2", username="", password="", timeout_seconds=5)
+    try:
+        result = (await client.delete_hashes(["A" * 40], delete_files=True))[0]
+    finally:
+        await client.close()
+
+    assert result.skip_reason == "torrent_closed"
+    assert result.delete_files is False
+    assert "execute.throw" not in calls
+    assert "d.erase" not in calls
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_rtorrent_inventory_uses_one_multicall_for_1500_entries() -> None:
+    calls: list[str] = []
+    rows = [
+        [f"{index:040X}", f"/srv/data/torrents/item-{index}", "/srv/data/torrents", f"item-{index}", False]
+        for index in range(1500)
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        _, method = loads(request.content)
+        calls.append(method)
+        result: object = "/srv/data/torrents" if method == "directory.default" else rows
+        return httpx.Response(200, content=dumps((result,), methodresponse=True, allow_none=True))
+
+    respx.post("http://rtorrent/RPC2").mock(side_effect=handler)
+    client = RTorrentClient(base_url="http://rtorrent/RPC2", username="", password="", timeout_seconds=5)
+    try:
+        inventory = await client.list_content_inventory()
+    finally:
+        await client.close()
+
+    assert inventory.failures == ()
+    assert len(inventory.scopes) == 1500
+    assert calls.count("d.multicall2") == 1
+    assert calls.count("directory.default") == 1
+    assert all(method not in calls for method in ("d.base_path", "d.directory", "d.name", "d.is_multi_file"))
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_rtorrent_inventory_rejects_malformed_multicall_row() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        _, method = loads(request.content)
+        result: object = (
+            "/srv/data/torrents"
+            if method == "directory.default"
+            else [["A" * 40, "/srv/data/torrents/Movie", "/srv/data/torrents", "Movie"]]
+        )
+        return httpx.Response(200, content=dumps((result,), methodresponse=True, allow_none=True))
+
+    respx.post("http://rtorrent/RPC2").mock(side_effect=handler)
+    client = RTorrentClient(base_url="http://rtorrent/RPC2", username="", password="", timeout_seconds=5)
+    try:
+        inventory = await client.list_content_inventory()
+    finally:
+        await client.close()
+
+    assert inventory.scopes == ()
+    assert inventory.failures[0].code == "malformed_content_scope"
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_rtorrent_outside_base_path_is_unbounded_unknown() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         _, method = loads(request.content)
         results: dict[str, Any] = {
             "download_list": ["A" * 40],
-            "d.base_path": "/other/data/Movie",
             "directory.default": "/srv/data/torrents",
-            "d.directory": "/srv/data/torrents",
-            "d.name": "Movie",
-            "d.is_multi_file": False,
+            "d.multicall2": [["A" * 40, "/other/data/Movie", "/srv/data/torrents", "Movie", False]],
         }
         return httpx.Response(200, content=dumps((results[method],), methodresponse=True, allow_none=True))
 
@@ -635,6 +723,10 @@ async def test_rtorrent_standalone_delete_blocks_shared_content_scope() -> None:
             "directory.default": "/srv/data/torrents",
             "d.base_path": "/srv/data/torrents/Movie",
             "d.name": "Movie",
+            "d.multicall2": [
+                ["A" * 40, "/srv/data/torrents/Movie", "/srv/data/torrents", "Movie", False],
+                ["B" * 40, "/srv/data/torrents/Movie", "/srv/data/torrents", "Movie", False],
+            ],
         }
         return httpx.Response(200, content=dumps((results[method],), methodresponse=True, allow_none=True))
 
@@ -664,6 +756,7 @@ async def test_rtorrent_defers_removal_using_scaled_ratio() -> None:
             "d.name": "Deferred release",
             "d.base_path": "/srv/data/torrents/deferred",
             "directory.default": "/srv/data/torrents",
+            "d.multicall2": [["A" * 40, "/srv/data/torrents/deferred", "/srv/data/torrents", "deferred", False]],
             "d.ratio": 750,
             "d.timestamp.finished": 1,
         }

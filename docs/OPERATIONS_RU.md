@@ -81,6 +81,12 @@ history. Старая binary отклоняет schema 8. Пустая replaceme
 сервисы и activity: новый исходный preview может блокироваться из-за уже
 отсутствующей записи Arr. Automatic remaining-steps recovery в change нет.
 
+Manual job с `unsafe_plan` терминальна: проверьте сохранённые причины,
+исправьте ownership/scope evidence и запросите новый предпросмотр.
+Автоматического повтора нет. `preflight_failed` означает bounded retries
+временных ошибок чтения; ошибка retention recording терминальна с
+`execution_failed`.
+
 ## Обновление и rollback
 
 Runtime configuration schema 4 добавляет thresholds свободного места storage:

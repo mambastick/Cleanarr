@@ -8,6 +8,8 @@ from cleanarr.application.strategies import DeletionStrategyFactory
 from cleanarr.domain import (
     ActionStatus,
     AuthenticationError,
+    ContentScopeBlocker,
+    DownloaderRemovalResult,
     ExternalServiceError,
     FailureReason,
     ItemType,
@@ -95,4 +97,35 @@ async def test_shared_movie_hash_or_unreadable_history_blocks_entire_cascade(fai
             a.reason is (FailureReason.OWNERSHIP_UNVERIFIABLE if failing_history else FailureReason.PACK_TORRENT)
             for a in result.actions
         )
+    assert downloader.deleted_hashes == radarr.deleted_movie_ids == seerr.deleted_media_ids == []
+
+
+@pytest.mark.parametrize("reason", [FailureReason.SIBLING_SCOPE_UNKNOWN, FailureReason.TORRENT_CLOSED])
+async def test_structured_scope_blockers_prevent_dependent_media_cleanup(reason):
+    factory, event, radarr, seerr, downloader = fixture(ItemType.MOVIE)
+
+    async def blocked(hashes, *, delete_files, dry_run=False):
+        return [
+            DownloaderRemovalResult(
+                hash_value="ABC",
+                existed=True,
+                client_id="target-client",
+                client_kind="rtorrent",
+                skip_reason=reason.value,
+                blocking_torrents=(ContentScopeBlocker("sibling-client", "B" * 40, "Unverified sibling"),)
+                if reason is FailureReason.SIBLING_SCOPE_UNKNOWN
+                else (),
+            )
+        ]
+
+    downloader.delete_hashes = blocked
+    for dry_run in (True, False):
+        result = await factory.for_item_type(ItemType.MOVIE, dry_run=dry_run).handle(event)
+        action = next(action for action in result.actions if action.action == "delete_hash")
+        assert action.status is ActionStatus.SKIPPED
+        assert action.reason is reason
+        if reason is FailureReason.SIBLING_SCOPE_UNKNOWN:
+            assert action.details["blocking_torrents"] == [
+                {"downloader_id": "sibling-client", "hash": "B" * 40, "torrent_name": "Unverified sibling"}
+            ]
     assert downloader.deleted_hashes == radarr.deleted_movie_ids == seerr.deleted_media_ids == []

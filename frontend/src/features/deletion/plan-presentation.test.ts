@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest"
 import type { DashboardAction, DashboardProcessingResult } from "@/lib/dashboard"
 import type { RuntimeConfigPayload } from "@/lib/runtime-config"
-import { actionEffect, actionFacts, actionLink, actionTarget, inspectionServices, planScope, providerLinks } from "./plan-presentation"
+import { actionEffect, actionFacts, actionLink, actionTarget, blockingTorrents, inspectionServices, planScope, providerLinks } from "./plan-presentation"
+import { actionGroup, localizedJobError } from "./deletion-copy"
 
 const plan: DashboardProcessingResult = { item_type: "Series", item_id: "fixture-series", name: "Example Series", display_name: "Пример сериала", status: "success", fingerprint: { tmdb_id: 42, tvdb_id: null, imdb_id: "tt12345", path: "/media/example" }, season_number: null, episode_number: null, episode_end_number: null, actions: [] }
 const action: DashboardAction = { system: "qbittorrent", action: "delete_hash", status: "dry_run", message: "DO NOT DISPLAY", reason: null, details: { hash: "A".repeat(40), torrent_name: "Example.Series.S01", content_path: "/downloads/Example.Series.S01", downloader_id: "client-2", downloader_name: "Second client", delete_files: true } }
@@ -22,6 +23,34 @@ describe("deletion target presentation", () => {
     expect(actionEffect({ ...action, status: "failed", reason: "new_reason" }, "en")).toContain("blocked")
     expect(actionEffect({ ...action, status: "already_absent" }, "en")).toContain("Already absent")
     expect(actionEffect({ ...action, action: "future_action" }, "ru")).toContain("не описывает")
+  })
+  it("distinguishes incomplete sibling evidence and closed torrents from known shared data", () => {
+    const sibling = { ...action, status: "skipped" as const, reason: "sibling_scope_unknown" }
+    expect(actionGroup(sibling)).toBe("attention")
+    expect(actionEffect(sibling, "en")).toContain("incomplete file metadata")
+    expect(actionEffect(sibling, "ru")).toContain("неполные сведения")
+    const closed = { ...sibling, reason: "torrent_closed" }
+    expect(actionGroup(closed)).toBe("attention")
+    expect(actionEffect(closed, "en")).toContain("Open or resume it in rTorrent")
+    expect(actionEffect(closed, "ru")).toContain("Откройте или возобновите")
+    expect(localizedJobError("unsafe_plan", "en")).toContain("Automatic retry is disabled")
+    expect(localizedJobError("unsafe_plan", "ru")).toContain("Автоматический повтор отключён")
+  })
+  it("projects only validated blocker identities and useful names", () => {
+    const sibling = { ...action, status: "skipped" as const, reason: "sibling_scope_unknown", details: { blocking_torrents: [
+      { downloader_id: "client-2", hash: "B".repeat(40), torrent_name: "Unknown release", url: "SECRET", error: "SECRET" },
+      { downloader_id: "client-3", hash: "C".repeat(64) },
+      { downloader_id: "client-4", hash: "bad" },
+      { downloader_id: "https://private.example", hash: "A".repeat(40) },
+      null,
+    ] } }
+    expect(blockingTorrents(sibling)).toEqual([
+      { clientId: "client-2", hash: "B".repeat(40), name: "Unknown release" },
+      { clientId: "client-3", hash: "C".repeat(64), name: null },
+    ])
+    expect(JSON.stringify(actionFacts(sibling, "ru"))).toContain("Unknown release")
+    expect(JSON.stringify(actionFacts(sibling, "en"))).not.toMatch(/SECRET|private/)
+    expect(blockingTorrents({ ...sibling, reason: "shared_path" })).toEqual([])
   })
   it("shows scope including specials and episode ranges, and labels non-deletion changes accurately", () => {
     expect(planScope(plan, "ru")).toContain("все сезоны")

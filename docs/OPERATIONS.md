@@ -82,6 +82,11 @@ activity before planning remaining cleanup; a fresh original preview may be
 blocked because the Arr record is already absent. There is no automatic
 remaining-steps recovery flow in this change.
 
+A manual job with `unsafe_plan` is terminal: inspect its recorded blockers,
+correct the ownership/scope evidence and request a fresh preview. It has no
+automatic retry. `preflight_failed` is reserved for bounded retries of transient
+read failures; a retention-recording failure is terminal `execution_failed`.
+
 ## Upgrade and rollback
 
 Runtime configuration schema 4 adds the storage warning and critical free-space

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Protocol, cast
 
-from cleanarr.domain import DownloaderContentInventory, DownloaderContentScope
+from cleanarr.domain import ContentScopeBlocker, DownloaderContentInventory, DownloaderContentScope
 
 CONTENT_INVENTORY_TIMEOUT_SECONDS = 10.0
 MAX_CONTENT_INVENTORY_SCOPES = 20_000
@@ -31,7 +31,9 @@ class ContentSafetyAssessment:
     missing_known: frozenset[tuple[str, str]] = frozenset()
     observed: frozenset[tuple[str, str]] = frozenset()
     uncertain: frozenset[tuple[str, str]] = frozenset()
-    scope_paths: tuple[tuple[str, str, tuple[str, ...]], ...] = ()
+    scope_paths: tuple[tuple[str, str, tuple[str, ...], str | None], ...] = ()
+    uncertainty_codes: tuple[tuple[str, str, str], ...] = ()
+    sibling_scope_blockers: tuple[tuple[str, str, tuple[ContentScopeBlocker, ...]], ...] = ()
 
 
 def validate_scope_path(value: object, *, minimum_parts: int = 3) -> str | None:
@@ -78,12 +80,13 @@ def assess_content_inventory(
 
     normalized_hashes = set(hashes)
     scoped: list[tuple[str, DownloaderContentScope, frozenset[str]]] = []
-    path_owners: dict[str, set[tuple[str, frozenset[str], bool]]] = {}
+    path_owners: dict[str, set[tuple[str, str, frozenset[str], bool, str | None, str | None]]] = {}
     seen: set[tuple[str, str]] = set()
     total_paths = 0
     observed: set[tuple[str, str]] = set()
     uncertain: set[tuple[str, str]] = set()
-    scope_paths: list[tuple[str, str, tuple[str, ...]]] = []
+    scope_paths: list[tuple[str, str, tuple[str, ...], str | None]] = []
+    uncertainty_codes: list[tuple[str, str, str]] = []
     for client_id, inventory in inventories:
         if not isinstance(inventory, DownloaderContentInventory):
             return ContentSafetyAssessment(complete=False)
@@ -103,6 +106,8 @@ def assess_content_inventory(
                 or not isinstance(scope.hash_aliases, tuple)
                 or not isinstance(scope.uncertain, bool)
                 or not isinstance(scope.empty_verified, bool)
+                or (scope.uncertainty_code is not None and not isinstance(scope.uncertainty_code, str))
+                or (scope.torrent_name is not None and not isinstance(scope.torrent_name, str))
                 or (not scope.paths and not scope.empty_verified)
                 or (scope.empty_verified and bool(scope.paths))
             ):
@@ -123,25 +128,57 @@ def assess_content_inventory(
                 return ContentSafetyAssessment(complete=False)
             scoped.append((client_id, scope, alias_set))
             observed.update((client_id, alias) for alias in alias_set)
-            scope_paths.extend((client_id, alias, scope.paths) for alias in alias_set)
+            scope_paths.extend((client_id, alias, scope.paths, scope.torrent_name) for alias in alias_set)
             if scope.uncertain:
                 uncertain.update((client_id, alias) for alias in alias_set)
+                if scope.uncertainty_code is not None:
+                    uncertainty_codes.extend((client_id, alias, scope.uncertainty_code) for alias in alias_set)
             for path in scope.paths:
-                path_owners.setdefault(path, set()).add((client_id, alias_set, scope.uncertain))
+                path_owners.setdefault(path, set()).add(
+                    (
+                        client_id,
+                        scope.info_hash,
+                        alias_set,
+                        scope.uncertain,
+                        scope.uncertainty_code,
+                        scope.torrent_name,
+                    )
+                )
 
     conflicts: set[tuple[str, str]] = set()
-    active: list[tuple[str, set[tuple[str, frozenset[str], bool]]]] = []
+    active: list[tuple[str, set[tuple[str, str, frozenset[str], bool, str | None, str | None]]]] = []
+    sibling_scope_blockers: dict[tuple[str, str], set[ContentScopeBlocker]] = {}
     for path in sorted(path_owners, key=lambda value: PurePosixPath(value).parts):
         while active and not (path == active[-1][0] or path.startswith(f"{active[-1][0]}/")):
             active.pop()
-        owners: set[tuple[str, frozenset[str], bool]] = set(path_owners[path])
+        owners: set[tuple[str, str, frozenset[str], bool, str | None, str | None]] = set(path_owners[path])
         for _ancestor, ancestor_owners in active:
             owners.update(ancestor_owners)
         if len(owners) > 1:
-            for client_id, aliases, owner_uncertain in owners:
-                conflicts.update((client_id, hash_value) for hash_value in aliases.intersection(normalized_hashes))
+            uncertain_owners = tuple(owner for owner in owners if owner[3])
+            for client_id, _canonical_hash, aliases, owner_uncertain, _uncertainty_code, _torrent_name in owners:
+                requested_aliases = aliases.intersection(normalized_hashes)
                 if owner_uncertain:
-                    uncertain.update((client_id, hash_value) for hash_value in aliases.intersection(normalized_hashes))
+                    uncertain.update((client_id, hash_value) for hash_value in requested_aliases)
+                elif uncertain_owners:
+                    for hash_value in requested_aliases:
+                        sibling_scope_blockers.setdefault((client_id, hash_value), set()).update(
+                            ContentScopeBlocker(
+                                client_id=blocker_client,
+                                info_hash=blocker_hash,
+                                torrent_name=blocker_name,
+                            )
+                            for (
+                                blocker_client,
+                                blocker_hash,
+                                _aliases,
+                                _uncertain,
+                                _code,
+                                blocker_name,
+                            ) in uncertain_owners
+                        )
+                else:
+                    conflicts.update((client_id, hash_value) for hash_value in requested_aliases)
         active.append((path, path_owners[path]))
     missing_known: set[tuple[str, str]] = set()
     if known_existing is not None:
@@ -164,6 +201,26 @@ def assess_content_inventory(
         observed=frozenset(observed),
         uncertain=frozenset(uncertain),
         scope_paths=tuple(scope_paths),
+        uncertainty_codes=tuple(sorted(set(uncertainty_codes))),
+        sibling_scope_blockers=tuple(
+            sorted(
+                (
+                    client_id,
+                    hash_value,
+                    tuple(
+                        sorted(
+                            blockers,
+                            key=lambda blocker: (
+                                blocker.client_id,
+                                blocker.info_hash,
+                                blocker.torrent_name or "",
+                            ),
+                        )
+                    ),
+                )
+                for (client_id, hash_value), blockers in sibling_scope_blockers.items()
+            )
+        ),
     )
 
 
@@ -180,11 +237,39 @@ def content_safety_skip_reason(
         return "ownership_unverifiable"
     if (client_id, info_hash) not in assessment.observed:
         return "ownership_unverifiable"
+    uncertainty_code = next(
+        (
+            code
+            for snapshot_client, snapshot_hash, code in assessment.uncertainty_codes
+            if snapshot_client == client_id and snapshot_hash == info_hash
+        ),
+        None,
+    )
+    if uncertainty_code == "torrent_closed":
+        return "torrent_closed"
+    if any(
+        snapshot_client == client_id and snapshot_hash == info_hash
+        for snapshot_client, snapshot_hash, _blockers in assessment.sibling_scope_blockers
+    ):
+        return "sibling_scope_unknown"
     if (client_id, info_hash) in assessment.uncertain:
         return "ownership_unverifiable"
     if (client_id, info_hash) in assessment.conflicts:
         return "shared_path"
     return None
+
+
+def content_safety_blockers(
+    assessment: ContentSafetyAssessment,
+    client_id: str,
+    info_hash: str,
+) -> tuple[ContentScopeBlocker, ...]:
+    """Return immutable sibling identities responsible for an unknown-scope block."""
+
+    for snapshot_client, snapshot_hash, blockers in assessment.sibling_scope_blockers:
+        if snapshot_client == client_id and snapshot_hash == info_hash:
+            return blockers
+    return ()
 
 
 def content_scope_matches(
@@ -206,7 +291,7 @@ def content_scope_matches(
         return False
     recorded = [
         paths
-        for snapshot_client, snapshot_hash, paths in assessment.scope_paths
+        for snapshot_client, snapshot_hash, paths, _torrent_name in assessment.scope_paths
         if snapshot_client == client_id and snapshot_hash == info_hash
     ]
     if len(recorded) != 1:

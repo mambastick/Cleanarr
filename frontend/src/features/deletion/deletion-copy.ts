@@ -87,6 +87,7 @@ export function isExecutablePlan(preview: ManualDeletePreviewResponse): boolean 
 
 export function localizedJobError(code: string | null | undefined, language: DeletionLanguage): string | null {
   const messages: Record<string, readonly [string, string]> = {
+    unsafe_plan: ["Safety evidence blocks this cleanup. Automatic retry is disabled; resolve the blockers and review a new preview.", "Очистка заблокирована проверками безопасности. Автоматический повтор отключён; устраните причины и проверьте новый предпросмотр."],
     partial_result_not_retryable: ["Some cleanup steps completed. Automatic retry is blocked; inspect the recorded result before continuing.", "Часть очистки выполнена. Автоматический повтор заблокирован; проверьте сохранённый результат перед продолжением."],
     interrupted_unknown: ["The previous attempt may have changed data. Inspect the result before continuing.", "Предыдущая попытка могла изменить данные. Проверьте результат перед продолжением."],
     plan_changed: ["The plan changed. Review a new preview before confirming again.", "План изменился. Проверьте новый предпросмотр перед повторным подтверждением."],

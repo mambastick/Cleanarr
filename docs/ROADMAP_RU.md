@@ -526,9 +526,19 @@ regressions всех четырёх adapters, заполненный upgrade п�
 полностью неизвестная область по-прежнему даёт fail-closed. Inventory закрытой
 раздачи rTorrent может вывести консервативную область, но само удаление требует
 непустого проверенного base path. Доверенный маркер пути Arr остаётся внутренним
-для manual flow. Ошибки до мутации сохраняют bounded retries. Ordered migration 8
+для manual flow. Только временные ошибки чтения сохраняют bounded retries;
+safety blockers дают terminal `unsafe_plan`. Ordered migration 8
 хранит structured job error codes; обязательны upgrade с schemas 6/7 и
 backup/restore. Scope и release gates сохраняются.
+
+Дополнительное уточнение ревью PR #53: отрицательные routed ID Radarr остаются
+допустимыми; raw ID внешнего сервиса должны быть положительными. Jellyfin
+отменяет нестабильный provider pass и повторяет его один раз. Inventory rTorrent
+использует bounded multicall; неизвестная область соседней раздачи и закрытая
+цель получают отдельные EN/RU причины и понятные сведения для исправления.
+Magnet без metadata в qBittorrent допускает документированный unknown-size
+sentinel только со строгими доказательствами нулевого payload. Это regression
+fixes в рамках прежних acceptance gates и destructive scope.
 
 ## Обязательный scope 1.0
 
