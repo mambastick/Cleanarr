@@ -122,6 +122,7 @@ class ManualDeletionService:
                     tmdb_id=movie.tmdb_id,
                     imdb_id=movie.imdb_id,
                     path=movie.path,
+                    path_namespace="arr",
                 ),
             )
 
@@ -149,6 +150,7 @@ class ManualDeletionService:
                 tmdb_id=series.tmdb_id,
                 imdb_id=series.imdb_id,
                 path=series.path,
+                path_namespace="arr",
             ),
             series_name=series.title,
             season_number=payload.season_number,

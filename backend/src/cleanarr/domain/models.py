@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 
@@ -66,6 +66,7 @@ class MediaFingerprint:
     tvdb_id: int | None = None
     imdb_id: str | None = None
     path: str | None = None
+    path_namespace: Literal["arr"] | None = None
 
     @property
     def normalized_path(self) -> str | None:
@@ -289,7 +290,7 @@ class DownloaderRemovalResult:
     """Download-client removal outcome and observed presentation metadata for one hash."""
 
     hash_value: str
-    existed: bool
+    existed: bool | None
     client_id: str | None = None
     client_name: str | None = None
     client_kind: str | None = None

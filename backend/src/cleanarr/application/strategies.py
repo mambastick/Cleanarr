@@ -29,6 +29,7 @@ from cleanarr.domain import (
     ItemType,
     MediaDeletionEvent,
     ProcessingResult,
+    RadarrHistoryRecord,
     RadarrMovie,
     ResourceNotFoundError,
     RetainedTorrent,
@@ -221,7 +222,22 @@ class BaseDeletionStrategy(ABC):
                     delete_files=result.delete_files,
                 )
                 continue
-            if result.existed and result.skip_reason:
+            if result.existed is None:
+                cleanup_succeeded = False
+                collector.add(
+                    result.client_kind or "downloader",
+                    "delete_hash",
+                    ActionStatus.FAILED,
+                    "Downloader existence could not be verified; dependent cleanup was blocked.",
+                    reason=FailureReason.OWNERSHIP_UNVERIFIABLE,
+                    hash=result.hash_value,
+                    downloader_id=result.client_id,
+                    downloader_name=result.client_name,
+                    downloader_kind=result.client_kind,
+                    skip_reason=result.skip_reason,
+                )
+                continue
+            if result.skip_reason:
                 skip_reason = {
                     "shared_path": FailureReason.SHARED_PATH,
                     "ownership_unverifiable": FailureReason.OWNERSHIP_UNVERIFIABLE,
@@ -230,7 +246,8 @@ class BaseDeletionStrategy(ABC):
                     cleanup_succeeded = False
                 if skip_reason is FailureReason.SEEDING_POLICY and not self._dry_run:
                     if (
-                        event is None
+                        result.existed is not True
+                        or event is None
                         or not result.client_id
                         or result.seeding_policy
                         not in {
@@ -700,30 +717,39 @@ class MovieDeletionStrategy(BaseDeletionStrategy):
         hashes: set[str],
     ) -> bool:
         """Retain the entire cascade unless all configured Radarr histories isolate the hash."""
+        del movies
         if not hashes:
             return True  # The normal missing-hash guard below still blocks deletion.
-        if len(movies) > 1000:
+        lookup = getattr(self._radarr, "list_download_history", None)
+        if not callable(lookup):
             collector.add(
                 "radarr",
                 "verify_download_ownership",
-                ActionStatus.SKIPPED,
-                "Radarr ownership inventory exceeds the safety bound.",
+                ActionStatus.FAILED,
+                "Radarr does not provide hash-scoped ownership history.",
                 reason=FailureReason.OWNERSHIP_UNVERIFIABLE,
             )
             return False
         semaphore = asyncio.Semaphore(4)
+        normalized_hashes = sorted({value.upper() for value in hashes})
 
-        async def references(candidate: RadarrMovie) -> bool:
-            other_id = candidate.id
-            if other_id == movie_id:
-                return False
+        async def history_for_hash(hash_value: str) -> tuple[str, Sequence[object]]:
             async with semaphore:
-                records = await self._radarr.list_movie_history(other_id)
-            return any(record.download_id and record.download_id.upper() in hashes for record in records)
+                records = await lookup(hash_value)
+            return hash_value, records
 
+        tasks = [asyncio.create_task(history_for_hash(hash_value)) for hash_value in normalized_hashes]
         try:
-            shared = any(await asyncio.gather(*(references(candidate) for candidate in movies)))
+            histories = await asyncio.gather(*tasks)
+        except asyncio.CancelledError:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
         except Exception as exc:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
             collector.add(
                 "radarr",
                 "verify_download_ownership",
@@ -735,16 +761,44 @@ class MovieDeletionStrategy(BaseDeletionStrategy):
                 error=str(exc),
             )
             return False
-        if shared:
+        try:
+            shared_hashes: set[str] = set()
+            for hash_value, records in histories:
+                if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+                    raise TypeError("Radarr returned malformed hash-scoped history.")
+                for record in records:
+                    if (
+                        not isinstance(record, RadarrHistoryRecord)
+                        or isinstance(record.movie_id, bool)
+                        or record.movie_id <= 0
+                    ):
+                        raise TypeError("Radarr returned malformed hash-scoped history records.")
+                    if not isinstance(record.download_id, str) or not record.download_id.strip():
+                        raise TypeError("Radarr returned malformed hash-scoped download IDs.")
+                    if record.download_id.strip().upper() != hash_value:
+                        raise ValueError("Radarr returned history for a different download hash.")
+                    if record.movie_id != movie_id:
+                        shared_hashes.add(hash_value)
+        except Exception as exc:  # noqa: BLE001 - malformed untrusted history fails closed
+            collector.add(
+                "radarr",
+                "verify_download_ownership",
+                ActionStatus.FAILED,
+                "Could not verify exclusive movie download ownership.",
+                reason=FailureReason.OWNERSHIP_UNVERIFIABLE,
+                error=str(exc),
+            )
+            return False
+        if shared_hashes:
             collector.add(
                 "radarr",
                 "verify_download_ownership",
                 ActionStatus.SKIPPED,
                 "A download hash is referenced by another movie; all dependent cleanup is blocked.",
                 reason=FailureReason.PACK_TORRENT,
-                hashes=sorted(hashes),
+                hashes=sorted(shared_hashes),
             )
-        return not shared
+        return not shared_hashes
 
     async def _handle(self, event: MediaDeletionEvent, collector: ActionCollector) -> ProcessingResult:
         movies = list(await self._radarr.list_movies())

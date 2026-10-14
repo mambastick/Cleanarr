@@ -54,7 +54,7 @@ Database migration 6 транзакционно добавляет `user_account
 остановить CleanArr и восстановить pre-upgrade database; старую binary нельзя
 запускать с schema 6.
 
-## Удержанные раздачи и database schema 7
+## Удержанные раздачи и database schema 8
 
 Migration 7 добавляет `retained_torrents`, сохраняя configuration, users,
 activity и jobs. Evidence keep/defer сохраняется до зависимой очистки медиа,
@@ -62,12 +62,17 @@ activity и jobs. Evidence keep/defer сохраняется до зависим
 аудит, а не актуальный ownership или permission; refresh не удаляет такие
 раздачи автоматически. Старые неотслеживаемые раздачи не выводятся из title/path.
 
+Migration 8 добавляет durable `error_code` ручной задачи, сохраняя migration 7.
+Обновление stable schema 6 и candidate schema 7 выполняется последовательно.
+Старые строки без кода читаются с `NULL`; новые переходы failure/recovery
+записывают код напрямую, без вывода из текста сообщения.
+
 Перед upgrade с v2.0.4 (schema 6) экспортируйте SQLite backup через
 `Connection.backup` по installation guide и проверьте `PRAGMA integrity_check`:
 результат должен быть `ok`. Сохраните backup вместе с image/package v2.0.4.
-Для rollback остановите CleanArr, сохраните schema-7 database отдельно,
+Для rollback остановите CleanArr, сохраните schema-8 database отдельно,
 восстановите backup schema 6 и запустите v2.0.4; проверьте settings, users и
-history. Старая binary отклоняет schema 7. Пустая replacement configuration или
+history. Старая binary отклоняет schema 8. Пустая replacement configuration или
 удаление новой таблицы не являются поддерживаемым downgrade.
 
 Частичная manual job с выполненной мутацией сообщает

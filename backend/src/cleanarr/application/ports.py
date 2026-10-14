@@ -161,6 +161,9 @@ class RadarrClientPort(Protocol):
     async def list_movie_history(self, movie_id: int) -> Sequence[RadarrHistoryRecord]:
         """Return history for a single movie."""
 
+    async def list_download_history(self, download_id: str) -> Sequence[RadarrHistoryRecord]:
+        """Return complete bounded history for one downloader identity."""
+
     async def delete_movie(
         self,
         movie_id: int,

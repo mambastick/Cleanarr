@@ -192,6 +192,32 @@ async def test_transmission_content_inventory_rejects_missing_download_root() ->
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_transmission_malformed_listing_never_mutates() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        if payload["method"] == "session_get":
+            result: object = {"version": "4.1.0"}
+        else:
+            result = {"torrents": [{"id": True, "hash_string": "A" * 40}]}
+        return httpx.Response(200, json={"jsonrpc": "2.0", "result": result, "id": payload["id"]})
+
+    respx.post("http://transmission/transmission/rpc").mock(side_effect=handler)
+    client = TransmissionClient(
+        base_url="http://transmission/transmission/rpc", username="", password="", timeout_seconds=5
+    )
+    try:
+        result = (await client.delete_hashes(["A" * 40], delete_files=False))[0]
+    finally:
+        await client.close()
+
+    assert result.existed is None
+    assert result.skip_reason == "ownership_unverifiable"
+    assert result.delete_files is False
+    assert all(json.loads(call.request.content).get("method") != "torrent_remove" for call in respx.calls)
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_transmission_standalone_delete_blocks_shared_content_scope() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
@@ -553,6 +579,9 @@ async def test_rtorrent_content_inventory_rejects_missing_base_path() -> None:
             "download_list": ["A" * 40],
             "d.base_path": "",
             "directory.default": "/srv/data/torrents",
+            "d.directory": "/srv/data/torrents",
+            "d.name": "Movie",
+            "d.is_multi_file": False,
         }
         return httpx.Response(200, content=dumps((results[method],), methodresponse=True, allow_none=True))
 
@@ -562,8 +591,35 @@ async def test_rtorrent_content_inventory_rejects_missing_base_path() -> None:
         inventory = await client.list_content_inventory()
     finally:
         await client.close()
+    assert inventory.failures == ()
+    assert inventory.scopes[0].paths == ("/srv/data/torrents/Movie",)
+    assert inventory.scopes[0].uncertain is True
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_rtorrent_outside_base_path_is_unbounded_unknown() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        _, method = loads(request.content)
+        results: dict[str, Any] = {
+            "download_list": ["A" * 40],
+            "d.base_path": "/other/data/Movie",
+            "directory.default": "/srv/data/torrents",
+            "d.directory": "/srv/data/torrents",
+            "d.name": "Movie",
+            "d.is_multi_file": False,
+        }
+        return httpx.Response(200, content=dumps((results[method],), methodresponse=True, allow_none=True))
+
+    respx.post("http://rtorrent/RPC2").mock(side_effect=handler)
+    client = RTorrentClient(base_url="http://rtorrent/RPC2", username="", password="", timeout_seconds=5)
+    try:
+        inventory = await client.list_content_inventory()
+    finally:
+        await client.close()
+
     assert inventory.scopes == ()
-    assert inventory.failures[0].code == "invalid_content_scope"
+    assert inventory.failures[0].code == "unbounded_content_scope"
 
 
 @pytest.mark.asyncio

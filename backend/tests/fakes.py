@@ -60,6 +60,7 @@ class FakeRadarrClient:
 
     movies: list[RadarrMovie]
     history_by_movie: dict[int, list[RadarrHistoryRecord]]
+    download_history_by_id: dict[str, list[RadarrHistoryRecord]] = field(default_factory=dict)
     deleted_movie_ids: list[int] = field(default_factory=list)
 
     async def list_movies(self) -> list[RadarrMovie]:
@@ -67,6 +68,16 @@ class FakeRadarrClient:
 
     async def list_movie_history(self, movie_id: int) -> list[RadarrHistoryRecord]:
         return list(self.history_by_movie.get(movie_id, []))
+
+    async def list_download_history(self, download_id: str) -> list[RadarrHistoryRecord]:
+        if download_id in self.download_history_by_id:
+            return list(self.download_history_by_id[download_id])
+        return [
+            record
+            for records in self.history_by_movie.values()
+            for record in records
+            if record.download_id and record.download_id.casefold() == download_id.casefold()
+        ]
 
     async def delete_movie(
         self,

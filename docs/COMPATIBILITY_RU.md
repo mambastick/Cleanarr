@@ -120,7 +120,8 @@ evidence совместимости этих flows.
 
 ## Candidate исправлений безопасности — 2026-10-14
 
-Issues #42–#52 добавляют protocol-tested проверки data scopes и SQLite schema 7.
+Issues #42–#52 добавляют protocol-tested проверки data scopes и SQLite schema 8
+(retention в migration 7, structured job errors в migration 8).
 Опубликованная выше version matrix — историческое evidence, а не сертификация
 candidate. Перед release нужны свежие real-service и latest-stable upgrade
 rehearsals. Ограничения POSIX path/aliases, root rTorrent и bounded fingerprint

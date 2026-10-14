@@ -18,6 +18,7 @@ from cleanarr.application.deletion_jobs import (
     DeletionPreviewer,
     ManualDeleteResolver,
     ManualDeleteRunner,
+    _preflight_failure_code,
     plan_hash,
 )
 from cleanarr.application.deletion_models import (
@@ -187,6 +188,8 @@ class ManualDeletionBatchService:
             changed_code = (
                 "library_item_changed"
                 if any(child.blocked_code == "library_item_changed" for child in preview.children)
+                else "preflight_failed"
+                if any(child.blocked_code == "preflight_failed" for child in preview.children)
                 else "batch_plan_changed"
             )
             raise BatchPlanChangedError(
@@ -415,7 +418,8 @@ class ManualDeletionBatchService:
                     child.message = "The child was only partially completed; later safe children will continue."
                 elif plan_blocked_code(result) is not None:
                     child.status = BatchChildStatus.FAILED
-                    child.error_code = "unsafe_result"
+                    blocked_code = plan_blocked_code(result)
+                    child.error_code = blocked_code if blocked_code == "preflight_failed" else "unsafe_result"
                     child.error_message = "The child reported a safety-attention outcome."
                     child.message = "The child was not treated as completed; later safe children will continue."
                 else:
@@ -740,6 +744,8 @@ def blocked_artifact(child: ManualDeleteBatchChildPreviewResponse) -> str:
 
 
 def plan_blocked_code(plan: ProcessingResultResponse) -> str | None:
+    if _preflight_failure_code(plan) is not None:
+        return "preflight_failed"
     if plan.status in {OverallStatus.PARTIAL_FAILURE, OverallStatus.IGNORED}:
         return "unsafe_plan"
     if any(

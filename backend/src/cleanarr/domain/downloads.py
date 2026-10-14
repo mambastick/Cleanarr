@@ -135,6 +135,8 @@ class DownloaderContentScope:
     info_hash: str
     paths: tuple[str, ...]
     hash_aliases: tuple[str, ...] = ()
+    uncertain: bool = False
+    empty_verified: bool = False
 
 
 @dataclass(frozen=True)

@@ -29,7 +29,7 @@ instance and are never treated as globally unique.
 
 The operation fails closed and records a structured skip when, for example:
 
-- provider identifiers or paths conflict;
+- provider identifiers conflict, or trusted Arr-derived paths conflict;
 - multiple Arr instances can own the same event without a unique resolution;
 - Arr history does not prove the download hash;
 - a torrent/file spans material outside the requested movie, series, season,
@@ -37,32 +37,49 @@ The operation fails closed and records a structured skip when, for example:
 - paths are shared, a torrent is a pack, or cross-seeded content cannot be
   isolated safely;
 - the client-supplied data path is empty, relative, traverses a parent, or is a
-  root-level path;
+  filesystem root;
 - a downstream dependency or authentication check fails.
 
 ## Source and physical-scope verification
 
 Webhook cascades require a configured, enabled Jellyfin connection. Exact item
 ID lookup is attempted first. Jellyfin 10.11.11 has no supported provider-equality
-filter on this endpoint, so fingerprint fallback reads one complete type
-catalogue bounded to 1,000 items, without pagination. Missing/invalid totals,
-partial data, a larger catalogue or a failed lookup returns `source_unverifiable`
+filter on this endpoint, so fingerprint fallback uses complete pagination with
+the existing 20,000-item library bound. There is no 1,000-item rejection.
+Missing/invalid totals, partial data, a catalogue above the bound or a failed lookup returns `source_unverifiable`
 and blocks the cascade. Manual confirmed flows remain available independently.
 
 Every data-removal preview and execution reads complete private content scopes
 from all configured downloaders. Equal, ancestor or descendant scopes belonging
 to another torrent, including the same hash on another client, return
-`shared_path`; missing/invalid/failed inventory returns `ownership_unverifiable`.
-All dependent Arr/Seerr/Jellyfin cleanup is blocked. Radarr hashes must also be
-absent from every other movie's complete history across configured instances;
-a shared hash is a pack block, and an unreadable history fails closed.
+`shared_path`. Incomplete file metadata with a validated root is represented as
+a conservative uncertain scope: it blocks overlapping targets without disabling
+unrelated paths. A metadata-less torrent is ignored for overlap only when its
+protocol counters prove zero local payload bytes; an empty file list alone is
+not proof. Unbounded/invalid/failed inventory returns `ownership_unverifiable`.
+Blocked targets retain all dependent Arr/Seerr/Jellyfin data. Each call reuses one
+fleet assessment, binds fresh target metadata to its recorded scope and keeps
+standalone adapter guards active. Unknown existence is never reported as present
+on every client or used to authorize dependent cleanup. Radarr hashes must also be
+absent from every other movie's complete download-ID-filtered history across
+configured instances. These checks do not fan out once per movie or impose a
+1,000-movie catalogue cap; a shared hash is a pack block, and an unreadable or
+incomplete filtered history fails closed.
+
+Provider identifiers are compared independently from Jellyfin's file/mount
+namespace. A webhook file path cannot veto a matching provider ID because an
+Arr path names a folder in a different namespace. Only trusted manual selections
+derived from Arr carry an internal Arr-path marker for conflict checks; inbound
+webhooks cannot set that marker. Exact-path fallback remains a weak last resort.
 
 These checks compare reported POSIX paths and exact file lists. They do not
 inspect remote inodes or resolve different bind-mount/symlink aliases. Configure
 clients with a consistent path namespace; unresolved physical aliases must be
 kept outside mutation-enabled operation. Hardlinks can retain physical bytes,
 so no reclaimed-space guarantee is made. Windows/UNC and malformed paths are
-unknown. rTorrent requires a nonempty base path strictly below its live
+unknown. Closed rTorrent inventory may derive a conservative scope from its
+directory, name and multi-file flag. Actual data removal still requires a
+nonempty base path strictly below its live
 `directory.default` root; root/no-subdirectory and paths outside that root are
 blocked rather than recursively removed by a directory fallback.
 

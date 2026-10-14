@@ -516,6 +516,20 @@ regressions всех четырёх adapters, заполненный upgrade п�
 с проверенным backup/restore и browser evidence EN/RU desktop/mobile light/dark.
 Это запись scope реализации, а не заявление о релизе или сертификации.
 
+Уточнение после ревью PR #53: обычный размер каталога не должен блокировать
+очистку. Jellyfin сохраняет точный ID lookup и возвращает полную pagination
+до существующего лимита 20 000 items для provider fallback. Ownership Radarr
+проверяется через полную историю по download ID во всех настроенных instances,
+без лимита 1 000 movies и запроса истории каждого фильма. Приватный assessment
+на один вызов исключает повторное полное чтение downloader inventories.
+Ограниченная известными путями неопределённость блокирует пересекающиеся цели;
+полностью неизвестная область по-прежнему даёт fail-closed. Inventory закрытой
+раздачи rTorrent может вывести консервативную область, но само удаление требует
+непустого проверенного base path. Доверенный маркер пути Arr остаётся внутренним
+для manual flow. Ошибки до мутации сохраняют bounded retries. Ordered migration 8
+хранит structured job error codes; обязательны upgrade с schemas 6/7 и
+backup/restore. Scope и release gates сохраняются.
+
 ## Обязательный scope 1.0
 
 ### 1. Torrent-клиенты и маршрутизация

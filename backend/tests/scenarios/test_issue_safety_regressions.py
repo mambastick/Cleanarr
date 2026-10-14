@@ -81,14 +81,14 @@ async def test_shared_movie_hash_or_unreadable_history_blocks_entire_cascade(fai
     factory, event, radarr, seerr, downloader = fixture(ItemType.MOVIE)
     radarr.movies.append(RadarrMovie(2, "Other", "/media/other", 2, None))
     radarr.history_by_movie[2] = [RadarrHistoryRecord(2, 2, "downloadFolderImported", "abc", None)]
-    original = radarr.list_movie_history
+    original = radarr.list_download_history
 
-    async def history(movie_id):
-        if movie_id == 2 and failing_history:
+    async def history(download_id):
+        if failing_history:
             raise ExternalServiceError("radarr", "Unreadable history")
-        return await original(movie_id)
+        return await original(download_id)
 
-    radarr.list_movie_history = history
+    radarr.list_download_history = history
     for dry_run in (True, False):
         result = await factory.for_item_type(ItemType.MOVIE, dry_run=dry_run).handle(event)
         assert any(

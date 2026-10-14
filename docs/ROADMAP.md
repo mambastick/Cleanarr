@@ -508,6 +508,19 @@ protocol regressions, a populated latest-stable schema-6 upgrade with verified
 backup/restore, and EN/RU desktop/mobile light/dark browser evidence. This
 section records implementation scope, not release or compatibility certification.
 
+PR #53 review correction: ordinary catalogue sizes must not disable cleanup.
+Jellyfin keeps exact-ID lookup and restores complete pagination up to the existing
+20,000-item bound for provider fallback. Radarr ownership uses complete history
+filtered by download ID across every configured instance, without a 1,000-movie
+cap or per-movie request fan-out. Private per-call downloader assessments avoid
+duplicate full inventories; bounded uncertain scopes block overlapping targets,
+while unbounded unknown evidence still fails closed. Closed rTorrent inventory
+may derive a conservative scope; the actual removal target still needs its
+nonempty validated base path. Trusted Arr path provenance is internal to manual
+flows. Pre-mutation failures retain bounded retries. Ordered migration 8 stores
+structured job error codes; upgrades from schemas 6/7 and backup/restore are
+required. These changes retain the existing scope and release gates.
+
 ## Required 1.0 scope
 
 ### 1. Download clients and routing

@@ -61,7 +61,7 @@ class SQLiteDeletionRepository:
             rows = connection.execute(
                 "SELECT id, request_json, event_json, preflight_json, status, phase, progress_percent,"
                 " message, item_name, created_at, started_at, completed_at, next_retry_at,"
-                " attempt_count, max_attempts, result_json, error, idempotency_key, display_name"
+                " attempt_count, max_attempts, result_json, error, error_code, idempotency_key, display_name"
                 " FROM manual_delete_jobs ORDER BY created_at DESC"
             ).fetchall()
         jobs: list[DeletionJobRecord] = []
@@ -77,7 +77,7 @@ class SQLiteDeletionRepository:
             row = connection.execute(
                 "SELECT id, request_json, event_json, preflight_json, status, phase, progress_percent,"
                 " message, item_name, created_at, started_at, completed_at, next_retry_at,"
-                " attempt_count, max_attempts, result_json, error, idempotency_key, display_name"
+                " attempt_count, max_attempts, result_json, error, error_code, idempotency_key, display_name"
                 " FROM manual_delete_jobs WHERE id = ?",
                 (str(job_id),),
             ).fetchone()
@@ -297,23 +297,27 @@ class SQLiteDeletionRepository:
 def encode_persisted_event(event: MediaDeletionEvent) -> str:
     """Encode an event with the established webhook JSON key order and shape."""
 
+    payload = {
+        "notification_type": event.notification_type,
+        "item_type": event.item_type.value,
+        "item_id": event.item_id,
+        "name": event.name,
+        "path": event.fingerprint.path,
+        "tmdb_id": event.fingerprint.tmdb_id,
+        "tvdb_id": event.fingerprint.tvdb_id,
+        "imdb_id": event.fingerprint.imdb_id,
+        "series_name": event.series_name,
+        "series_id": event.series_id,
+        "season_number": event.season_number,
+        "episode_number": event.episode_number,
+        "episode_end_number": event.episode_end_number,
+        "occurred_at": _json_datetime(event.occurred_at),
+    }
+    path_namespace = getattr(event.fingerprint, "path_namespace", None)
+    if path_namespace == "arr":
+        payload["path_namespace"] = "arr"
     return json.dumps(
-        {
-            "notification_type": event.notification_type,
-            "item_type": event.item_type.value,
-            "item_id": event.item_id,
-            "name": event.name,
-            "path": event.fingerprint.path,
-            "tmdb_id": event.fingerprint.tmdb_id,
-            "tvdb_id": event.fingerprint.tvdb_id,
-            "imdb_id": event.fingerprint.imdb_id,
-            "series_name": event.series_name,
-            "series_id": event.series_id,
-            "season_number": event.season_number,
-            "episode_number": event.episode_number,
-            "episode_end_number": event.episode_end_number,
-            "occurred_at": _json_datetime(event.occurred_at),
-        },
+        payload,
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -334,6 +338,7 @@ def decode_persisted_event(value: str) -> MediaDeletionEvent:
             tvdb_id=payload.get("tvdb_id"),
             imdb_id=payload.get("imdb_id"),
             path=payload.get("path"),
+            path_namespace="arr" if payload.get("path_namespace") == "arr" else None,
         ),
         series_name=payload.get("series_name"),
         series_id=payload.get("series_id"),
@@ -358,8 +363,8 @@ def _save_job_in_connection(connection: sqlite3.Connection, job: DeletionJobReco
         "INSERT INTO manual_delete_jobs ("
         " id, request_json, event_json, preflight_json, status, phase, progress_percent,"
         " message, item_name, created_at, started_at, completed_at, next_retry_at,"
-        " attempt_count, max_attempts, result_json, error, idempotency_key, display_name"
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        " attempt_count, max_attempts, result_json, error, error_code, idempotency_key, display_name"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         " ON CONFLICT(id) DO UPDATE SET"
         " request_json=excluded.request_json, event_json=excluded.event_json,"
         " preflight_json=excluded.preflight_json, status=excluded.status, phase=excluded.phase,"
@@ -368,6 +373,7 @@ def _save_job_in_connection(connection: sqlite3.Connection, job: DeletionJobReco
         " started_at=excluded.started_at, completed_at=excluded.completed_at,"
         " next_retry_at=excluded.next_retry_at, attempt_count=excluded.attempt_count,"
         " max_attempts=excluded.max_attempts, result_json=excluded.result_json, error=excluded.error,"
+        " error_code=excluded.error_code,"
         " idempotency_key=excluded.idempotency_key, display_name=excluded.display_name",
         (
             str(job.id),
@@ -387,6 +393,7 @@ def _save_job_in_connection(connection: sqlite3.Connection, job: DeletionJobReco
             job.max_attempts,
             job.result.model_dump_json() if job.result is not None else None,
             job.error,
+            job.error_code,
             str(job.idempotency_key) if job.idempotency_key is not None else None,
             job.display_name,
         ),
@@ -406,10 +413,10 @@ def _job_from_row(row: tuple[object, ...]) -> DeletionJobRecord:
         progress_percent=int(str(row[6])),
         message=redact_sensitive_text(str(row[7])),
         item_name=item_name,
-        idempotency_key=UUID(str(row[17])) if row[17] is not None else None,
+        idempotency_key=UUID(str(row[18])) if row[18] is not None else None,
         display_name=(
-            str(row[18])
-            if row[18] is not None
+            str(row[19])
+            if row[19] is not None
             else display_name_fallback(item_name=item_name, result_name=event.name, item_type=event.item_type)
         ),
         created_at=datetime.fromisoformat(str(row[9])),
@@ -420,6 +427,7 @@ def _job_from_row(row: tuple[object, ...]) -> DeletionJobRecord:
         max_attempts=int(str(row[14])),
         result=ProcessingResultResponse.model_validate_json(str(row[15])) if row[15] is not None else None,
         error=redact_sensitive_text(str(row[16])) if row[16] is not None else None,
+        error_code=redact_sensitive_text(str(row[17])) if row[17] is not None else None,
     )
 
 

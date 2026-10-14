@@ -41,6 +41,7 @@ class DeletionJobRecord:
     attempt_count: int = 0
     result: ProcessingResultResponse | None = None
     error: str | None = None
+    error_code: str | None = None
 
 
 @dataclass

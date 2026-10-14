@@ -139,6 +139,34 @@ class MultiRadarrClient:
             for record in records
         ]
 
+    async def list_download_history(self, download_id: str) -> Sequence[RadarrHistoryRecord]:
+        """Query every Radarr instance and preserve each record's owning instance."""
+        semaphore = asyncio.Semaphore(4)
+
+        async def fetch(target: RadarrTarget) -> Sequence[RadarrHistoryRecord]:
+            async with semaphore:
+                return await target.client.list_download_history(download_id)
+
+        outcomes = await asyncio.gather(*(fetch(target) for target in self._targets), return_exceptions=True)
+        records: list[RadarrHistoryRecord] = []
+        first_error: BaseException | None = None
+        for target_index, outcome in enumerate(outcomes):
+            if isinstance(outcome, BaseException):
+                if first_error is None:
+                    first_error = outcome
+                continue
+            records.extend(
+                replace(
+                    record,
+                    id=_encode_id(target_index, record.id),
+                    movie_id=_encode_id(target_index, record.movie_id),
+                )
+                for record in outcome
+            )
+        if first_error is not None:
+            raise first_error
+        return records
+
     async def delete_movie(
         self,
         movie_id: int,

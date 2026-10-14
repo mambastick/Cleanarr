@@ -388,6 +388,7 @@ class ManualDeletionJobService:
         job.next_retry_at = None
         job.attempt_count += 1
         job.error = None
+        job.error_code = None
         # Freeze the planning snapshot before handing it to the worker thread.
         running_snapshot = copy.deepcopy(job)
         running_snapshot.status = ManualDeleteJobStatus.RUNNING
@@ -409,16 +410,25 @@ class ManualDeletionJobService:
                         if getattr(exc, "code", None) == "library_item_changed":
                             self._mark_failed(
                                 job,
-                                "library_item_changed: The library item changed; preview it again before retrying.",
+                                "The library item changed; preview it again before retrying.",
+                                error_code="library_item_changed",
                             )
                             await asyncio.to_thread(self._repository.save_job, job)
                             return
                         raise
                 current_plan = await self._previewer(job.request, verified_event)
+                if _preflight_failure_code(current_plan) is not None:
+                    await self._retry_or_fail(
+                        job,
+                        "The deletion preflight could not be verified safely.",
+                        error_code="preflight_failed",
+                    )
+                    return
                 if plan_hash(current_plan) != plan_hash(job.preflight):
                     self._mark_failed(
                         job,
                         "The deletion plan changed while the job was queued. Preview it and confirm again.",
+                        error_code="plan_changed",
                     )
                     await asyncio.to_thread(self._repository.save_job, job)
                     return
@@ -432,16 +442,16 @@ class ManualDeletionJobService:
         except asyncio.CancelledError:
             raise
         except DeletionExecutionFailure as exc:
-            self._mark_failed(job, exc.message)
+            self._mark_failed(job, exc.message, error_code="execution_failed")
             await asyncio.to_thread(self._repository.save_job, job)
         except Exception as exc:  # noqa: BLE001
             _logger.exception("Manual deletion background job %s attempt %s failed", job.id, job.attempt_count)
             message = str(exc) or type(exc).__name__
             if job.phase not in {ManualDeleteJobPhase.PLANNING, ManualDeleteJobPhase.LOCATING}:
-                self._mark_failed(job, "interrupted_unknown: " + message)
+                self._mark_failed(job, message, error_code="interrupted_unknown")
                 await asyncio.to_thread(self._repository.save_job, job)
             else:
-                await self._retry_or_fail(job, message)
+                await self._retry_or_fail(job, message, error_code="preflight_failed")
         else:
             job.result = with_display_name(result, job.display_name or display_name(job.request, job.event))
             if result.status is OverallStatus.PARTIAL_FAILURE:
@@ -454,11 +464,11 @@ class ManualDeletionJobService:
                     else "The deletion finished with downstream errors."
                 )
                 if any(action.status is ActionStatus.DELETED for action in result.actions):
-                    self._mark_failed(job, original_error)
+                    self._mark_failed(job, original_error, error_code="partial_result_not_retryable")
                     job.message = "Partial cleanup completed; automatic replay is blocked."
                     await asyncio.to_thread(self._repository.save_job, job)
                 else:
-                    await self._retry_or_fail(job, original_error)
+                    await self._retry_or_fail(job, original_error, error_code="execution_failed")
                 return
             job.status = ManualDeleteJobStatus.COMPLETED
             job.phase = ManualDeleteJobPhase.COMPLETED
@@ -466,13 +476,15 @@ class ManualDeletionJobService:
             job.message = "Deletion completed."
             job.completed_at = datetime.now(UTC)
             job.error = None
+            job.error_code = None
             await asyncio.to_thread(self._repository.save_job, job)
 
-    async def _retry_or_fail(self, job: DeletionJobRecord, message: str) -> None:
+    async def _retry_or_fail(self, job: DeletionJobRecord, message: str, *, error_code: str) -> None:
         message = redact_sensitive_text(message)
         job.error = message
+        job.error_code = error_code
         if job.attempt_count >= job.max_attempts:
-            self._mark_failed(job, message)
+            self._mark_failed(job, message, error_code=error_code)
             await asyncio.to_thread(self._repository.save_job, job)
             return
         delay_index = min(job.attempt_count - 1, len(self._retry_delays_seconds) - 1)
@@ -488,12 +500,13 @@ class ManualDeletionJobService:
         self._schedule_job(job)
 
     @staticmethod
-    def _mark_failed(job: DeletionJobRecord, message: str) -> None:
+    def _mark_failed(job: DeletionJobRecord, message: str, *, error_code: str) -> None:
         job.status = ManualDeleteJobStatus.FAILED
         job.phase = ManualDeleteJobPhase.FAILED
         job.progress_percent = 100
         job.message = "Deletion failed after all safe attempts."
         job.error = redact_sensitive_text(message)
+        job.error_code = error_code
         job.completed_at = datetime.now(UTC)
         job.next_retry_at = None
 
@@ -536,6 +549,7 @@ class ManualDeletionJobService:
                     job.next_retry_at = now
                     job.message = "Process restart detected before mutation; rechecking the persisted preflight."
                     job.error = "Previous process stopped before the mutation phase began."
+                    job.error_code = "interrupted_before_mutation"
                 else:
                     job.status = ManualDeleteJobStatus.FAILED
                     job.phase = ManualDeleteJobPhase.FAILED
@@ -546,6 +560,7 @@ class ManualDeletionJobService:
                     job.error = (
                         "interrupted_unknown: The previous process stopped after a potentially mutating phase began."
                     )
+                    job.error_code = "interrupted_unknown"
                 await asyncio.to_thread(self._repository.save_job, job)
 
     async def _prune_history(self, *, reserve: int = 0) -> None:
@@ -591,18 +606,7 @@ class ManualDeletionJobService:
             preflight=job.preflight,
             result=job.result,
             error=job.error,
-            error_code=(
-                "partial_result_not_retryable"
-                if job.status is ManualDeleteJobStatus.FAILED
-                and job.result is not None
-                and job.result.status is OverallStatus.PARTIAL_FAILURE
-                and any(action.status is ActionStatus.DELETED for action in job.result.actions)
-                else "interrupted_unknown"
-                if job.error and job.error.startswith("interrupted_unknown:")
-                else "plan_changed"
-                if job.error and job.error.startswith("The deletion plan changed")
-                else None
-            ),
+            error_code=job.error_code,
         )
 
 
@@ -650,6 +654,12 @@ def validate_plan_confirmation(request: ManualDeleteRequest, plan: ProcessingRes
             "plan_changed",
             "The deletion plan changed after it was reviewed. Preview the current plan and confirm again.",
         )
+
+
+def _preflight_failure_code(plan: ProcessingResultResponse) -> str | None:
+    """Classify failed read/preflight evidence before treating it as plan drift."""
+
+    return "preflight_failed" if any(action.status is ActionStatus.FAILED for action in plan.actions) else None
 
 
 def canonical_submission_request(payload: ManualDeleteRequest) -> str:

@@ -175,6 +175,10 @@ MIGRATIONS = (
             "CREATE INDEX IF NOT EXISTS idx_retained_torrents_retained_at ON retained_torrents(retained_at DESC)",
         ),
     ),
+    DatabaseMigration(
+        version=8,
+        statements=("ALTER TABLE manual_delete_jobs ADD COLUMN error_code TEXT",),
+    ),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

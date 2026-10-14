@@ -259,7 +259,8 @@ async def test_jellyfin_targeted_lookup_supports_provider_id_fallback() -> None:
 
     assert route.call_count == 1
     assert route.calls[0].request.url.params["IncludeItemTypes"] == "Movie"
-    assert route.calls[0].request.url.params["Limit"] == "1000"
+    assert route.calls[0].request.url.params["Limit"] == "500"
+    assert route.calls[0].request.url.params["StartIndex"] == "0"
     assert route.calls[0].request.url.params["EnableTotalRecordCount"] == "true"
     assert "AnyProviderIdEquals" not in route.calls[0].request.url.params
     assert items[0].imdb_id == "TT123"
@@ -268,16 +269,71 @@ async def test_jellyfin_targeted_lookup_supports_provider_id_fallback() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_jellyfin_targeted_lookup_rejects_partial_response() -> None:
-    respx.get("http://jellyfin/Items").respond(
-        json={
-            "Items": [{"Id": "one", "Name": "One", "Type": "Movie", "ProviderIds": {}}],
-            "TotalRecordCount": 2,
-        }
-    )
+async def test_jellyfin_provider_lookup_paginates_complete_catalogue_over_1000_items() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        start = int(request.url.params["StartIndex"])
+        assert request.url.params["Limit"] == "500"
+        assert request.url.params["EnableTotalRecordCount"] == "true"
+        assert "AnyProviderIdEquals" not in request.url.params
+        page = [
+            {
+                "Id": f"movie-{index}",
+                "Name": f"Movie {index}",
+                "Type": "Movie",
+                "ProviderIds": {"Imdb": f"tt{index}"},
+            }
+            for index in range(start, min(start + 500, 1001))
+        ]
+        return httpx.Response(200, json={"Items": page, "TotalRecordCount": 1001})
+
+    route = respx.get("http://jellyfin/Items").mock(side_effect=handler)
     client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
     try:
-        with pytest.raises(ExternalServiceError, match="incomplete targeted lookup"):
+        items = await client.find_items(provider_ids=["imdb.TT1000"], include_types=["Movie"])
+    finally:
+        await client.close()
+
+    assert route.call_count == 3
+    assert [item.id for item in items] == ["movie-1000"]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_provider_lookup_rejects_incomplete_catalogue_after_first_page() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        start = int(request.url.params["StartIndex"])
+        page = [{"Id": "movie-1", "Name": "Movie", "Type": "Movie", "ProviderIds": {"Tmdb": "1"}}] if start == 0 else []
+        return httpx.Response(200, json={"Items": page, "TotalRecordCount": 501})
+
+    respx.get("http://jellyfin/Items").mock(side_effect=handler)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="incomplete provider catalogue"):
+            await client.find_items(provider_ids=["tmdb.1"], include_types=["Movie"])
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jellyfin_targeted_lookup_rejects_partial_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "Items": (
+                    [{"Id": "one", "Name": "One", "Type": "Movie", "ProviderIds": {}}]
+                    if request.url.params["StartIndex"] == "0"
+                    else []
+                ),
+                "TotalRecordCount": 2,
+            },
+        )
+
+    respx.get("http://jellyfin/Items").mock(side_effect=handler)
+    client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="incomplete provider catalogue"):
             await client.find_items(provider_ids=["tmdb.42"], include_types=["Movie"])
     finally:
         await client.close()
@@ -289,7 +345,7 @@ async def test_jellyfin_provider_lookup_rejects_large_inventory() -> None:
     respx.get("http://jellyfin/Items").respond(
         json={
             "Items": [],
-            "TotalRecordCount": 1001,
+            "TotalRecordCount": 20_001,
         }
     )
     client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
@@ -308,7 +364,7 @@ async def test_jellyfin_provider_lookup_rejects_missing_total_count() -> None:
     )
     client = JellyfinServerClient(base_url="http://jellyfin", api_key="key", timeout_seconds=5)
     try:
-        with pytest.raises(ExternalServiceError, match="invalid targeted lookup metadata"):
+        with pytest.raises(ExternalServiceError, match="unverifiable provider catalogue metadata"):
             await client.find_items(provider_ids=["tmdb.42"], include_types=["Movie"])
     finally:
         await client.close()
@@ -432,6 +488,147 @@ async def test_radarr_client_parses_movies_and_history() -> None:
 
     assert movies[0].tmdb_id == 10
     assert history[0].download_id == "HASH10"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_radarr_download_history_uses_bounded_download_id_filter() -> None:
+    download_id = "HASH /? encoded"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v3/history"
+        assert request.url.params["downloadId"] == download_id
+        assert request.url.params["page"] == "1"
+        assert request.url.params["pageSize"] == "1000"
+        return httpx.Response(
+            200,
+            json={
+                "page": 1,
+                "pageSize": 1000,
+                "totalRecords": 1,
+                "records": [
+                    {
+                        "id": 100,
+                        "movieId": 1,
+                        "eventType": "grabbed",
+                        "downloadId": download_id,
+                        "data": {},
+                    }
+                ],
+            },
+        )
+
+    route = respx.get("http://radarr/api/v3/history").mock(side_effect=handler)
+    client = RadarrClient(base_url="http://radarr/api/v3", api_key="key", timeout_seconds=5)
+    try:
+        records = await client.list_download_history(download_id)
+    finally:
+        await client.close()
+
+    assert route.call_count == 1
+    assert records[0].download_id == download_id
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_radarr_download_history_accepts_omitted_optional_data() -> None:
+    respx.get("http://radarr/api/v3/history").respond(
+        json={
+            "totalRecords": 1,
+            "records": [{"id": 100, "movieId": 1, "eventType": "grabbed", "downloadId": "HASH10"}],
+        }
+    )
+    client = RadarrClient(base_url="http://radarr/api/v3", api_key="key", timeout_seconds=5)
+    try:
+        records = await client.list_download_history("HASH10")
+    finally:
+        await client.close()
+
+    assert records[0].imported_path is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("record_id", "movie_id"),
+    [(True, 1), (0, 1), (-1, 1), (100, True), (100, 0), (100, -1)],
+)
+@respx.mock
+async def test_radarr_download_history_rejects_nonpositive_or_boolean_ids(record_id: object, movie_id: object) -> None:
+    respx.get("http://radarr/api/v3/history").respond(
+        json={
+            "totalRecords": 1,
+            "records": [
+                {
+                    "id": record_id,
+                    "movieId": movie_id,
+                    "eventType": "grabbed",
+                    "downloadId": "HASH10",
+                }
+            ],
+        }
+    )
+    client = RadarrClient(base_url="http://radarr/api/v3", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="invalid download history records"):
+            await client.list_download_history("HASH10")
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_radarr_download_history_rejects_records_beyond_reported_total() -> None:
+    respx.get("http://radarr/api/v3/history").respond(
+        json={
+            "totalRecords": 1,
+            "records": [
+                {"id": 100, "movieId": 1, "eventType": "grabbed", "downloadId": "HASH10"},
+                {"id": 101, "movieId": 1, "eventType": "imported", "downloadId": "HASH10"},
+            ],
+        }
+    )
+    client = RadarrClient(base_url="http://radarr/api/v3", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="beyond the reported download history"):
+            await client.list_download_history("HASH10")
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_radarr_download_history_rejects_incomplete_or_excessive_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "totalRecords": 10_001,
+                "records": [],
+            },
+        )
+
+    respx.get("http://radarr/api/v3/history").mock(side_effect=handler)
+    client = RadarrClient(base_url="http://radarr/api/v3", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="safe bounded limit"):
+            await client.list_download_history("HASH10")
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_radarr_download_history_rejects_premature_empty_page() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"totalRecords": 2, "records": []})
+
+    respx.get("http://radarr/api/v3/history").mock(side_effect=handler)
+    client = RadarrClient(base_url="http://radarr/api/v3", api_key="key", timeout_seconds=5)
+    try:
+        with pytest.raises(ExternalServiceError, match="incomplete download history"):
+            await client.list_download_history("HASH10")
+    finally:
+        await client.close()
 
 
 @pytest.mark.asyncio

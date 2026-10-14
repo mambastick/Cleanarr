@@ -16,6 +16,7 @@ from cleanarr.application.data_safety import (
     ContentSafetyAssessment,
     assess_content_inventory,
     content_safety_skip_reason,
+    content_scope_matches,
     read_content_inventory,
     validate_scope_path,
 )
@@ -59,7 +60,8 @@ from cleanarr.domain.seeding import TorrentSeedingStatus, seeding_policy_skip_re
 _CONTROL_VERIFICATION_DELAYS = (0.0, 0.05, 0.1, 0.2, 0.4, 0.8)
 _JELLYFIN_LIBRARY_PAGE_SIZE = 500
 _JELLYFIN_LIBRARY_MAX_ITEMS = 20_000
-_JELLYFIN_TARGETED_PROVIDER_MAX_ITEMS = 1_000
+_RADARR_HISTORY_PAGE_SIZE = 1_000
+_RADARR_HISTORY_MAX_RECORDS = 10_000
 
 
 def _optional_datetime(value: object) -> datetime | None:
@@ -170,7 +172,7 @@ def _safe_content_path(value: object) -> str | None:
         return None
     text = value
     paths = (PurePosixPath(text), PureWindowsPath(text))
-    if not any(path.is_absolute() and ".." not in path.parts and len(path.parts) >= 3 for path in paths):
+    if not any(path.is_absolute() and ".." not in path.parts and len(path.parts) >= 2 for path in paths):
         return None
     return text
 
@@ -524,6 +526,79 @@ class RadarrClient(JsonServiceClient):
             for item in records
         ]
 
+    async def list_download_history(self, download_id: str) -> Sequence[RadarrHistoryRecord]:
+        """Return complete, bounded history selected by Radarr's downloadId filter."""
+        if not download_id.strip():
+            raise ExternalServiceError("radarr", "Radarr download history requires a download identifier.")
+        result: list[RadarrHistoryRecord] = []
+        seen_ids: set[int] = set()
+        expected_total: int | None = None
+        page = 1
+        while True:
+            payload = await self._request(
+                "GET",
+                "/history",
+                params={
+                    "downloadId": download_id,
+                    "page": page,
+                    "pageSize": _RADARR_HISTORY_PAGE_SIZE,
+                    "sortKey": "date",
+                    "sortDirection": "descending",
+                },
+            )
+            if not isinstance(payload, dict) or not isinstance(payload.get("records"), list):
+                raise ExternalServiceError("radarr", "Radarr returned invalid download history.")
+            total = payload.get("totalRecords")
+            if isinstance(total, bool) or not isinstance(total, int) or total < 0:
+                raise ExternalServiceError("radarr", "Radarr returned invalid download history metadata.")
+            if expected_total is None:
+                expected_total = total
+                if total > _RADARR_HISTORY_MAX_RECORDS:
+                    raise ExternalServiceError("radarr", "Radarr download history exceeds the safe bounded limit.")
+            elif total != expected_total:
+                raise ExternalServiceError("radarr", "Radarr returned inconsistent download history metadata.")
+            records = payload["records"]
+            if len(records) > _RADARR_HISTORY_PAGE_SIZE:
+                raise ExternalServiceError("radarr", "Radarr returned an oversized download history page.")
+            if len(result) + len(records) > expected_total:
+                raise ExternalServiceError("radarr", "Radarr returned records beyond the reported download history.")
+            for item in records:
+                data = item.get("data", {}) if isinstance(item, dict) else None
+                if (
+                    not isinstance(item, dict)
+                    or isinstance(item.get("id"), bool)
+                    or not isinstance(item.get("id"), int)
+                    or item["id"] <= 0
+                    or isinstance(item.get("movieId"), bool)
+                    or not isinstance(item.get("movieId"), int)
+                    or item["movieId"] <= 0
+                    or not isinstance(item.get("eventType"), str)
+                    or not isinstance(data, dict)
+                ):
+                    raise ExternalServiceError("radarr", "Radarr returned invalid download history records.")
+                record_download_id = item.get("downloadId") or data.get("torrentInfoHash")
+                if not isinstance(record_download_id, str) or record_download_id.casefold() != download_id.casefold():
+                    raise ExternalServiceError("radarr", "Radarr returned out-of-scope download history records.")
+                if item["id"] in seen_ids:
+                    raise ExternalServiceError("radarr", "Radarr returned duplicate download history records.")
+                seen_ids.add(item["id"])
+                result.append(
+                    RadarrHistoryRecord(
+                        id=item["id"],
+                        movie_id=item["movieId"],
+                        event_type=item["eventType"],
+                        download_id=record_download_id,
+                        imported_path=data.get("importedPath"),
+                    )
+                )
+            if len(result) > _RADARR_HISTORY_MAX_RECORDS:
+                raise ExternalServiceError("radarr", "Radarr download history exceeds the safe bounded limit.")
+            if len(result) == expected_total:
+                return result
+            if not records:
+                raise ExternalServiceError("radarr", "Radarr returned incomplete download history.")
+            page += 1
+
     async def delete_movie(
         self,
         movie_id: int,
@@ -558,6 +633,9 @@ class NullRadarrClient:
         return []
 
     async def list_movie_history(self, movie_id: int) -> Sequence[RadarrHistoryRecord]:
+        return []
+
+    async def list_download_history(self, download_id: str) -> Sequence[RadarrHistoryRecord]:
         return []
 
     async def list_root_folders(self) -> Sequence[StorageRootFolder]:
@@ -1160,14 +1238,25 @@ class QbittorrentClient:
         delete_files: bool,
         dry_run: bool = False,
     ) -> Sequence[DownloaderRemovalResult]:
+        return await self._delete_hashes_with_assessment(hashes, delete_files=delete_files, dry_run=dry_run)
+
+    async def _delete_hashes_with_assessment(
+        self,
+        hashes: Sequence[str],
+        *,
+        delete_files: bool,
+        dry_run: bool = False,
+        assessment: ContentSafetyAssessment | None = None,
+        assessment_client_id: str | None = None,
+    ) -> Sequence[DownloaderRemovalResult]:
         normalized = list(dict.fromkeys(hash_value.strip().upper() for hash_value in hashes if hash_value.strip()))
         if not normalized:
             return []
 
         await self._login()
         matches = await self._matching_torrents(normalized)
-        assessment: ContentSafetyAssessment | None = None
-        if delete_files:
+        safety_client_id = assessment_client_id or self._system
+        if delete_files and assessment is None:
             inventory = await read_content_inventory(self)
             assessment = assess_content_inventory(
                 ((self._system, inventory),),
@@ -1183,8 +1272,18 @@ class QbittorrentClient:
                 continue
             canonical_hash, status, torrent_name, content_path = match
             safety_reason = (
-                content_safety_skip_reason(assessment, self._system, hash_value) if assessment is not None else None
+                content_safety_skip_reason(assessment, safety_client_id, hash_value) if assessment is not None else None
             )
+            if (
+                delete_files
+                and assessment is not None
+                and safety_reason is None
+                and (
+                    content_path is None
+                    or not content_scope_matches(assessment, safety_client_id, hash_value, content_path, exact=True)
+                )
+            ):
+                safety_reason = "ownership_unverifiable"
             skip_reason = safety_reason or seeding_policy_skip_reason(
                 self._seeding_policy,
                 min_seed_ratio=self._min_seed_ratio,
@@ -1247,7 +1346,27 @@ class QbittorrentClient:
                 dict.fromkeys(_qbt_hash(raw_value) for raw_value in raw_aliases if raw_value not in (None, ""))
             )
             info_hash = aliases[0] if aliases else ""
-            path = validate_scope_path(item.get("content_path"))
+            raw_path = item.get("content_path")
+            path = validate_scope_path(raw_path, minimum_parts=2)
+            if info_hash and raw_path in (None, ""):
+                if item.get("state") == "metaDL" and all(
+                    isinstance(item.get(key), int) and not isinstance(item.get(key), bool) and item.get(key) == 0
+                    for key in ("total_size", "completed", "downloaded")
+                ):
+                    scopes.append(
+                        DownloaderContentScope(
+                            info_hash=info_hash, hash_aliases=aliases[1:], paths=(), empty_verified=True
+                        )
+                    )
+                    continue
+                root = validate_scope_path(item.get("save_path"), minimum_parts=2)
+                if root is not None:
+                    scopes.append(
+                        DownloaderContentScope(
+                            info_hash=info_hash, hash_aliases=aliases[1:], paths=(root,), uncertain=True
+                        )
+                    )
+                    continue
             if not info_hash or path is None:
                 failures.append(DownloaderContentInventoryFailure("invalid_content_scope"))
                 continue
@@ -1376,8 +1495,10 @@ class QbittorrentClient:
         matches: dict[str, tuple[str, TorrentSeedingStatus, str | None, str | None]] = {}
         for item in payload:
             if not isinstance(item, dict):
-                continue
+                raise ExternalServiceError(self._system, "qBittorrent returned malformed target metadata.")
             identifiers = {str(item[key]).upper() for key in ("hash", "infohash_v1", "infohash_v2") if item.get(key)}
+            if not identifiers:
+                raise ExternalServiceError(self._system, "qBittorrent returned missing target identifiers.")
             matched = identifiers.intersection(requested)
             if not matched:
                 continue
@@ -1389,6 +1510,8 @@ class QbittorrentClient:
             torrent_name = _safe_metadata_text(item.get("name"))
             content_path = _safe_content_path(item.get("content_path"))
             for hash_value in matched:
+                if hash_value in matches:
+                    raise ExternalServiceError(self._system, "qBittorrent returned duplicate target metadata.")
                 matches[hash_value] = (canonical_hash, status, torrent_name, content_path)
         return matches
 
@@ -1466,7 +1589,7 @@ class JellyfinServerClient(JsonServiceClient):
         include_types: Sequence[str] = (),
         accept_language: str | None = None,
     ) -> Sequence[JellyfinItem]:
-        """Look up a bounded set of Jellyfin items without paginating a library."""
+        """Look up exact IDs or verify a complete bounded catalogue before filtering providers."""
         if not ids and not provider_ids:
             raise ExternalServiceError("jellyfin", "Jellyfin lookup requires an item or provider identifier.")
         request_kwargs: dict[str, Any] = {}
@@ -1479,28 +1602,24 @@ class JellyfinServerClient(JsonServiceClient):
         }
         if ids:
             params["Ids"] = ",".join(ids)
-        else:
-            params["Limit"] = _JELLYFIN_TARGETED_PROVIDER_MAX_ITEMS
-        if include_types:
-            params["IncludeItemTypes"] = ",".join(include_types)
-        payload = await self._request("GET", "/Items", params=params, **request_kwargs)
-        if not isinstance(payload, dict) or not isinstance(payload.get("Items"), list):
-            raise ExternalServiceError("jellyfin", "Jellyfin returned invalid targeted lookup data.")
-        total = payload.get("TotalRecordCount")
-        if total is None or isinstance(total, bool) or not isinstance(total, int) or total < 0:
-            raise ExternalServiceError("jellyfin", "Jellyfin returned invalid targeted lookup metadata.")
-        if not ids and total > _JELLYFIN_TARGETED_PROVIDER_MAX_ITEMS:
-            raise ExternalServiceError("jellyfin", "Jellyfin provider lookup exceeds the safe bounded limit.")
-        raw_items = payload["Items"]
-        if isinstance(total, int) and len(raw_items) != total:
-            raise ExternalServiceError("jellyfin", "Jellyfin returned an incomplete targeted lookup.")
-        result: list[JellyfinItem] = []
-        for item in raw_items:
-            parsed = self._library_item(item)
-            if parsed is None:
-                raise ExternalServiceError("jellyfin", "Jellyfin returned invalid targeted lookup data.")
-            result.append(parsed)
         if ids:
+            if include_types:
+                params["IncludeItemTypes"] = ",".join(include_types)
+            payload = await self._request("GET", "/Items", params=params, **request_kwargs)
+            if not isinstance(payload, dict) or not isinstance(payload.get("Items"), list):
+                raise ExternalServiceError("jellyfin", "Jellyfin returned invalid targeted lookup data.")
+            total = payload.get("TotalRecordCount")
+            if total is None or isinstance(total, bool) or not isinstance(total, int) or total < 0:
+                raise ExternalServiceError("jellyfin", "Jellyfin returned invalid targeted lookup metadata.")
+            raw_items = payload["Items"]
+            if len(raw_items) != total:
+                raise ExternalServiceError("jellyfin", "Jellyfin returned an incomplete targeted lookup.")
+            result: list[JellyfinItem] = []
+            for item in raw_items:
+                parsed = self._library_item(item)
+                if parsed is None:
+                    raise ExternalServiceError("jellyfin", "Jellyfin returned invalid targeted lookup data.")
+                result.append(parsed)
             requested_ids = set(ids)
             returned_ids = [item.id for item in result]
             if any(item_id not in requested_ids for item_id in returned_ids) or len(returned_ids) != len(
@@ -1508,8 +1627,63 @@ class JellyfinServerClient(JsonServiceClient):
             ):
                 raise ExternalServiceError("jellyfin", "Jellyfin returned inconsistent targeted lookup items.")
             return result
+        result = await self._list_complete_items(include_types=include_types, request_kwargs=request_kwargs)
         provider_tokens = {provider_id.casefold() for provider_id in provider_ids}
         return [item for item in result if self._matches_provider_ids(item, provider_tokens)]
+
+    async def _list_complete_items(
+        self, *, include_types: Sequence[str], request_kwargs: dict[str, Any]
+    ) -> list[JellyfinItem]:
+        """Read a complete, bounded Jellyfin catalogue with an authoritative count."""
+        result: list[JellyfinItem] = []
+        seen_ids: set[str] = set()
+        expected_total: int | None = None
+        start_index = 0
+        while True:
+            payload = await self._request(
+                "GET",
+                "/Items",
+                params={
+                    "Recursive": "true",
+                    "IncludeItemTypes": ",".join(include_types),
+                    "Fields": "ProviderIds,ParentId,IndexNumber",
+                    "StartIndex": start_index,
+                    "Limit": _JELLYFIN_LIBRARY_PAGE_SIZE,
+                    "EnableTotalRecordCount": "true",
+                },
+                **request_kwargs,
+            )
+            if not isinstance(payload, dict) or not isinstance(payload.get("Items"), list):
+                raise ExternalServiceError("jellyfin", "Jellyfin returned invalid provider catalogue data.")
+            total = payload.get("TotalRecordCount")
+            if total is None or isinstance(total, bool) or not isinstance(total, int) or total < 0:
+                raise ExternalServiceError("jellyfin", "Jellyfin returned unverifiable provider catalogue metadata.")
+            if expected_total is None:
+                expected_total = total
+                if total > _JELLYFIN_LIBRARY_MAX_ITEMS:
+                    raise ExternalServiceError(
+                        "jellyfin", "Jellyfin provider catalogue exceeds the safe bounded limit."
+                    )
+            elif total != expected_total:
+                raise ExternalServiceError("jellyfin", "Jellyfin returned inconsistent provider catalogue metadata.")
+            raw_items = payload["Items"]
+            if len(raw_items) > _JELLYFIN_LIBRARY_PAGE_SIZE:
+                raise ExternalServiceError("jellyfin", "Jellyfin returned an oversized provider catalogue page.")
+            for item in raw_items:
+                parsed = self._library_item(item)
+                if parsed is None or (include_types and parsed.type not in include_types):
+                    raise ExternalServiceError("jellyfin", "Jellyfin returned invalid or out-of-scope provider data.")
+                if parsed.id in seen_ids:
+                    raise ExternalServiceError("jellyfin", "Jellyfin returned duplicate provider catalogue items.")
+                seen_ids.add(parsed.id)
+                result.append(parsed)
+            start_index += len(raw_items)
+            if start_index > expected_total:
+                raise ExternalServiceError("jellyfin", "Jellyfin returned inconsistent provider catalogue metadata.")
+            if start_index == expected_total:
+                return result
+            if not raw_items:
+                raise ExternalServiceError("jellyfin", "Jellyfin returned incomplete provider catalogue data.")
 
     @staticmethod
     def _matches_provider_ids(item: JellyfinItem, provider_tokens: set[str]) -> bool:

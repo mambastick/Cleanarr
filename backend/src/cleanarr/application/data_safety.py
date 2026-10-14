@@ -29,6 +29,9 @@ class ContentSafetyAssessment:
     complete: bool
     conflicts: frozenset[tuple[str, str]] = frozenset()
     missing_known: frozenset[tuple[str, str]] = frozenset()
+    observed: frozenset[tuple[str, str]] = frozenset()
+    uncertain: frozenset[tuple[str, str]] = frozenset()
+    scope_paths: tuple[tuple[str, str, tuple[str, ...]], ...] = ()
 
 
 def validate_scope_path(value: object, *, minimum_parts: int = 3) -> str | None:
@@ -75,9 +78,12 @@ def assess_content_inventory(
 
     normalized_hashes = set(hashes)
     scoped: list[tuple[str, DownloaderContentScope, frozenset[str]]] = []
-    path_owners: dict[str, set[tuple[str, frozenset[str]]]] = {}
+    path_owners: dict[str, set[tuple[str, frozenset[str], bool]]] = {}
     seen: set[tuple[str, str]] = set()
     total_paths = 0
+    observed: set[tuple[str, str]] = set()
+    uncertain: set[tuple[str, str]] = set()
+    scope_paths: list[tuple[str, str, tuple[str, ...]]] = []
     for client_id, inventory in inventories:
         if not isinstance(inventory, DownloaderContentInventory):
             return ContentSafetyAssessment(complete=False)
@@ -94,12 +100,15 @@ def assess_content_inventory(
                 or not isinstance(scope.info_hash, str)
                 or _INFO_HASH_RE.fullmatch(scope.info_hash) is None
                 or not isinstance(scope.paths, tuple)
-                or not scope.paths
                 or not isinstance(scope.hash_aliases, tuple)
+                or not isinstance(scope.uncertain, bool)
+                or not isinstance(scope.empty_verified, bool)
+                or (not scope.paths and not scope.empty_verified)
+                or (scope.empty_verified and bool(scope.paths))
             ):
                 return ContentSafetyAssessment(complete=False)
             alias_values = (scope.info_hash, *scope.hash_aliases)
-            if any(_INFO_HASH_RE.fullmatch(alias) is None for alias in alias_values):
+            if any(not isinstance(alias, str) or _INFO_HASH_RE.fullmatch(alias) is None for alias in alias_values):
                 return ContentSafetyAssessment(complete=False)
             alias_set = frozenset(alias_values)
             if len(alias_set) != len(alias_values):
@@ -107,26 +116,32 @@ def assess_content_inventory(
             if any((client_id, alias) in seen for alias in alias_set):
                 return ContentSafetyAssessment(complete=False)
             seen.update((client_id, alias) for alias in alias_set)
-            if any(validate_scope_path(path) != path for path in scope.paths):
+            if any(validate_scope_path(path, minimum_parts=2) != path for path in scope.paths):
                 return ContentSafetyAssessment(complete=False)
             total_paths += len(scope.paths)
             if total_paths > MAX_CONTENT_INVENTORY_PATHS:
                 return ContentSafetyAssessment(complete=False)
             scoped.append((client_id, scope, alias_set))
+            observed.update((client_id, alias) for alias in alias_set)
+            scope_paths.extend((client_id, alias, scope.paths) for alias in alias_set)
+            if scope.uncertain:
+                uncertain.update((client_id, alias) for alias in alias_set)
             for path in scope.paths:
-                path_owners.setdefault(path, set()).add((client_id, alias_set))
+                path_owners.setdefault(path, set()).add((client_id, alias_set, scope.uncertain))
 
     conflicts: set[tuple[str, str]] = set()
-    active: list[tuple[str, set[tuple[str, frozenset[str]]]]] = []
+    active: list[tuple[str, set[tuple[str, frozenset[str], bool]]]] = []
     for path in sorted(path_owners, key=lambda value: PurePosixPath(value).parts):
         while active and not (path == active[-1][0] or path.startswith(f"{active[-1][0]}/")):
             active.pop()
-        owners: set[tuple[str, frozenset[str]]] = set(path_owners[path])
+        owners: set[tuple[str, frozenset[str], bool]] = set(path_owners[path])
         for _ancestor, ancestor_owners in active:
             owners.update(ancestor_owners)
         if len(owners) > 1:
-            for client_id, aliases in owners:
+            for client_id, aliases, owner_uncertain in owners:
                 conflicts.update((client_id, hash_value) for hash_value in aliases.intersection(normalized_hashes))
+                if owner_uncertain:
+                    uncertain.update((client_id, hash_value) for hash_value in aliases.intersection(normalized_hashes))
         active.append((path, path_owners[path]))
     missing_known: set[tuple[str, str]] = set()
     if known_existing is not None:
@@ -138,7 +153,7 @@ def assess_content_inventory(
         }
         for client_id, known_hashes in known_existing.items():
             for known_hash in known_hashes:
-                if _INFO_HASH_RE.fullmatch(known_hash) is None:
+                if not isinstance(known_hash, str) or _INFO_HASH_RE.fullmatch(known_hash) is None:
                     return ContentSafetyAssessment(complete=False)
                 if known_hash not in aliases_by_client.get(client_id, frozenset()):
                     missing_known.add((client_id, known_hash))
@@ -146,6 +161,9 @@ def assess_content_inventory(
         complete=True,
         conflicts=frozenset(conflicts),
         missing_known=frozenset(missing_known),
+        observed=frozenset(observed),
+        uncertain=frozenset(uncertain),
+        scope_paths=tuple(scope_paths),
     )
 
 
@@ -160,9 +178,46 @@ def content_safety_skip_reason(
         return "ownership_unverifiable"
     if (client_id, info_hash) in assessment.missing_known:
         return "ownership_unverifiable"
+    if (client_id, info_hash) not in assessment.observed:
+        return "ownership_unverifiable"
+    if (client_id, info_hash) in assessment.uncertain:
+        return "ownership_unverifiable"
     if (client_id, info_hash) in assessment.conflicts:
         return "shared_path"
     return None
+
+
+def content_scope_matches(
+    assessment: ContentSafetyAssessment,
+    client_id: str,
+    info_hash: str,
+    path: str,
+    *,
+    exact: bool = False,
+) -> bool:
+    """Check that fresh destructive metadata remains within its inventory snapshot."""
+
+    if not assessment.complete or (client_id, info_hash) not in assessment.observed:
+        return False
+    if (client_id, info_hash) in assessment.uncertain:
+        return False
+    normalized_path = validate_scope_path(path, minimum_parts=2)
+    if normalized_path is None:
+        return False
+    recorded = [
+        paths
+        for snapshot_client, snapshot_hash, paths in assessment.scope_paths
+        if snapshot_client == client_id and snapshot_hash == info_hash
+    ]
+    if len(recorded) != 1:
+        return False
+    snapshot_paths = recorded[0]
+    if exact:
+        return snapshot_paths == (normalized_path,)
+    return bool(snapshot_paths) and all(
+        snapshot_path == normalized_path or snapshot_path.startswith(f"{normalized_path}/")
+        for snapshot_path in snapshot_paths
+    )
 
 
 async def read_content_inventory(client: object) -> DownloaderContentInventory | None:

@@ -40,6 +40,21 @@ class ManagedFakeRadarr(FakeRadarrClient):
         return "test"
 
 
+@dataclass
+class FailingHistoryRadarr(ManagedFakeRadarr):
+    started: list[str] = field(default_factory=list)
+    finished: list[str] = field(default_factory=list)
+    failure: bool = False
+
+    async def list_download_history(self, download_id: str) -> list[RadarrHistoryRecord]:
+        self.started.append(download_id)
+        await asyncio.sleep(0)
+        self.finished.append(download_id)
+        if self.failure:
+            raise ExternalServiceError("radarr", "history unavailable")
+        return list(self.download_history_by_id.get(download_id, []))
+
+
 class ManagedFakeSonarr(FakeSonarrClient):
     async def close(self) -> None:
         return None
@@ -162,6 +177,55 @@ async def test_radarr_router_preserves_owner_when_raw_ids_collide() -> None:
 
 
 @pytest.mark.asyncio
+async def test_radarr_router_fans_out_download_history_and_encodes_owners() -> None:
+    first = ManagedFakeRadarr(
+        movies=[],
+        history_by_movie={},
+        download_history_by_id={
+            "HASH": [RadarrHistoryRecord(4, 1, "grabbed", "HASH", None)],
+        },
+    )
+    second = ManagedFakeRadarr(
+        movies=[],
+        history_by_movie={},
+        download_history_by_id={
+            "HASH": [RadarrHistoryRecord(4, 2, "imported", "HASH", "/movie/file.mkv")],
+        },
+    )
+    router = MultiRadarrClient(
+        [
+            RadarrTarget(id="radarr-a", name="Radarr A", client=first),
+            RadarrTarget(id="radarr-b", name="Radarr B", client=second),
+        ]
+    )
+
+    records = await router.list_download_history("HASH")
+
+    assert len(records) == 2
+    assert records[0].id != records[1].id
+    assert records[0].movie_id != records[1].movie_id
+    assert all(record.download_id == "HASH" for record in records)
+
+
+@pytest.mark.asyncio
+async def test_radarr_router_drains_all_download_history_requests_before_raising() -> None:
+    first = FailingHistoryRadarr(movies=[], history_by_movie={}, failure=True)
+    second = FailingHistoryRadarr(movies=[], history_by_movie={}, failure=False)
+    router = MultiRadarrClient(
+        [
+            RadarrTarget(id="radarr-a", name="Radarr A", client=first),
+            RadarrTarget(id="radarr-b", name="Radarr B", client=second),
+        ]
+    )
+
+    with pytest.raises(ExternalServiceError, match="history unavailable"):
+        await router.list_download_history("HASH")
+
+    assert first.finished == ["HASH"]
+    assert second.finished == ["HASH"]
+
+
+@pytest.mark.asyncio
 async def test_sonarr_router_routes_episode_and_file_mutations_to_owner() -> None:
     first = ManagedFakeSonarr(series=[], history_by_series={}, episodes_by_series={}, episode_files_by_series={})
     second = ManagedFakeSonarr(
@@ -235,10 +299,10 @@ async def test_downloader_router_checks_all_clients_and_keeps_partial_errors() -
 
     assert qbittorrent.deleted_hashes == []
     assert transmission.seen_hashes == []
-    assert results[0].existed is True
+    assert len(results) == 1
+    assert results[0].existed is None
+    assert results[0].client_id is None
     assert results[0].skip_reason == "ownership_unverifiable"
-    assert results[1].client_id == "tr"
-    assert results[1].skip_reason == "ownership_unverifiable"
 
 
 @pytest.mark.asyncio

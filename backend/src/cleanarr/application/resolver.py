@@ -209,6 +209,10 @@ def _consistent[T](decision: MatchDecision[T], fingerprint: MediaFingerprint) ->
     if candidate is None:
         return decision
     for field in ("tmdb_id", "tvdb_id", "imdb_id", "path"):
+        if field == "path" and fingerprint.path_namespace != "arr":
+            # A Jellyfin file/mount path is not an Arr folder identifier.
+            # Only the trusted manual resolver supplies an Arr namespace.
+            continue
         expected = getattr(fingerprint, field, None)
         actual = getattr(candidate, field, None)
         if expected is None or actual is None or expected == "" or actual == "":

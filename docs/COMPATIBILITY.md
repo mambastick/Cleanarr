@@ -120,7 +120,8 @@ evidence for those flows.
 
 ## Safety follow-up candidate — 2026-10-14
 
-Issues #42–#52 add protocol-tested data-scope checks and SQLite schema 7.
+Issues #42–#52 add protocol-tested data-scope checks and SQLite schema 8
+(retention migration 7, structured job errors migration 8).
 The published version matrix above is historical evidence, not certification of
 this candidate. Fresh real-service and latest-stable upgrade rehearsals remain
 required before release. See Safety for POSIX path/alias limitations, rTorrent

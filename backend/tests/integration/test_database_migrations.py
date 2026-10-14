@@ -398,7 +398,7 @@ def test_v6_upgrade_adds_retention_idempotently_and_backup_stays_v6(tmp_path: Pa
     assert migrate_database(db_path) == LATEST_SCHEMA_VERSION
     assert migrate_database(db_path) == LATEST_SCHEMA_VERSION
     with sqlite3.connect(db_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone() == (7,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (LATEST_SCHEMA_VERSION,)
         assert connection.execute("SELECT config_json FROM config").fetchone() == ('{"general":{"dry_run":true}}',)
         assert connection.execute("SELECT result_json FROM activity").fetchone() == ('{"name":"preserved"}',)
         assert connection.execute("SELECT role FROM user_accounts").fetchone() == ("admin",)

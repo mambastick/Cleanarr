@@ -5,7 +5,11 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from cleanarr.application.data_safety import assess_content_inventory, content_safety_skip_reason
+from cleanarr.application.data_safety import (
+    ContentSafetyAssessment,
+    assess_content_inventory,
+    content_safety_skip_reason,
+)
 from cleanarr.domain import (
     DownloaderContentInventory,
     DownloaderContentInventoryFailure,
@@ -19,6 +23,7 @@ from cleanarr.infrastructure.downloaders import DownloaderTarget, MultiDownloade
 class InventoryDownloader:
     inventory: DownloaderContentInventory | Exception
     calls: list[tuple[tuple[str, ...], bool, bool]] = field(default_factory=list)
+    inventory_reads: int = 0
 
     async def close(self) -> None:
         return None
@@ -30,6 +35,7 @@ class InventoryDownloader:
         return "fixture"
 
     async def list_content_inventory(self) -> DownloaderContentInventory:
+        self.inventory_reads += 1
         if isinstance(self.inventory, Exception):
             raise self.inventory
         return self.inventory
@@ -43,10 +49,68 @@ class InventoryDownloader:
             for value in hashes
         ]
 
+    async def _delete_hashes_with_assessment(
+        self,
+        hashes: list[str],
+        *,
+        delete_files: bool,
+        dry_run: bool = False,
+        assessment: ContentSafetyAssessment | None = None,
+        assessment_client_id: str | None = None,
+    ) -> list[DownloaderRemovalResult]:
+        if assessment is not None:
+            client_id = assessment_client_id or "client"
+            reasons = {value: content_safety_skip_reason(assessment, client_id, value) for value in hashes}
+            if any(reason is not None for reason in reasons.values()):
+                return [
+                    DownloaderRemovalResult(
+                        hash_value=value,
+                        existed=(client_id, value) in assessment.observed,
+                        client_id=client_id,
+                        skip_reason=reasons[value],
+                        delete_files=False,
+                    )
+                    for value in hashes
+                ]
+        return await self.delete_hashes(hashes, delete_files=delete_files, dry_run=dry_run)
+
+
+@dataclass
+class LegacyInventoryDownloader:
+    inventory: DownloaderContentInventory
+    calls: list[tuple[tuple[str, ...], bool, bool]] = field(default_factory=list)
+
+    async def close(self) -> None:
+        return None
+
+    async def ping(self) -> None:
+        return None
+
+    async def get_version(self) -> str:
+        return "fixture"
+
+    async def list_content_inventory(self) -> DownloaderContentInventory:
+        return self.inventory
+
+    async def delete_hashes(
+        self, hashes: list[str], *, delete_files: bool, dry_run: bool = False
+    ) -> list[DownloaderRemovalResult]:
+        self.calls.append((tuple(hashes), delete_files, dry_run))
+        return [
+            DownloaderRemovalResult(hash_value=value, existed=True, client_kind="legacy", delete_files=delete_files)
+            for value in hashes
+        ]
+
 
 def _fleet(*clients: tuple[str, InventoryDownloader]) -> MultiDownloaderClient:
     return MultiDownloaderClient(
         [DownloaderTarget(id=client_id, name=client_id, kind="fixture", client=client) for client_id, client in clients]
+    )
+
+
+def _legacy_fleet(*clients: tuple[str, LegacyInventoryDownloader]) -> MultiDownloaderClient:
+    return MultiDownloaderClient(
+        [DownloaderTarget(id=client_id, name=client_id, kind="legacy", client=client) for client_id, client in clients]
     )
 
 
@@ -144,8 +208,9 @@ async def test_missing_or_failed_inventory_blocks_every_client_before_mutation(d
     result = await fleet.delete_hashes([target_hash], delete_files=True, dry_run=dry_run)
 
     assert not target.calls and not missing.calls
-    assert len(result) == 2
-    assert all(item.skip_reason == "ownership_unverifiable" and item.delete_files is False for item in result)
+    assert len(result) == 1
+    assert result[0].existed is None
+    assert result[0].skip_reason == "ownership_unverifiable" and result[0].delete_files is False
 
 
 @pytest.mark.asyncio
@@ -233,6 +298,104 @@ async def test_inventory_timeout_fails_closed(monkeypatch: pytest.MonkeyPatch) -
 
     assert client.calls == []
     assert result[0].skip_reason == "ownership_unverifiable"
+
+
+@pytest.mark.asyncio
+async def test_bounded_uncertain_unrelated_scope_does_not_block_target() -> None:
+    target_hash = "A" * 40
+    unknown_hash = "B" * 40
+    target = InventoryDownloader(
+        DownloaderContentInventory(scopes=(_scope(target_hash, "/data/torrents/target/file.mkv"),))
+    )
+    unknown = InventoryDownloader(
+        DownloaderContentInventory(
+            scopes=(DownloaderContentScope(info_hash=unknown_hash, paths=("/data/other",), uncertain=True),)
+        )
+    )
+
+    result = await _fleet(("target", target), ("unknown", unknown)).delete_hashes([target_hash], delete_files=True)
+
+    assert target.calls == [((target_hash,), True, False)]
+    assert target.inventory_reads == 1
+    assert unknown.inventory_reads == 1
+    assert result[0].existed is True
+    assert result[0].skip_reason is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_fallback_blocks_observed_shared_scope_before_mutation() -> None:
+    target_hash = "A" * 40
+    target = LegacyInventoryDownloader(
+        DownloaderContentInventory(scopes=(_scope(target_hash, "/data/torrents/Movie"),))
+    )
+    other = LegacyInventoryDownloader(DownloaderContentInventory(scopes=(_scope("B" * 40, "/data/torrents/Movie"),)))
+
+    result = await _legacy_fleet(("target", target), ("other", other)).delete_hashes([target_hash], delete_files=True)
+
+    assert target.calls == []
+    assert other.calls == []
+    assert result[0].skip_reason == "shared_path"
+    assert result[0].delete_files is False
+    assert result[0].existed is True
+
+
+def test_empty_scope_requires_explicit_no_payload_evidence() -> None:
+    target_hash = "A" * 40
+    incomplete = assess_content_inventory(
+        [("client", DownloaderContentInventory(scopes=(_scope(target_hash),)))], [target_hash]
+    )
+    verified = assess_content_inventory(
+        [
+            (
+                "client",
+                DownloaderContentInventory(
+                    scopes=(DownloaderContentScope(info_hash=target_hash, paths=(), empty_verified=True),)
+                ),
+            )
+        ],
+        [target_hash],
+    )
+
+    assert incomplete.complete is False
+    assert verified.complete is True
+    assert content_safety_skip_reason(verified, "client", target_hash) is None
+
+
+def test_shallow_non_root_scope_is_valid() -> None:
+    target_hash = "A" * 40
+    assessment = assess_content_inventory(
+        [("client", DownloaderContentInventory(scopes=(_scope(target_hash, "/downloads"),)))], [target_hash]
+    )
+
+    assert assessment.complete is True
+    assert content_safety_skip_reason(assessment, "client", target_hash) is None
+
+
+def test_uncertain_parent_scope_overlaps_other_client_and_blocks_both() -> None:
+    target_hash = "A" * 40
+    unknown_hash = "B" * 40
+    assessment = assess_content_inventory(
+        [
+            (
+                "unknown",
+                DownloaderContentInventory(
+                    scopes=(
+                        DownloaderContentScope(
+                            info_hash=unknown_hash,
+                            paths=("/data/torrents",),
+                            uncertain=True,
+                        ),
+                    )
+                ),
+            ),
+            ("target", DownloaderContentInventory(scopes=(_scope(target_hash, "/data/torrents/Movie"),))),
+        ],
+        [target_hash, unknown_hash],
+    )
+
+    assert assessment.complete is True
+    assert content_safety_skip_reason(assessment, "unknown", unknown_hash) == "ownership_unverifiable"
+    assert content_safety_skip_reason(assessment, "target", target_hash) == "shared_path"
 
 
 async def test_intervening_lexical_sibling_does_not_hide_ancestor_conflict() -> None:
